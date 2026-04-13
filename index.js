@@ -594,177 +594,6 @@ const commands = [
     )
     .addSubcommand(subcommand =>
       subcommand
-        .setName("links")
-        .setDescription("Enable or disable link filtering")
-        .addBooleanOption(option =>
-          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("allowedlinksonly")
-        .setDescription("Allow only trusted domains when link filtering is enabled")
-        .addBooleanOption(option =>
-          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("allowdomain")
-        .setDescription("Add or remove an allowed domain")
-        .addStringOption(option =>
-          option.setName("mode").setDescription("add or remove").setRequired(true).addChoices(
-            { name: "add", value: "add" },
-            { name: "remove", value: "remove" }
-          )
-        )
-        .addStringOption(option =>
-          option.setName("domain").setDescription("Domain like example.com").setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("blockdomain")
-        .setDescription("Add or remove a blocked domain")
-        .addStringOption(option =>
-          option.setName("mode").setDescription("add or remove").setRequired(true).addChoices(
-            { name: "add", value: "add" },
-            { name: "remove", value: "remove" }
-          )
-        )
-        .addStringOption(option =>
-          option.setName("domain").setDescription("Domain like example.com").setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("attachments")
-        .setDescription("Enable or disable attachment filtering")
-        .addBooleanOption(option =>
-          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("attachmentlimit")
-        .setDescription("Set the maximum attachment size in MB")
-        .addIntegerOption(option =>
-          option.setName("mb").setDescription("Maximum size in MB").setRequired(true).setMinValue(1).setMaxValue(100)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("allowextension")
-        .setDescription("Add or remove an allowed attachment extension")
-        .addStringOption(option =>
-          option.setName("mode").setDescription("add or remove").setRequired(true).addChoices(
-            { name: "add", value: "add" },
-            { name: "remove", value: "remove" }
-          )
-        )
-        .addStringOption(option =>
-          option.setName("extension").setDescription("Extension like .png or png").setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("blockextension")
-        .setDescription("Add or remove a blocked attachment extension")
-        .addStringOption(option =>
-          option.setName("mode").setDescription("add or remove").setRequired(true).addChoices(
-            { name: "add", value: "add" },
-            { name: "remove", value: "remove" }
-          )
-        )
-        .addStringOption(option =>
-          option.setName("extension").setDescription("Extension like .exe or exe").setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("ageprotection")
-        .setDescription("Enable or disable age-based protections")
-        .addBooleanOption(option =>
-          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("accountagelinks")
-        .setDescription("Set minimum Discord account age for posting links")
-        .addStringOption(option =>
-          option.setName("duration").setDescription("Duration like 1d, 7d").setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("memberagelinks")
-        .setDescription("Set minimum server membership age for posting links")
-        .addStringOption(option =>
-          option.setName("duration").setDescription("Duration like 12h, 1d").setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("accountageattachments")
-        .setDescription("Set minimum Discord account age for attachments")
-        .addStringOption(option =>
-          option.setName("duration").setDescription("Duration like 1d, 7d").setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("memberageattachments")
-        .setDescription("Set minimum server membership age for attachments")
-        .addStringOption(option =>
-          option.setName("duration").setDescription("Duration like 12h, 1d").setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("antiraid")
-        .setDescription("Enable or disable anti-raid join detection")
-        .addBooleanOption(option =>
-          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("raidthreshold")
-        .setDescription("Set how many joins trigger anti-raid")
-        .addIntegerOption(option =>
-          option.setName("count").setDescription("Join count").setRequired(true).setMinValue(2).setMaxValue(100)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("raidwindow")
-        .setDescription("Set the anti-raid join detection window")
-        .addStringOption(option =>
-          option.setName("duration").setDescription("Duration like 30s, 1m, 5m").setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("raidaccountage")
-        .setDescription("Set the account age that counts as suspicious during a raid")
-        .addStringOption(option =>
-          option.setName("duration").setDescription("Duration like 1d, 7d").setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("raidaction")
-        .setDescription("Set the anti-raid response")
-        .addStringOption(option =>
-          option.setName("action").setDescription("Raid response").setRequired(true).addChoices(
-            { name: "log only", value: "log" },
-            { name: "timeout suspicious joins", value: "timeout" }
-          )
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
         .setName("nicknamefilter")
         .setDescription("Enable or disable nickname filtering")
         .addBooleanOption(option =>
@@ -862,6 +691,187 @@ const commands = [
         )
         .addRoleOption(option =>
           option.setName("role").setDescription("Role to exempt or unexempt").setRequired(true)
+        )
+    ),
+
+  new SlashCommandBuilder()
+    .setName("automodlinks")
+    .setDescription("Manage link and attachment filters")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("links")
+        .setDescription("Enable or disable link filtering")
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("allowedlinksonly")
+        .setDescription("Allow only trusted domains when link filtering is enabled")
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("allowdomain")
+        .setDescription("Add or remove an allowed domain")
+        .addStringOption(option =>
+          option.setName("mode").setDescription("add or remove").setRequired(true).addChoices(
+            { name: "add", value: "add" },
+            { name: "remove", value: "remove" }
+          )
+        )
+        .addStringOption(option =>
+          option.setName("domain").setDescription("Domain like example.com").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("blockdomain")
+        .setDescription("Add or remove a blocked domain")
+        .addStringOption(option =>
+          option.setName("mode").setDescription("add or remove").setRequired(true).addChoices(
+            { name: "add", value: "add" },
+            { name: "remove", value: "remove" }
+          )
+        )
+        .addStringOption(option =>
+          option.setName("domain").setDescription("Domain like example.com").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("attachments")
+        .setDescription("Enable or disable attachment filtering")
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("attachmentlimit")
+        .setDescription("Set the maximum attachment size in MB")
+        .addIntegerOption(option =>
+          option.setName("mb").setDescription("Maximum size in MB").setRequired(true).setMinValue(1).setMaxValue(100)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("allowextension")
+        .setDescription("Add or remove an allowed attachment extension")
+        .addStringOption(option =>
+          option.setName("mode").setDescription("add or remove").setRequired(true).addChoices(
+            { name: "add", value: "add" },
+            { name: "remove", value: "remove" }
+          )
+        )
+        .addStringOption(option =>
+          option.setName("extension").setDescription("Extension like .png or png").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("blockextension")
+        .setDescription("Add or remove a blocked attachment extension")
+        .addStringOption(option =>
+          option.setName("mode").setDescription("add or remove").setRequired(true).addChoices(
+            { name: "add", value: "add" },
+            { name: "remove", value: "remove" }
+          )
+        )
+        .addStringOption(option =>
+          option.setName("extension").setDescription("Extension like .exe or exe").setRequired(true)
+        )
+    ),
+
+  new SlashCommandBuilder()
+    .setName("automodguard")
+    .setDescription("Manage age protection and anti-raid")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("ageprotection")
+        .setDescription("Enable or disable age-based protections")
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("accountagelinks")
+        .setDescription("Set minimum Discord account age for posting links")
+        .addStringOption(option =>
+          option.setName("duration").setDescription("Duration like 1d, 7d").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("memberagelinks")
+        .setDescription("Set minimum server membership age for posting links")
+        .addStringOption(option =>
+          option.setName("duration").setDescription("Duration like 12h, 1d").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("accountageattachments")
+        .setDescription("Set minimum Discord account age for attachments")
+        .addStringOption(option =>
+          option.setName("duration").setDescription("Duration like 1d, 7d").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("memberageattachments")
+        .setDescription("Set minimum server membership age for attachments")
+        .addStringOption(option =>
+          option.setName("duration").setDescription("Duration like 12h, 1d").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("antiraid")
+        .setDescription("Enable or disable anti-raid join detection")
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("raidthreshold")
+        .setDescription("Set how many joins trigger anti-raid")
+        .addIntegerOption(option =>
+          option.setName("count").setDescription("Join count").setRequired(true).setMinValue(2).setMaxValue(100)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("raidwindow")
+        .setDescription("Set the anti-raid join detection window")
+        .addStringOption(option =>
+          option.setName("duration").setDescription("Duration like 30s, 1m, 5m").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("raidaccountage")
+        .setDescription("Set the account age that counts as suspicious during a raid")
+        .addStringOption(option =>
+          option.setName("duration").setDescription("Duration like 1d, 7d").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("raidaction")
+        .setDescription("Set the anti-raid response")
+        .addStringOption(option =>
+          option.setName("action").setDescription("Raid response").setRequired(true).addChoices(
+            { name: "log only", value: "log" },
+            { name: "timeout suspicious joins", value: "timeout" }
+          )
         )
     ),
 
@@ -1550,7 +1560,8 @@ function buildHelpEmbed() {
       },
       {
         name: "Staff Records",
-        value: "`/note`, `/notes`, `/case`, `/cases`, `/automod`, `/bannedwords`, `/settings`, `/exportmod`, `/backup`",
+        value:
+          "`/note`, `/notes`, `/case`, `/cases`, `/automod`, `/automodlinks`, `/automodguard`, `/bannedwords`, `/settings`, `/exportmod`, `/backup`",
         inline: false
       },
       {
@@ -2446,6 +2457,76 @@ client.on("interactionCreate", async interaction => {
         config.automod.maxMentions = interaction.options.getInteger("limit");
       }
 
+      if (subcommand === "escalation") {
+        config.automod.escalationEnabled = interaction.options.getBoolean("enabled");
+      }
+
+      if (subcommand === "warnthreshold") {
+        config.automod.warnThreshold = interaction.options.getInteger("count");
+      }
+
+      if (subcommand === "timeoutthreshold") {
+        config.automod.timeoutThreshold = interaction.options.getInteger("count");
+      }
+
+      if (subcommand === "timeoutduration") {
+        const durationMs = parseDuration(interaction.options.getString("duration"));
+        if (!durationMs) {
+          return interaction.reply({
+            content: "Use a valid duration like 10m, 2h, or 1d. Discord timeouts max out at 28d.",
+            ephemeral: true
+          });
+        }
+        config.automod.timeoutDurationMs = durationMs;
+      }
+
+      if (subcommand === "offensewindow") {
+        const durationMs = parseDuration(interaction.options.getString("duration"));
+        if (!durationMs) {
+          return interaction.reply({
+            content: "Use a valid duration like 1h, 12h, or 1d.",
+            ephemeral: true
+          });
+        }
+        config.automod.offenseWindowMs = durationMs;
+      }
+
+      if (subcommand === "exemptchannel") {
+        const mode = interaction.options.getString("mode");
+        const targetChannel = interaction.options.getChannel("channel");
+
+        if (mode === "add" && !config.automod.exemptChannelIds.includes(targetChannel.id)) {
+          config.automod.exemptChannelIds.push(targetChannel.id);
+        }
+
+        if (mode === "remove") {
+          config.automod.exemptChannelIds = config.automod.exemptChannelIds.filter(id => id !== targetChannel.id);
+        }
+      }
+
+      if (subcommand === "exemptrole") {
+        const mode = interaction.options.getString("mode");
+        const role = interaction.options.getRole("role");
+
+        if (mode === "add" && !config.automod.exemptRoleIds.includes(role.id)) {
+          config.automod.exemptRoleIds.push(role.id);
+        }
+
+        if (mode === "remove") {
+          config.automod.exemptRoleIds = config.automod.exemptRoleIds.filter(id => id !== role.id);
+        }
+      }
+
+      saveConfig();
+      return interaction.reply({
+        content: `Updated auto mod setting: ${subcommand}.`,
+        ephemeral: true
+      });
+    }
+
+    if (interaction.commandName === "automodlinks") {
+      const subcommand = interaction.options.getSubcommand();
+
       if (subcommand === "links") {
         config.automod.linksEnabled = interaction.options.getBoolean("enabled");
       }
@@ -2493,6 +2574,48 @@ client.on("interactionCreate", async interaction => {
       if (subcommand === "attachmentlimit") {
         config.automod.maxAttachmentSizeMb = interaction.options.getInteger("mb");
       }
+
+      if (subcommand === "allowextension") {
+        const mode = interaction.options.getString("mode");
+        const extension = normalizeExtension(interaction.options.getString("extension"));
+        if (!extension) {
+          return interaction.reply({ content: "Enter a valid extension like .png or png.", ephemeral: true });
+        }
+
+        if (mode === "add" && !config.automod.allowedAttachmentExtensions.includes(extension)) {
+          config.automod.allowedAttachmentExtensions.push(extension);
+        }
+
+        if (mode === "remove") {
+          config.automod.allowedAttachmentExtensions = config.automod.allowedAttachmentExtensions.filter(entry => entry !== extension);
+        }
+      }
+
+      if (subcommand === "blockextension") {
+        const mode = interaction.options.getString("mode");
+        const extension = normalizeExtension(interaction.options.getString("extension"));
+        if (!extension) {
+          return interaction.reply({ content: "Enter a valid extension like .exe or exe.", ephemeral: true });
+        }
+
+        if (mode === "add" && !config.automod.blockedAttachmentExtensions.includes(extension)) {
+          config.automod.blockedAttachmentExtensions.push(extension);
+        }
+
+        if (mode === "remove") {
+          config.automod.blockedAttachmentExtensions = config.automod.blockedAttachmentExtensions.filter(entry => entry !== extension);
+        }
+      }
+
+      saveConfig();
+      return interaction.reply({
+        content: `Updated auto mod links setting: ${subcommand}.`,
+        ephemeral: true
+      });
+    }
+
+    if (interaction.commandName === "automodguard") {
+      const subcommand = interaction.options.getSubcommand();
 
       if (subcommand === "ageprotection") {
         config.automod.ageProtectionEnabled = interaction.options.getBoolean("enabled");
@@ -2558,101 +2681,9 @@ client.on("interactionCreate", async interaction => {
         config.automod.raidAction = interaction.options.getString("action");
       }
 
-      if (subcommand === "allowextension") {
-        const mode = interaction.options.getString("mode");
-        const extension = normalizeExtension(interaction.options.getString("extension"));
-        if (!extension) {
-          return interaction.reply({ content: "Enter a valid extension like .png or png.", ephemeral: true });
-        }
-
-        if (mode === "add" && !config.automod.allowedAttachmentExtensions.includes(extension)) {
-          config.automod.allowedAttachmentExtensions.push(extension);
-        }
-
-        if (mode === "remove") {
-          config.automod.allowedAttachmentExtensions = config.automod.allowedAttachmentExtensions.filter(entry => entry !== extension);
-        }
-      }
-
-      if (subcommand === "blockextension") {
-        const mode = interaction.options.getString("mode");
-        const extension = normalizeExtension(interaction.options.getString("extension"));
-        if (!extension) {
-          return interaction.reply({ content: "Enter a valid extension like .exe or exe.", ephemeral: true });
-        }
-
-        if (mode === "add" && !config.automod.blockedAttachmentExtensions.includes(extension)) {
-          config.automod.blockedAttachmentExtensions.push(extension);
-        }
-
-        if (mode === "remove") {
-          config.automod.blockedAttachmentExtensions = config.automod.blockedAttachmentExtensions.filter(entry => entry !== extension);
-        }
-      }
-
-      if (subcommand === "escalation") {
-        config.automod.escalationEnabled = interaction.options.getBoolean("enabled");
-      }
-
-      if (subcommand === "warnthreshold") {
-        config.automod.warnThreshold = interaction.options.getInteger("count");
-      }
-
-      if (subcommand === "timeoutthreshold") {
-        config.automod.timeoutThreshold = interaction.options.getInteger("count");
-      }
-
-      if (subcommand === "timeoutduration") {
-        const durationMs = parseDuration(interaction.options.getString("duration"));
-        if (!durationMs) {
-          return interaction.reply({
-            content: "Use a valid duration like 10m, 2h, or 1d. Discord timeouts max out at 28d.",
-            ephemeral: true
-          });
-        }
-        config.automod.timeoutDurationMs = durationMs;
-      }
-
-      if (subcommand === "offensewindow") {
-        const durationMs = parseDuration(interaction.options.getString("duration"));
-        if (!durationMs) {
-          return interaction.reply({
-            content: "Use a valid duration like 1h, 12h, or 1d.",
-            ephemeral: true
-          });
-        }
-        config.automod.offenseWindowMs = durationMs;
-      }
-
-      if (subcommand === "exemptchannel") {
-        const mode = interaction.options.getString("mode");
-        const targetChannel = interaction.options.getChannel("channel");
-
-        if (mode === "add" && !config.automod.exemptChannelIds.includes(targetChannel.id)) {
-          config.automod.exemptChannelIds.push(targetChannel.id);
-        }
-
-        if (mode === "remove") {
-          config.automod.exemptChannelIds = config.automod.exemptChannelIds.filter(id => id !== targetChannel.id);
-        }
-      }
-
-      if (subcommand === "exemptrole") {
-        const mode = interaction.options.getString("mode");
-        const role = interaction.options.getRole("role");
-
-        if (mode === "add" && !config.automod.exemptRoleIds.includes(role.id)) {
-          config.automod.exemptRoleIds.push(role.id);
-        }
-
-        if (mode === "remove") {
-          config.automod.exemptRoleIds = config.automod.exemptRoleIds.filter(id => id !== role.id);
-        }
-      }
-
       saveConfig();
       return interaction.reply({
-        content: `Updated auto mod setting: ${subcommand}.`,
+        content: `Updated auto mod guard setting: ${subcommand}.`,
         ephemeral: true
       });
     }
