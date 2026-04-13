@@ -61,6 +61,7 @@ const FOOTER = {
 const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
 const INVITE_REGEX = /(discord\.gg|discord\.com\/invite)\/[a-z0-9-]+/i;
 const spamTracker = new Map();
+const joinTracker = new Map();
 
 const dataDir = path.join(__dirname, "data");
 const configPath = path.join(dataDir, "config.json");
@@ -78,7 +79,34 @@ function createDefaultConfig() {
       caps: true,
       bannedWords: false,
       bannedWordList: [],
+      linksEnabled: false,
+      allowedDomainsOnly: false,
+      allowedDomains: [],
+      blockedDomains: [],
+      attachmentsEnabled: false,
+      allowedAttachmentExtensions: [],
+      blockedAttachmentExtensions: [".exe", ".bat", ".cmd", ".scr"],
+      maxAttachmentSizeMb: 10,
+      ageProtectionEnabled: false,
+      minAccountAgeForLinksMs: 0,
+      minMemberAgeForLinksMs: 0,
+      minAccountAgeForAttachmentsMs: 0,
+      minMemberAgeForAttachmentsMs: 0,
+      antiRaidEnabled: false,
+      raidJoinThreshold: 5,
+      raidWindowMs: 60 * 1000,
+      raidAction: "log",
+      raidAccountAgeLimitMs: 24 * 60 * 60 * 1000,
+      nicknameFilterEnabled: false,
+      nicknameBlockedTerms: [],
+      alertOnlyRules: [],
       maxMentions: 5,
+      escalationEnabled: true,
+      warnThreshold: 2,
+      timeoutThreshold: 4,
+      timeoutDurationMs: 10 * 60 * 1000,
+      offenseWindowMs: 24 * 60 * 60 * 1000,
+      offenses: {},
       exemptChannelIds: [],
       exemptRoleIds: []
     },
@@ -86,6 +114,7 @@ function createDefaultConfig() {
       verifyChannelId: null,
       rulesChannelId: null,
       logChannelId: null,
+      automodLogChannelId: null,
       tiktokUsername: null,
       tiktokChannelId: null
     }
@@ -112,6 +141,13 @@ function loadConfig() {
         ...defaults.automod,
         ...(parsed.automod || {}),
         bannedWordList: Array.isArray(parsed.automod?.bannedWordList) ? parsed.automod.bannedWordList : [],
+        allowedDomains: Array.isArray(parsed.automod?.allowedDomains) ? parsed.automod.allowedDomains : [],
+        blockedDomains: Array.isArray(parsed.automod?.blockedDomains) ? parsed.automod.blockedDomains : [],
+        allowedAttachmentExtensions: Array.isArray(parsed.automod?.allowedAttachmentExtensions) ? parsed.automod.allowedAttachmentExtensions : [],
+        blockedAttachmentExtensions: Array.isArray(parsed.automod?.blockedAttachmentExtensions) ? parsed.automod.blockedAttachmentExtensions : defaults.automod.blockedAttachmentExtensions,
+        nicknameBlockedTerms: Array.isArray(parsed.automod?.nicknameBlockedTerms) ? parsed.automod.nicknameBlockedTerms : [],
+        alertOnlyRules: Array.isArray(parsed.automod?.alertOnlyRules) ? parsed.automod.alertOnlyRules : [],
+        offenses: parsed.automod?.offenses && typeof parsed.automod.offenses === "object" ? parsed.automod.offenses : {},
         exemptChannelIds: Array.isArray(parsed.automod?.exemptChannelIds) ? parsed.automod.exemptChannelIds : [],
         exemptRoleIds: Array.isArray(parsed.automod?.exemptRoleIds) ? parsed.automod.exemptRoleIds : []
       },
@@ -146,6 +182,10 @@ function getLogChannelId() {
   return config.settings.logChannelId || LOG_CHANNEL_ID;
 }
 
+function getAutoModLogChannelId() {
+  return config.settings.automodLogChannelId || getLogChannelId();
+}
+
 function getTikTokUsername() {
   return config.settings.tiktokUsername || TIKTOK_USERNAME;
 }
@@ -156,6 +196,79 @@ function getTikTokChannelId() {
 
 function getBannedWords() {
   return Array.isArray(config.automod.bannedWordList) ? config.automod.bannedWordList : [];
+}
+
+function getNicknameBlockedTerms() {
+  return Array.isArray(config.automod.nicknameBlockedTerms) ? config.automod.nicknameBlockedTerms : [];
+}
+
+function getAlertOnlyRules() {
+  return Array.isArray(config.automod.alertOnlyRules) ? config.automod.alertOnlyRules : [];
+}
+
+function normalizeDomain(value) {
+  return (value || "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "");
+}
+
+function normalizeExtension(value) {
+  const trimmed = (value || "").trim().toLowerCase();
+  if (!trimmed) return "";
+  return trimmed.startsWith(".") ? trimmed : `.${trimmed}`;
+}
+
+function extractMessageDomains(content) {
+  const matches = content.match(/https?:\/\/[^\s]+/gi) || [];
+  const domains = [];
+
+  for (const match of matches) {
+    try {
+      domains.push(normalizeDomain(new URL(match).hostname));
+    } catch (error) {
+      continue;
+    }
+  }
+
+  return domains.filter(Boolean);
+}
+
+function getAccountAgeMs(user) {
+  return Date.now() - user.createdTimestamp;
+}
+
+function getMemberAgeMs(member) {
+  return member.joinedTimestamp ? Date.now() - member.joinedTimestamp : Number.MAX_SAFE_INTEGER;
+}
+
+function trackJoin(guildId) {
+  const now = Date.now();
+  const history = joinTracker.get(guildId) || [];
+  const recent = history.filter(timestamp => now - timestamp <= config.automod.raidWindowMs);
+  recent.push(now);
+  joinTracker.set(guildId, recent);
+  return recent.length;
+}
+
+function getAutoModOffenses(userId) {
+  return Array.isArray(config.automod.offenses[userId]) ? config.automod.offenses[userId] : [];
+}
+
+function pruneAutoModOffenses(userId) {
+  const now = Date.now();
+  const offenses = getAutoModOffenses(userId).filter(entry => now - entry.timestamp <= config.automod.offenseWindowMs);
+  config.automod.offenses[userId] = offenses;
+  return offenses;
+}
+
+function recordAutoModOffense(userId, action, reason) {
+  const offenses = pruneAutoModOffenses(userId);
+  offenses.push({
+    action,
+    reason,
+    timestamp: Date.now()
+  });
+  config.automod.offenses[userId] = offenses;
+  saveConfig();
+  return offenses;
 }
 
 function validateEnv() {
@@ -188,6 +301,45 @@ const commands = [
     .setName("status")
     .setDescription("View bot runtime status")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName("moddashboard")
+    .setDescription("View a moderation system dashboard")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
+
+  new SlashCommandBuilder()
+    .setName("backup")
+    .setDescription("Export a backup snapshot")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addStringOption(option =>
+      option
+        .setName("target")
+        .setDescription("What to include in the backup")
+        .setRequired(true)
+        .addChoices(
+          { name: "Full snapshot", value: "full" },
+          { name: "Config only", value: "config" }
+        )
+    ),
+
+  new SlashCommandBuilder()
+    .setName("exportmod")
+    .setDescription("Export moderation data")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addStringOption(option =>
+      option
+        .setName("target")
+        .setDescription("Data to export")
+        .setRequired(true)
+        .addChoices(
+          { name: "Cases", value: "cases" },
+          { name: "Warnings", value: "warnings" },
+          { name: "Notes", value: "notes" }
+        )
+    )
+    .addUserOption(option =>
+      option.setName("user").setDescription("Optional user filter").setRequired(false)
+    ),
 
   new SlashCommandBuilder()
     .setName("reload")
@@ -442,6 +594,246 @@ const commands = [
     )
     .addSubcommand(subcommand =>
       subcommand
+        .setName("links")
+        .setDescription("Enable or disable link filtering")
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("allowedlinksonly")
+        .setDescription("Allow only trusted domains when link filtering is enabled")
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("allowdomain")
+        .setDescription("Add or remove an allowed domain")
+        .addStringOption(option =>
+          option.setName("mode").setDescription("add or remove").setRequired(true).addChoices(
+            { name: "add", value: "add" },
+            { name: "remove", value: "remove" }
+          )
+        )
+        .addStringOption(option =>
+          option.setName("domain").setDescription("Domain like example.com").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("blockdomain")
+        .setDescription("Add or remove a blocked domain")
+        .addStringOption(option =>
+          option.setName("mode").setDescription("add or remove").setRequired(true).addChoices(
+            { name: "add", value: "add" },
+            { name: "remove", value: "remove" }
+          )
+        )
+        .addStringOption(option =>
+          option.setName("domain").setDescription("Domain like example.com").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("attachments")
+        .setDescription("Enable or disable attachment filtering")
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("attachmentlimit")
+        .setDescription("Set the maximum attachment size in MB")
+        .addIntegerOption(option =>
+          option.setName("mb").setDescription("Maximum size in MB").setRequired(true).setMinValue(1).setMaxValue(100)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("allowextension")
+        .setDescription("Add or remove an allowed attachment extension")
+        .addStringOption(option =>
+          option.setName("mode").setDescription("add or remove").setRequired(true).addChoices(
+            { name: "add", value: "add" },
+            { name: "remove", value: "remove" }
+          )
+        )
+        .addStringOption(option =>
+          option.setName("extension").setDescription("Extension like .png or png").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("blockextension")
+        .setDescription("Add or remove a blocked attachment extension")
+        .addStringOption(option =>
+          option.setName("mode").setDescription("add or remove").setRequired(true).addChoices(
+            { name: "add", value: "add" },
+            { name: "remove", value: "remove" }
+          )
+        )
+        .addStringOption(option =>
+          option.setName("extension").setDescription("Extension like .exe or exe").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("ageprotection")
+        .setDescription("Enable or disable age-based protections")
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("accountagelinks")
+        .setDescription("Set minimum Discord account age for posting links")
+        .addStringOption(option =>
+          option.setName("duration").setDescription("Duration like 1d, 7d").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("memberagelinks")
+        .setDescription("Set minimum server membership age for posting links")
+        .addStringOption(option =>
+          option.setName("duration").setDescription("Duration like 12h, 1d").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("accountageattachments")
+        .setDescription("Set minimum Discord account age for attachments")
+        .addStringOption(option =>
+          option.setName("duration").setDescription("Duration like 1d, 7d").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("memberageattachments")
+        .setDescription("Set minimum server membership age for attachments")
+        .addStringOption(option =>
+          option.setName("duration").setDescription("Duration like 12h, 1d").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("antiraid")
+        .setDescription("Enable or disable anti-raid join detection")
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("raidthreshold")
+        .setDescription("Set how many joins trigger anti-raid")
+        .addIntegerOption(option =>
+          option.setName("count").setDescription("Join count").setRequired(true).setMinValue(2).setMaxValue(100)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("raidwindow")
+        .setDescription("Set the anti-raid join detection window")
+        .addStringOption(option =>
+          option.setName("duration").setDescription("Duration like 30s, 1m, 5m").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("raidaccountage")
+        .setDescription("Set the account age that counts as suspicious during a raid")
+        .addStringOption(option =>
+          option.setName("duration").setDescription("Duration like 1d, 7d").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("raidaction")
+        .setDescription("Set the anti-raid response")
+        .addStringOption(option =>
+          option.setName("action").setDescription("Raid response").setRequired(true).addChoices(
+            { name: "log only", value: "log" },
+            { name: "timeout suspicious joins", value: "timeout" }
+          )
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("nicknamefilter")
+        .setDescription("Enable or disable nickname filtering")
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("alertonly")
+        .setDescription("Mark a rule as alert-only or enforce it")
+        .addStringOption(option =>
+          option.setName("rule").setDescription("Rule name").setRequired(true).addChoices(
+            { name: "banned-word", value: "banned-word" },
+            { name: "blocked-domain", value: "blocked-domain" },
+            { name: "disallowed-domain", value: "disallowed-domain" },
+            { name: "blocked-extension", value: "blocked-extension" },
+            { name: "disallowed-extension", value: "disallowed-extension" },
+            { name: "caps", value: "caps" },
+            { name: "spam", value: "spam" },
+            { name: "mass-mentions", value: "mass-mentions" },
+            { name: "invite-link", value: "invite-link" }
+          )
+        )
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable alert-only mode").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("escalation")
+        .setDescription("Enable or disable automod escalation")
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("warnthreshold")
+        .setDescription("Set the offense count that triggers an automod warning")
+        .addIntegerOption(option =>
+          option.setName("count").setDescription("Offense count").setRequired(true).setMinValue(1).setMaxValue(20)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("timeoutthreshold")
+        .setDescription("Set the offense count that triggers an automod timeout")
+        .addIntegerOption(option =>
+          option.setName("count").setDescription("Offense count").setRequired(true).setMinValue(1).setMaxValue(20)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("timeoutduration")
+        .setDescription("Set the automod timeout duration")
+        .addStringOption(option =>
+          option.setName("duration").setDescription("Duration like 10m, 2h, 1d").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("offensewindow")
+        .setDescription("Set how long automod offenses count toward escalation")
+        .addStringOption(option =>
+          option.setName("duration").setDescription("Duration like 1h, 12h, 1d").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
         .setName("exemptchannel")
         .setDescription("Add or remove a channel exemption")
         .addStringOption(option =>
@@ -501,6 +893,33 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("nickfilter")
+    .setDescription("Manage blocked nickname terms")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addSubcommand(subcommand =>
+      subcommand.setName("list").setDescription("View blocked nickname terms")
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("add")
+        .setDescription("Add a blocked nickname term")
+        .addStringOption(option =>
+          option.setName("term").setDescription("Word or phrase to block in nicknames").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("remove")
+        .setDescription("Remove a blocked nickname term")
+        .addStringOption(option =>
+          option.setName("term").setDescription("Word or phrase to remove").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand.setName("clear").setDescription("Clear blocked nickname terms")
+    ),
+
+  new SlashCommandBuilder()
     .setName("settings")
     .setDescription("Manage bot settings")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
@@ -515,6 +934,18 @@ const commands = [
           option
             .setName("channel")
             .setDescription("Channel to use for logs")
+            .addChannelTypes(ChannelType.GuildText)
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("automodlogchannel")
+        .setDescription("Set a separate channel for automod logs")
+        .addChannelOption(option =>
+          option
+            .setName("channel")
+            .setDescription("Channel to use for automod logs")
             .addChannelTypes(ChannelType.GuildText)
             .setRequired(true)
         )
@@ -611,6 +1042,18 @@ async function logEmbed(embed) {
     await channel.send({ embeds: [embed] });
   } catch (error) {
     console.error("Log send error:", error.message);
+  }
+}
+
+async function logAutoModEmbed(embed) {
+  try {
+    const automodLogChannelId = getAutoModLogChannelId();
+    if (!automodLogChannelId) return;
+    const channel = await client.channels.fetch(automodLogChannelId);
+    if (!channel) return;
+    await channel.send({ embeds: [embed] });
+  } catch (error) {
+    console.error("AutoMod log send error:", error.message);
   }
 }
 
@@ -827,14 +1270,18 @@ async function ensureModeratable(interaction, member, actionLabel) {
 }
 
 async function handleAutoModViolation(message, reason, actionLabel) {
-  await message.delete().catch(() => {});
+  const alertOnly = getAlertOnlyRules().includes(actionLabel);
 
-  const notice = await message.channel.send({
-    content: `${message.author}, ${reason}`
-  }).catch(() => null);
+  if (!alertOnly) {
+    await message.delete().catch(() => {});
 
-  if (notice) {
-    setTimeout(() => notice.delete().catch(() => {}), 10000);
+    const notice = await message.channel.send({
+      content: `${message.author}, ${reason}`
+    }).catch(() => null);
+
+    if (notice) {
+      setTimeout(() => notice.delete().catch(() => {}), 10000);
+    }
   }
 
   const entry = addCase({
@@ -853,12 +1300,106 @@ async function handleAutoModViolation(message, reason, actionLabel) {
     ]
   });
 
-  await logEmbed(
+  const offenses = recordAutoModOffense(message.author.id, actionLabel, reason);
+  const activeOffenseCount = offenses.length;
+  let escalationText = alertOnly ? "Alert only" : null;
+
+  if (config.automod.escalationEnabled && !alertOnly) {
+    if (
+      activeOffenseCount >= config.automod.timeoutThreshold &&
+      message.member &&
+      message.member.moderatable
+    ) {
+      await message.member.timeout(
+        config.automod.timeoutDurationMs,
+        `AutoMod escalation: ${reason}`
+      ).catch(() => {});
+
+      const timeoutEntry = addCase({
+        action: "automod:timeout",
+        targetId: message.author.id,
+        targetTag: message.author.tag,
+        moderatorTag: "AutoMod",
+        reason: `Automatic timeout after repeated automod violations. Latest: ${reason}`,
+        details: [
+          { name: "Offenses in window", value: `${activeOffenseCount}`, inline: true },
+          { name: "Duration", value: formatDuration(config.automod.timeoutDurationMs), inline: true }
+        ]
+      });
+
+      escalationText = `Automatic timeout applied for ${formatDuration(config.automod.timeoutDurationMs)}.`;
+
+      await notifyUser(
+        message.author,
+        makeEmbed({
+          title: "Automatic timeout",
+          description: `You were automatically timed out in **${message.guild.name}** after repeated automod violations.`,
+          color: COLORS.red,
+          fields: buildCaseFields(timeoutEntry)
+        })
+      );
+
+      await logEmbed(
+        makeEmbed({
+          title: `Case #${timeoutEntry.id}: automod timeout`,
+          description: `${message.author.tag} was automatically timed out.`,
+          color: COLORS.red,
+          fields: buildCaseFields(timeoutEntry)
+        })
+      );
+    } else if (activeOffenseCount >= config.automod.warnThreshold) {
+      const warnings = addWarning(
+        message.author.id,
+        "AutoMod",
+        `Automatic warning after repeated automod violations. Latest: ${reason}`
+      );
+
+      const warningEntry = addCase({
+        action: "automod:warn",
+        targetId: message.author.id,
+        targetTag: message.author.tag,
+        moderatorTag: "AutoMod",
+        reason: `Automatic warning after repeated automod violations. Latest: ${reason}`,
+        details: [
+          { name: "Offenses in window", value: `${activeOffenseCount}`, inline: true },
+          { name: "Total warnings", value: `${warnings.length}`, inline: true }
+        ]
+      });
+
+      escalationText = `Automatic warning issued. Total warnings: ${warnings.length}.`;
+
+      await notifyUser(
+        message.author,
+        makeEmbed({
+          title: "Automatic warning",
+          description: `You received an automatic warning in **${message.guild.name}** after repeated automod violations.`,
+          color: COLORS.yellow,
+          fields: buildCaseFields(warningEntry)
+        })
+      );
+
+      await logEmbed(
+        makeEmbed({
+          title: `Case #${warningEntry.id}: automod warning`,
+          description: `${message.author.tag} received an automatic warning.`,
+          color: COLORS.yellow,
+          fields: buildCaseFields(warningEntry)
+        })
+      );
+    }
+  }
+
+  await logAutoModEmbed(
     makeEmbed({
       title: `Auto mod case #${entry.id}`,
       description: `${message.author.tag} had a message removed.`,
       color: COLORS.red,
-      fields: buildCaseFields(entry)
+      fields: [
+        ...buildCaseFields(entry),
+        { name: "Offenses in window", value: `${activeOffenseCount}`, inline: true },
+        { name: "Mode", value: alertOnly ? "Alert only" : "Enforced", inline: true },
+        { name: "Escalation", value: escalationText || "None", inline: false }
+      ]
     })
   );
 }
@@ -956,7 +1497,30 @@ function buildAutoModSummary() {
     `Caps: ${config.automod.caps ? "on" : "off"}`,
     `Banned words: ${config.automod.bannedWords ? "on" : "off"}`,
     `Banned word count: ${getBannedWords().length}`,
+    `Link filtering: ${config.automod.linksEnabled ? "on" : "off"}`,
+    `Allowed links only: ${config.automod.allowedDomainsOnly ? "on" : "off"}`,
+    `Allowed domains: ${config.automod.allowedDomains.length}`,
+    `Blocked domains: ${config.automod.blockedDomains.length}`,
+    `Attachment filtering: ${config.automod.attachmentsEnabled ? "on" : "off"}`,
+    `Max attachment size: ${config.automod.maxAttachmentSizeMb}MB`,
+    `Allowed extensions: ${config.automod.allowedAttachmentExtensions.length}`,
+    `Blocked extensions: ${config.automod.blockedAttachmentExtensions.length}`,
+    `Age protection: ${config.automod.ageProtectionEnabled ? "on" : "off"}`,
+    `Account age for links: ${formatDuration(config.automod.minAccountAgeForLinksMs)}`,
+    `Member age for links: ${formatDuration(config.automod.minMemberAgeForLinksMs)}`,
+    `Account age for attachments: ${formatDuration(config.automod.minAccountAgeForAttachmentsMs)}`,
+    `Member age for attachments: ${formatDuration(config.automod.minMemberAgeForAttachmentsMs)}`,
+    `Anti-raid: ${config.automod.antiRaidEnabled ? "on" : "off"}`,
+    `Raid threshold: ${config.automod.raidJoinThreshold}`,
+    `Raid window: ${formatDuration(config.automod.raidWindowMs)}`,
+    `Raid account age: ${formatDuration(config.automod.raidAccountAgeLimitMs)}`,
+    `Raid action: ${config.automod.raidAction}`,
     `Mention limit: ${config.automod.maxMentions}`,
+    `Escalation: ${config.automod.escalationEnabled ? "on" : "off"}`,
+    `Warn threshold: ${config.automod.warnThreshold}`,
+    `Timeout threshold: ${config.automod.timeoutThreshold}`,
+    `Timeout duration: ${formatDuration(config.automod.timeoutDurationMs)}`,
+    `Offense window: ${formatDuration(config.automod.offenseWindowMs)}`,
     `Exempt channels: ${config.automod.exemptChannelIds.length}`,
     `Exempt roles: ${config.automod.exemptRoleIds.length}`
   ].join("\n");
@@ -986,7 +1550,7 @@ function buildHelpEmbed() {
       },
       {
         name: "Staff Records",
-        value: "`/note`, `/notes`, `/case`, `/cases`, `/automod`, `/bannedwords`, `/settings`",
+        value: "`/note`, `/notes`, `/case`, `/cases`, `/automod`, `/bannedwords`, `/settings`, `/exportmod`, `/backup`",
         inline: false
       },
       {
@@ -1027,6 +1591,7 @@ function buildStatusEmbed() {
       { name: "Verify Channel", value: verifyChannelId ? `<#${verifyChannelId}>` : "Not set", inline: true },
       { name: "Rules Channel", value: rulesChannelId ? `<#${rulesChannelId}>` : "Not set", inline: true },
       { name: "Log Channel", value: logChannelId ? `<#${logChannelId}>` : "Not set", inline: true },
+      { name: "AutoMod Log Channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
       { name: "TikTok User", value: tiktokUsername ? `@${tiktokUsername}` : "Not set", inline: true },
       { name: "TikTok Alerts", value: tiktokChannelId ? `<#${tiktokChannelId}>` : "Not set", inline: true },
       { name: "TikTok Connected", value: tiktokConnection ? "Yes" : "No", inline: true },
@@ -1035,6 +1600,40 @@ function buildStatusEmbed() {
       { name: "Banned Words", value: `${getBannedWords().length}`, inline: true }
     ]
   });
+}
+
+function buildDashboardEmbed() {
+  const recentCases = config.cases.slice(-5).reverse();
+  const recentAutomodCases = recentCases.filter(entry => entry.action.startsWith("automod:"));
+
+  return makeEmbed({
+    title: "Moderation dashboard",
+    description: "Quick view of your moderation setup and recent activity.",
+    color: COLORS.blue,
+    fields: [
+      { name: "Total cases", value: `${config.cases.length}`, inline: true },
+      { name: "Warnings saved", value: `${Object.keys(config.warnings).length}`, inline: true },
+      { name: "Staff notes", value: `${Object.keys(config.notes).length}`, inline: true },
+      { name: "AutoMod log channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
+      { name: "Alert-only rules", value: getAlertOnlyRules().join(", ") || "None", inline: false },
+      { name: "Nickname filter terms", value: `${getNicknameBlockedTerms().length}`, inline: true },
+      {
+        name: "Recent AutoMod cases",
+        value: recentAutomodCases.length
+          ? recentAutomodCases.map(entry => `#${entry.id} ${entry.action} - ${entry.targetTag}`).join("\n").slice(0, 1024)
+          : "No recent automod cases.",
+        inline: false
+      }
+    ]
+  });
+}
+
+function buildJsonExportAttachment(prefix, payload) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return {
+    attachment: Buffer.from(`${JSON.stringify(payload, null, 2)}\n`, "utf8"),
+    name: `${prefix}-${stamp}.json`
+  };
 }
 
 client.once("clientReady", async () => {
@@ -1121,6 +1720,74 @@ client.on("interactionCreate", async interaction => {
 
     if (interaction.commandName === "status") {
       return interaction.reply({ embeds: [buildStatusEmbed()], ephemeral: true });
+    }
+
+    if (interaction.commandName === "moddashboard") {
+      return interaction.reply({ embeds: [buildDashboardEmbed()], ephemeral: true });
+    }
+
+    if (interaction.commandName === "backup") {
+      const target = interaction.options.getString("target");
+      const snapshot =
+        target === "config"
+          ? {
+              exportedAt: new Date().toISOString(),
+              target,
+              config
+            }
+          : {
+              exportedAt: new Date().toISOString(),
+              target,
+              config,
+              summary: {
+                caseCount: config.cases.length,
+                warningUsers: Object.keys(config.warnings).length,
+                noteUsers: Object.keys(config.notes).length
+              }
+            };
+
+      return interaction.reply({
+        content: `Backup export ready: ${target}.`,
+        files: [buildJsonExportAttachment(`mochi-backup-${target}`, snapshot)],
+        ephemeral: true
+      });
+    }
+
+    if (interaction.commandName === "exportmod") {
+      const target = interaction.options.getString("target");
+      const user = interaction.options.getUser("user");
+      const userId = user?.id || null;
+
+      let data;
+
+      if (target === "cases") {
+        data = userId ? getCasesForUser(userId) : config.cases;
+      }
+
+      if (target === "warnings") {
+        data = userId
+          ? { [userId]: getWarnings(userId) }
+          : config.warnings;
+      }
+
+      if (target === "notes") {
+        data = userId
+          ? { [userId]: getNotes(userId) }
+          : config.notes;
+      }
+
+      return interaction.reply({
+        content: `Moderation export ready: ${target}${user ? ` for ${user.tag}` : ""}.`,
+        files: [
+          buildJsonExportAttachment(`mochi-${target}${userId ? `-${userId}` : ""}`, {
+            exportedAt: new Date().toISOString(),
+            target,
+            userId,
+            data
+          })
+        ],
+        ephemeral: true
+      });
     }
 
     if (interaction.commandName === "reload") {
@@ -1758,8 +2425,203 @@ client.on("interactionCreate", async interaction => {
         config.automod.bannedWords = interaction.options.getBoolean("enabled");
       }
 
+      if (subcommand === "nicknamefilter") {
+        config.automod.nicknameFilterEnabled = interaction.options.getBoolean("enabled");
+      }
+
+      if (subcommand === "alertonly") {
+        const rule = interaction.options.getString("rule");
+        const enabled = interaction.options.getBoolean("enabled");
+
+        if (enabled && !config.automod.alertOnlyRules.includes(rule)) {
+          config.automod.alertOnlyRules.push(rule);
+        }
+
+        if (!enabled) {
+          config.automod.alertOnlyRules = config.automod.alertOnlyRules.filter(entry => entry !== rule);
+        }
+      }
+
       if (subcommand === "mentions") {
         config.automod.maxMentions = interaction.options.getInteger("limit");
+      }
+
+      if (subcommand === "links") {
+        config.automod.linksEnabled = interaction.options.getBoolean("enabled");
+      }
+
+      if (subcommand === "allowedlinksonly") {
+        config.automod.allowedDomainsOnly = interaction.options.getBoolean("enabled");
+      }
+
+      if (subcommand === "allowdomain") {
+        const mode = interaction.options.getString("mode");
+        const domain = normalizeDomain(interaction.options.getString("domain"));
+        if (!domain) {
+          return interaction.reply({ content: "Enter a valid domain like example.com.", ephemeral: true });
+        }
+
+        if (mode === "add" && !config.automod.allowedDomains.includes(domain)) {
+          config.automod.allowedDomains.push(domain);
+        }
+
+        if (mode === "remove") {
+          config.automod.allowedDomains = config.automod.allowedDomains.filter(entry => entry !== domain);
+        }
+      }
+
+      if (subcommand === "blockdomain") {
+        const mode = interaction.options.getString("mode");
+        const domain = normalizeDomain(interaction.options.getString("domain"));
+        if (!domain) {
+          return interaction.reply({ content: "Enter a valid domain like example.com.", ephemeral: true });
+        }
+
+        if (mode === "add" && !config.automod.blockedDomains.includes(domain)) {
+          config.automod.blockedDomains.push(domain);
+        }
+
+        if (mode === "remove") {
+          config.automod.blockedDomains = config.automod.blockedDomains.filter(entry => entry !== domain);
+        }
+      }
+
+      if (subcommand === "attachments") {
+        config.automod.attachmentsEnabled = interaction.options.getBoolean("enabled");
+      }
+
+      if (subcommand === "attachmentlimit") {
+        config.automod.maxAttachmentSizeMb = interaction.options.getInteger("mb");
+      }
+
+      if (subcommand === "ageprotection") {
+        config.automod.ageProtectionEnabled = interaction.options.getBoolean("enabled");
+      }
+
+      if (subcommand === "accountagelinks") {
+        const durationMs = parseDuration(interaction.options.getString("duration"));
+        if (!durationMs) {
+          return interaction.reply({ content: "Use a valid duration like 1d or 7d.", ephemeral: true });
+        }
+        config.automod.minAccountAgeForLinksMs = durationMs;
+      }
+
+      if (subcommand === "memberagelinks") {
+        const durationMs = parseDuration(interaction.options.getString("duration"));
+        if (!durationMs) {
+          return interaction.reply({ content: "Use a valid duration like 12h or 1d.", ephemeral: true });
+        }
+        config.automod.minMemberAgeForLinksMs = durationMs;
+      }
+
+      if (subcommand === "accountageattachments") {
+        const durationMs = parseDuration(interaction.options.getString("duration"));
+        if (!durationMs) {
+          return interaction.reply({ content: "Use a valid duration like 1d or 7d.", ephemeral: true });
+        }
+        config.automod.minAccountAgeForAttachmentsMs = durationMs;
+      }
+
+      if (subcommand === "memberageattachments") {
+        const durationMs = parseDuration(interaction.options.getString("duration"));
+        if (!durationMs) {
+          return interaction.reply({ content: "Use a valid duration like 12h or 1d.", ephemeral: true });
+        }
+        config.automod.minMemberAgeForAttachmentsMs = durationMs;
+      }
+
+      if (subcommand === "antiraid") {
+        config.automod.antiRaidEnabled = interaction.options.getBoolean("enabled");
+      }
+
+      if (subcommand === "raidthreshold") {
+        config.automod.raidJoinThreshold = interaction.options.getInteger("count");
+      }
+
+      if (subcommand === "raidwindow") {
+        const durationMs = parseDuration(interaction.options.getString("duration"));
+        if (!durationMs) {
+          return interaction.reply({ content: "Use a valid duration like 30s, 1m, or 5m.", ephemeral: true });
+        }
+        config.automod.raidWindowMs = durationMs;
+      }
+
+      if (subcommand === "raidaccountage") {
+        const durationMs = parseDuration(interaction.options.getString("duration"));
+        if (!durationMs) {
+          return interaction.reply({ content: "Use a valid duration like 1d or 7d.", ephemeral: true });
+        }
+        config.automod.raidAccountAgeLimitMs = durationMs;
+      }
+
+      if (subcommand === "raidaction") {
+        config.automod.raidAction = interaction.options.getString("action");
+      }
+
+      if (subcommand === "allowextension") {
+        const mode = interaction.options.getString("mode");
+        const extension = normalizeExtension(interaction.options.getString("extension"));
+        if (!extension) {
+          return interaction.reply({ content: "Enter a valid extension like .png or png.", ephemeral: true });
+        }
+
+        if (mode === "add" && !config.automod.allowedAttachmentExtensions.includes(extension)) {
+          config.automod.allowedAttachmentExtensions.push(extension);
+        }
+
+        if (mode === "remove") {
+          config.automod.allowedAttachmentExtensions = config.automod.allowedAttachmentExtensions.filter(entry => entry !== extension);
+        }
+      }
+
+      if (subcommand === "blockextension") {
+        const mode = interaction.options.getString("mode");
+        const extension = normalizeExtension(interaction.options.getString("extension"));
+        if (!extension) {
+          return interaction.reply({ content: "Enter a valid extension like .exe or exe.", ephemeral: true });
+        }
+
+        if (mode === "add" && !config.automod.blockedAttachmentExtensions.includes(extension)) {
+          config.automod.blockedAttachmentExtensions.push(extension);
+        }
+
+        if (mode === "remove") {
+          config.automod.blockedAttachmentExtensions = config.automod.blockedAttachmentExtensions.filter(entry => entry !== extension);
+        }
+      }
+
+      if (subcommand === "escalation") {
+        config.automod.escalationEnabled = interaction.options.getBoolean("enabled");
+      }
+
+      if (subcommand === "warnthreshold") {
+        config.automod.warnThreshold = interaction.options.getInteger("count");
+      }
+
+      if (subcommand === "timeoutthreshold") {
+        config.automod.timeoutThreshold = interaction.options.getInteger("count");
+      }
+
+      if (subcommand === "timeoutduration") {
+        const durationMs = parseDuration(interaction.options.getString("duration"));
+        if (!durationMs) {
+          return interaction.reply({
+            content: "Use a valid duration like 10m, 2h, or 1d. Discord timeouts max out at 28d.",
+            ephemeral: true
+          });
+        }
+        config.automod.timeoutDurationMs = durationMs;
+      }
+
+      if (subcommand === "offensewindow") {
+        const durationMs = parseDuration(interaction.options.getString("duration"));
+        if (!durationMs) {
+          return interaction.reply({
+            content: "Use a valid duration like 1h, 12h, or 1d.",
+            ephemeral: true
+          });
+        }
+        config.automod.offenseWindowMs = durationMs;
       }
 
       if (subcommand === "exemptchannel") {
@@ -1847,6 +2709,58 @@ client.on("interactionCreate", async interaction => {
       }
     }
 
+    if (interaction.commandName === "nickfilter") {
+      const subcommand = interaction.options.getSubcommand();
+      const nicknameTerms = getNicknameBlockedTerms();
+
+      if (subcommand === "list") {
+        return interaction.reply({
+          embeds: [
+            makeEmbed({
+              title: "Blocked nickname terms",
+              description: nicknameTerms.length ? nicknameTerms.join("\n").slice(0, 4000) : "No blocked nickname terms saved.",
+              color: COLORS.yellow
+            })
+          ],
+          ephemeral: true
+        });
+      }
+
+      if (subcommand === "add") {
+        const term = interaction.options.getString("term").trim().toLowerCase();
+        if (!term) {
+          return interaction.reply({ content: "Enter a valid nickname term.", ephemeral: true });
+        }
+
+        if (nicknameTerms.includes(term)) {
+          return interaction.reply({ content: `"${term}" is already blocked in nicknames.`, ephemeral: true });
+        }
+
+        config.automod.nicknameBlockedTerms.push(term);
+        saveConfig();
+        return interaction.reply({ content: `Added "${term}" to blocked nickname terms.`, ephemeral: true });
+      }
+
+      if (subcommand === "remove") {
+        const term = interaction.options.getString("term").trim().toLowerCase();
+        const nextList = nicknameTerms.filter(entry => entry !== term);
+
+        if (nextList.length === nicknameTerms.length) {
+          return interaction.reply({ content: `"${term}" was not on the nickname block list.`, ephemeral: true });
+        }
+
+        config.automod.nicknameBlockedTerms = nextList;
+        saveConfig();
+        return interaction.reply({ content: `Removed "${term}" from blocked nickname terms.`, ephemeral: true });
+      }
+
+      if (subcommand === "clear") {
+        config.automod.nicknameBlockedTerms = [];
+        saveConfig();
+        return interaction.reply({ content: "Cleared blocked nickname terms.", ephemeral: true });
+      }
+    }
+
     if (interaction.commandName === "settings") {
       const subcommand = interaction.options.getSubcommand();
 
@@ -1865,6 +2779,10 @@ client.on("interactionCreate", async interaction => {
 
       if (subcommand === "logchannel") {
         config.settings.logChannelId = interaction.options.getChannel("channel").id;
+      }
+
+      if (subcommand === "automodlogchannel") {
+        config.settings.automodLogChannelId = interaction.options.getChannel("channel").id;
       }
 
       if (subcommand === "verifychannel") {
@@ -1949,6 +2867,112 @@ client.on("messageCreate", async message => {
     if (!message.guild || message.author.bot || !message.member) return;
     if (isAutoModExempt(message)) return;
 
+    const accountAgeMs = getAccountAgeMs(message.author);
+    const memberAgeMs = getMemberAgeMs(message.member);
+    const messageDomains = extractMessageDomains(message.content);
+    const normalizedBlockedDomains = config.automod.blockedDomains.map(normalizeDomain);
+    const normalizedAllowedDomains = config.automod.allowedDomains.map(normalizeDomain);
+
+    if (config.automod.ageProtectionEnabled && messageDomains.length) {
+      if (config.automod.minAccountAgeForLinksMs > 0 && accountAgeMs < config.automod.minAccountAgeForLinksMs) {
+        await handleAutoModViolation(
+          message,
+          `your Discord account must be at least ${formatDuration(config.automod.minAccountAgeForLinksMs)} old before posting links.`,
+          "account-age-links"
+        );
+        return;
+      }
+
+      if (config.automod.minMemberAgeForLinksMs > 0 && memberAgeMs < config.automod.minMemberAgeForLinksMs) {
+        await handleAutoModViolation(
+          message,
+          `you must be in the server for at least ${formatDuration(config.automod.minMemberAgeForLinksMs)} before posting links.`,
+          "member-age-links"
+        );
+        return;
+      }
+    }
+
+    if (config.automod.linksEnabled && messageDomains.length) {
+      const blockedDomain = messageDomains.find(domain =>
+        normalizedBlockedDomains.some(blocked => domain === blocked || domain.endsWith(`.${blocked}`))
+      );
+
+      if (blockedDomain) {
+        await handleAutoModViolation(message, `links from ${blockedDomain} are not allowed here.`, "blocked-domain");
+        return;
+      }
+
+      if (config.automod.allowedDomainsOnly) {
+        const disallowedDomain = messageDomains.find(domain =>
+          !normalizedAllowedDomains.some(allowed => domain === allowed || domain.endsWith(`.${allowed}`))
+        );
+
+        if (disallowedDomain) {
+          await handleAutoModViolation(message, `links from ${disallowedDomain} are not on the allowed list.`, "disallowed-domain");
+          return;
+        }
+      }
+    }
+
+    if (config.automod.attachmentsEnabled && message.attachments.size) {
+      if (config.automod.ageProtectionEnabled) {
+        if (config.automod.minAccountAgeForAttachmentsMs > 0 && accountAgeMs < config.automod.minAccountAgeForAttachmentsMs) {
+          await handleAutoModViolation(
+            message,
+            `your Discord account must be at least ${formatDuration(config.automod.minAccountAgeForAttachmentsMs)} old before uploading attachments.`,
+            "account-age-attachments"
+          );
+          return;
+        }
+
+        if (config.automod.minMemberAgeForAttachmentsMs > 0 && memberAgeMs < config.automod.minMemberAgeForAttachmentsMs) {
+          await handleAutoModViolation(
+            message,
+            `you must be in the server for at least ${formatDuration(config.automod.minMemberAgeForAttachmentsMs)} before uploading attachments.`,
+            "member-age-attachments"
+          );
+          return;
+        }
+      }
+
+      const blockedExtensions = config.automod.blockedAttachmentExtensions.map(normalizeExtension);
+      const allowedExtensions = config.automod.allowedAttachmentExtensions.map(normalizeExtension);
+
+      for (const attachment of message.attachments.values()) {
+        const fileName = attachment.name || "";
+        const extension = normalizeExtension(path.extname(fileName));
+        const sizeMb = attachment.size / (1024 * 1024);
+
+        if (config.automod.maxAttachmentSizeMb > 0 && sizeMb > config.automod.maxAttachmentSizeMb) {
+          await handleAutoModViolation(
+            message,
+            `attachments larger than ${config.automod.maxAttachmentSizeMb}MB are not allowed here.`,
+            "attachment-size"
+          );
+          return;
+        }
+
+        if (extension && blockedExtensions.includes(extension)) {
+          await handleAutoModViolation(
+            message,
+            `files with the ${extension} extension are not allowed here.`,
+            "blocked-extension"
+          );
+          return;
+        }
+
+        if (allowedExtensions.length && (!extension || !allowedExtensions.includes(extension))) {
+          await handleAutoModViolation(
+            message,
+            `only these attachment types are allowed here: ${allowedExtensions.join(", ")}.`,
+            "disallowed-extension"
+          );
+          return;
+        }
+      }
+    }
+
     if (config.automod.invites && INVITE_REGEX.test(message.content)) {
       await handleAutoModViolation(message, "invite links are not allowed here.", "invite-link");
       return;
@@ -2026,6 +3050,47 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
 
 client.on("guildMemberAdd", async member => {
   try {
+    if (config.automod.antiRaidEnabled) {
+      const joinCount = trackJoin(member.guild.id);
+      const accountAgeMs = getAccountAgeMs(member.user);
+
+      if (joinCount >= config.automod.raidJoinThreshold && accountAgeMs <= config.automod.raidAccountAgeLimitMs) {
+        const details = [
+          { name: "Recent joins", value: `${joinCount}`, inline: true },
+          { name: "Account age", value: formatDuration(accountAgeMs), inline: true },
+          { name: "Raid action", value: config.automod.raidAction, inline: true }
+        ];
+
+        let raidReason = `Potential raid join detected. ${joinCount} joins in ${formatDuration(config.automod.raidWindowMs)}.`;
+
+        if (config.automod.raidAction === "timeout" && member.moderatable) {
+          await member.timeout(
+            config.automod.timeoutDurationMs,
+            `Anti-raid: ${raidReason}`
+          ).catch(() => {});
+          raidReason += ` Automatic timeout applied for ${formatDuration(config.automod.timeoutDurationMs)}.`;
+        }
+
+        const raidEntry = addCase({
+          action: "automod:raid-join",
+          targetId: member.user.id,
+          targetTag: member.user.tag,
+          moderatorTag: "AutoMod",
+          reason: raidReason,
+          details
+        });
+
+        await logEmbed(
+          makeEmbed({
+            title: `Case #${raidEntry.id}: anti-raid`,
+            description: `${member.user.tag} matched the anti-raid rules on join.`,
+            color: COLORS.red,
+            fields: buildCaseFields(raidEntry)
+          })
+        );
+      }
+    }
+
     await notifyUser(
       member.user,
       makeEmbed({
@@ -2048,8 +3113,65 @@ client.on("guildMemberAdd", async member => {
         thumbnail: member.user.displayAvatarURL({ dynamic: true })
       })
     );
+
+    if (config.automod.nicknameFilterEnabled) {
+      const displayName = (member.nickname || member.user.username || "").toLowerCase();
+      const blockedTerm = getNicknameBlockedTerms().find(term => displayName.includes(term));
+
+      if (blockedTerm) {
+        const entry = addCase({
+          action: "automod:nickname",
+          targetId: member.user.id,
+          targetTag: member.user.tag,
+          moderatorTag: "AutoMod",
+          reason: `Nickname matched blocked term "${blockedTerm}" on join.`
+        });
+
+        await logAutoModEmbed(
+          makeEmbed({
+            title: `Auto mod case #${entry.id}`,
+            description: `${member.user.tag} matched the nickname filter on join.`,
+            color: COLORS.red,
+            fields: buildCaseFields(entry)
+          })
+        );
+      }
+    }
   } catch (error) {
     console.error("Welcome error:", error);
+  }
+});
+
+client.on("guildMemberUpdate", async (oldMember, newMember) => {
+  try {
+    if (!config.automod.nicknameFilterEnabled) return;
+
+    const previousName = (oldMember.nickname || oldMember.user.username || "").toLowerCase();
+    const currentName = (newMember.nickname || newMember.user.username || "").toLowerCase();
+    if (previousName === currentName) return;
+
+    const blockedTerm = getNicknameBlockedTerms().find(term => currentName.includes(term));
+    if (!blockedTerm) return;
+
+    const entry = addCase({
+      action: "automod:nickname",
+      targetId: newMember.user.id,
+      targetTag: newMember.user.tag,
+      moderatorTag: "AutoMod",
+      reason: `Nickname matched blocked term "${blockedTerm}".`,
+      details: [{ name: "Nickname", value: newMember.displayName.slice(0, 1024), inline: false }]
+    });
+
+    await logAutoModEmbed(
+      makeEmbed({
+        title: `Auto mod case #${entry.id}`,
+        description: `${newMember.user.tag} matched the nickname filter.`,
+        color: COLORS.red,
+        fields: buildCaseFields(entry)
+      })
+    );
+  } catch (error) {
+    console.error("Nickname filter error:", error);
   }
 });
 
