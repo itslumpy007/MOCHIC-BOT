@@ -4,6 +4,9 @@ const fs = require("fs");
 const path = require("path");
 
 const {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   ChannelType,
   Client,
   EmbedBuilder,
@@ -327,6 +330,11 @@ const commands = [
   new SlashCommandBuilder()
     .setName("help")
     .setDescription("Show the bot's main commands"),
+
+  new SlashCommandBuilder()
+    .setName("adminpanel")
+    .setDescription("Open the interactive Mochi admin panel")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
 
   new SlashCommandBuilder()
     .setName("status")
@@ -1877,7 +1885,7 @@ function buildHelpEmbed() {
       {
         name: "Moderation",
         value:
-          "`/warn`, `/warnings`, `/clearwarnings`, `/timeout`, `/untimeout`, `/mute`, `/unmute`, `/kick`, `/ban`, `/tempban`, `/unban`, `/slowmode`",
+          "`/adminpanel`, `/warn`, `/warnings`, `/clearwarnings`, `/timeout`, `/untimeout`, `/mute`, `/unmute`, `/kick`, `/ban`, `/tempban`, `/unban`, `/slowmode`",
         inline: false
       },
       {
@@ -1955,6 +1963,141 @@ function buildDashboardEmbed() {
         value: recentAutomodCases.length
           ? recentAutomodCases.map(entry => `#${entry.id} ${entry.action} - ${entry.targetTag}`).join("\n").slice(0, 1024)
           : "No recent automod cases.",
+        inline: false
+      }
+    ]
+  });
+}
+
+function buildAdminPanelButtons(view) {
+  const navigationRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("adminpanel:view:overview")
+      .setLabel("Overview")
+      .setStyle(view === "overview" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("adminpanel:view:moderation")
+      .setLabel("Moderation")
+      .setStyle(view === "moderation" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("adminpanel:view:automod")
+      .setLabel("AutoMod")
+      .setStyle(view === "automod" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("adminpanel:view:setup")
+      .setLabel("Setup")
+      .setStyle(view === "setup" ? ButtonStyle.Primary : ButtonStyle.Secondary)
+  );
+
+  let actionRow;
+
+  if (view === "overview") {
+    actionRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("adminpanel:action:status").setLabel("Refresh Status").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("adminpanel:action:dashboard").setLabel("Dashboard Snapshot").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("adminpanel:action:reload-config").setLabel("Reload Config").setStyle(ButtonStyle.Success)
+    );
+  }
+
+  if (view === "moderation") {
+    actionRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("adminpanel:action:lockdown").setLabel("Lock Current Channel").setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId("adminpanel:action:unlockdown").setLabel("Unlock Current Channel").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("adminpanel:view:overview").setLabel("Back To Home").setStyle(ButtonStyle.Secondary)
+    );
+  }
+
+  if (view === "automod") {
+    actionRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("adminpanel:toggle:spam").setLabel(`Spam ${config.automod.spam ? "On" : "Off"}`).setStyle(config.automod.spam ? ButtonStyle.Success : ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("adminpanel:toggle:invites").setLabel(`Invites ${config.automod.invites ? "On" : "Off"}`).setStyle(config.automod.invites ? ButtonStyle.Success : ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("adminpanel:toggle:emoji").setLabel(`Emoji ${config.automod.emojiSpamEnabled ? "On" : "Off"}`).setStyle(config.automod.emojiSpamEnabled ? ButtonStyle.Success : ButtonStyle.Secondary)
+    );
+  }
+
+  if (view === "setup") {
+    actionRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("adminpanel:action:setupverify").setLabel("Post Verify Panel").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("adminpanel:action:setuprules").setLabel("Post Rules").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId("adminpanel:action:settings-view").setLabel("View Settings").setStyle(ButtonStyle.Secondary)
+    );
+  }
+
+  return actionRow ? [navigationRow, actionRow] : [navigationRow];
+}
+
+function buildAdminPanelEmbed(view, interaction) {
+  if (view === "moderation") {
+    return makeEmbed({
+      title: "Mochi Admin Panel - Moderation",
+      description: "Quick moderation controls for the current channel and shortcuts to the bot's punishment tools.",
+      color: COLORS.red,
+      fields: [
+        {
+          name: "Live Actions",
+          value: "`Lock Current Channel`, `Unlock Current Channel`",
+          inline: false
+        },
+        {
+          name: "Punishment Commands",
+          value: "`/warn`, `/timeout`, `/mute`, `/kick`, `/ban`, `/tempban`, `/unban`",
+          inline: false
+        },
+        {
+          name: "Current Channel",
+          value: interaction.channel ? `${interaction.channel}` : "Unknown",
+          inline: true
+        }
+      ]
+    });
+  }
+
+  if (view === "automod") {
+    return makeEmbed({
+      title: "Mochi Admin Panel - AutoMod",
+      description: "Live AutoMod toggles for the fastest day-to-day adjustments.",
+      color: COLORS.yellow,
+      fields: [
+        { name: "Spam Filter", value: config.automod.spam ? "Enabled" : "Disabled", inline: true },
+        { name: "Invite Filter", value: config.automod.invites ? "Enabled" : "Disabled", inline: true },
+        { name: "Emoji Spam", value: config.automod.emojiSpamEnabled ? `Enabled (${config.automod.maxEmojiCount})` : "Disabled", inline: true },
+        { name: "Mentions", value: `${config.automod.maxMentions}`, inline: true },
+        { name: "Escalation", value: config.automod.escalationEnabled ? "Enabled" : "Disabled", inline: true },
+        { name: "Alert-Only Rules", value: getAlertOnlyRules().join(", ") || "None", inline: false }
+      ]
+    });
+  }
+
+  if (view === "setup") {
+    return makeEmbed({
+      title: "Mochi Admin Panel - Setup",
+      description: "High-frequency setup actions that are safe to trigger directly from the panel.",
+      color: COLORS.blue,
+      fields: [
+        { name: "Log Channel", value: getLogChannelId() ? `<#${getLogChannelId()}>` : "Not set", inline: true },
+        { name: "AutoMod Log", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
+        { name: "Verify Channel", value: getVerifyChannelId() ? `<#${getVerifyChannelId()}>` : "Not set", inline: true },
+        { name: "Rules Channel", value: getRulesChannelId() ? `<#${getRulesChannelId()}>` : "Not set", inline: true },
+        { name: "Muted Role", value: getMutedRoleId() ? `<@&${getMutedRoleId()}>` : "Not set", inline: true },
+        { name: "TikTok Alerts", value: getTikTokChannelId() ? `<#${getTikTokChannelId()}>` : "Not set", inline: true }
+      ]
+    });
+  }
+
+  return makeEmbed({
+    title: "Mochi Admin Panel - Overview",
+    description: "Your interactive control center for moderation, AutoMod, and core server setup.",
+    color: COLORS.purple,
+    fields: [
+      { name: "Cases Logged", value: `${config.cases.length}`, inline: true },
+      { name: "Warning Users", value: `${Object.keys(config.warnings).length}`, inline: true },
+      { name: "Staff Notes", value: `${Object.keys(config.notes).length}`, inline: true },
+      { name: "AutoMod Status", value: config.automod.spam || config.automod.invites || config.automod.caps ? "Active" : "Mostly Off", inline: true },
+      { name: "Current Channel", value: interaction.channel ? `${interaction.channel}` : "Unknown", inline: true },
+      { name: "Staff Access", value: `Mod roles: ${getPermissionRoleIds("mod").length} | Admin roles: ${getPermissionRoleIds("admin").length}`, inline: true },
+      {
+        name: "Quick Actions",
+        value: "`Refresh Status`, `Dashboard Snapshot`, `Reload Config`",
         inline: false
       }
     ]
@@ -2075,6 +2218,139 @@ client.on("channelCreate", async channel => {
 
 client.on("interactionCreate", async interaction => {
   try {
+    if (interaction.isButton()) {
+      if (!interaction.customId.startsWith("adminpanel:")) return;
+
+      const [, kind, action] = interaction.customId.split(":");
+      const isAdminPanelAction = ["toggle", "action"].includes(kind);
+      const accessLevel =
+        kind === "toggle" ||
+        ["reload-config", "setupverify", "setuprules", "settings-view"].includes(action)
+          ? "admin"
+          : "mod";
+
+      if (!(await ensureStaffAccess(interaction, accessLevel, "the admin panel"))) {
+        return;
+      }
+
+      if (kind === "view") {
+        return interaction.update({
+          embeds: [buildAdminPanelEmbed(action, interaction)],
+          components: buildAdminPanelButtons(action)
+        });
+      }
+
+      if (kind === "toggle") {
+        if (action === "spam") config.automod.spam = !config.automod.spam;
+        if (action === "invites") config.automod.invites = !config.automod.invites;
+        if (action === "emoji") config.automod.emojiSpamEnabled = !config.automod.emojiSpamEnabled;
+
+        saveConfig();
+        return interaction.update({
+          embeds: [buildAdminPanelEmbed("automod", interaction)],
+          components: buildAdminPanelButtons("automod")
+        });
+      }
+
+      if (kind === "action") {
+        if (action === "status") {
+          return interaction.reply({ embeds: [buildStatusEmbed()], ephemeral: true });
+        }
+
+        if (action === "dashboard") {
+          return interaction.reply({ embeds: [buildDashboardEmbed()], ephemeral: true });
+        }
+
+        if (action === "reload-config") {
+          const previousVerifyMessageId = config.verifyMessageId;
+          config = loadConfig();
+          if (!config.verifyMessageId && previousVerifyMessageId) {
+            config.verifyMessageId = previousVerifyMessageId;
+          }
+
+          return interaction.update({
+            embeds: [buildAdminPanelEmbed("overview", interaction)],
+            components: buildAdminPanelButtons("overview")
+          });
+        }
+
+        if (action === "lockdown") {
+          await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false });
+          await interaction.reply({ content: `Locked ${interaction.channel}.`, ephemeral: true });
+          return interaction.message.edit({
+            embeds: [buildAdminPanelEmbed("moderation", interaction)],
+            components: buildAdminPanelButtons("moderation")
+          }).catch(() => {});
+        }
+
+        if (action === "unlockdown") {
+          await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: null });
+          await interaction.reply({ content: `Unlocked ${interaction.channel}.`, ephemeral: true });
+          return interaction.message.edit({
+            embeds: [buildAdminPanelEmbed("moderation", interaction)],
+            components: buildAdminPanelButtons("moderation")
+          }).catch(() => {});
+        }
+
+        if (action === "setupverify") {
+          const verifyChannel = await client.channels.fetch(getVerifyChannelId());
+          const verifyEmbed = makeEmbed({
+            title: "welcome to the mochi garden",
+            description:
+              "Pick one flavor role by reacting below to unlock your vibe.\n\n" +
+              "🌸 Sakura\n🍓 Strawberry Milk\n🍵 Matcha Dream\n🫐 Mystic Berry\n💜 Taro Cloud\n\n" +
+              "You can switch your role anytime by changing your reaction.",
+            color: COLORS.pink
+          });
+
+          const sentMessage = await verifyChannel.send({ embeds: [verifyEmbed] });
+          for (const emoji of Object.keys(MOCHI_ROLES)) {
+            await sentMessage.react(emoji);
+          }
+
+          config.verifyMessageId = sentMessage.id;
+          saveConfig();
+          return interaction.reply({ content: "Verify panel posted.", ephemeral: true });
+        }
+
+        if (action === "setuprules") {
+          const rulesChannel = await client.channels.fetch(getRulesChannelId());
+          await rulesChannel.send({
+            embeds: [
+              makeEmbed({
+                title: "Server rules",
+                description: "Please keep everything comfy, safe, and fun for everyone.",
+                color: COLORS.purple,
+                fields: [
+                  { name: "1", value: "Be kind and respectful to everyone.", inline: false },
+                  { name: "2", value: "No spam, harassment, or drama.", inline: false },
+                  { name: "3", value: "Follow Discord ToS at all times.", inline: false },
+                  { name: "4", value: "Use channels for their correct purpose.", inline: false },
+                  { name: "5", value: `Please verify in <#${getVerifyChannelId()}> to access the server.`, inline: false }
+                ]
+              })
+            ]
+          });
+          return interaction.reply({ content: "Rules posted.", ephemeral: true });
+        }
+
+        if (action === "settings-view") {
+          return interaction.reply({
+            embeds: [
+              makeEmbed({
+                title: "Bot settings",
+                description: buildSettingsSummary(),
+                color: COLORS.blue
+              })
+            ],
+            ephemeral: true
+          });
+        }
+      }
+
+      return;
+    }
+
     if (!interaction.isChatInputCommand()) return;
 
     const { guild, channel } = interaction;
@@ -2093,6 +2369,7 @@ client.on("interactionCreate", async interaction => {
       "staffroles"
     ]);
     const modCommands = new Set([
+      "adminpanel",
       "moddashboard",
       "exportmod",
       "lockdown",
@@ -2133,6 +2410,14 @@ client.on("interactionCreate", async interaction => {
 
     if (interaction.commandName === "help") {
       return interaction.reply({ embeds: [buildHelpEmbed()], ephemeral: true });
+    }
+
+    if (interaction.commandName === "adminpanel") {
+      return interaction.reply({
+        embeds: [buildAdminPanelEmbed("overview", interaction)],
+        components: buildAdminPanelButtons("overview"),
+        ephemeral: true
+      });
     }
 
     if (interaction.commandName === "status") {
