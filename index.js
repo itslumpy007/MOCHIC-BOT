@@ -1944,25 +1944,30 @@ function buildStatusEmbed() {
 }
 
 function buildDashboardEmbed() {
-  const recentCases = config.cases.slice(-5).reverse();
-  const recentAutomodCases = recentCases.filter(entry => entry.action.startsWith("automod:"));
+  const allCases = Array.isArray(config.cases) ? config.cases : [];
+  const recentCases = allCases.slice(-5).reverse();
+  const recentAutomodCases = recentCases.filter(entry => typeof entry?.action === "string" && entry.action.startsWith("automod:"));
+  const recentAutomodText = recentAutomodCases.length
+    ? recentAutomodCases
+        .map(entry => `#${entry.id || "?"} ${entry.action} - ${entry.targetTag || entry.targetId || "Unknown user"}`)
+        .join("\n")
+        .slice(0, 1024)
+    : "No recent automod cases.";
 
   return makeEmbed({
     title: "Moderation dashboard",
     description: "Quick view of your moderation setup and recent activity.",
     color: COLORS.blue,
     fields: [
-      { name: "Total cases", value: `${config.cases.length}`, inline: true },
-      { name: "Warnings saved", value: `${Object.keys(config.warnings).length}`, inline: true },
-      { name: "Staff notes", value: `${Object.keys(config.notes).length}`, inline: true },
+      { name: "Total cases", value: `${allCases.length}`, inline: true },
+      { name: "Warnings saved", value: `${Object.keys(config.warnings || {}).length}`, inline: true },
+      { name: "Staff notes", value: `${Object.keys(config.notes || {}).length}`, inline: true },
       { name: "AutoMod log channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
       { name: "Alert-only rules", value: getAlertOnlyRules().join(", ") || "None", inline: false },
       { name: "Nickname filter terms", value: `${getNicknameBlockedTerms().length}`, inline: true },
       {
         name: "Recent AutoMod cases",
-        value: recentAutomodCases.length
-          ? recentAutomodCases.map(entry => `#${entry.id} ${entry.action} - ${entry.targetTag}`).join("\n").slice(0, 1024)
-          : "No recent automod cases.",
+        value: recentAutomodText,
         inline: false
       }
     ]
