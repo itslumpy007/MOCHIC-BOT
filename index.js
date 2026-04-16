@@ -15,9 +15,9 @@ const {
   Partials,
   PermissionFlagsBits,
   REST,
+  RoleSelectMenuBuilder,
   Routes,
-  SlashCommandBuilder
-  ,
+  SlashCommandBuilder,
   TextInputBuilder,
   TextInputStyle,
   UserSelectMenuBuilder
@@ -70,6 +70,7 @@ const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
 const INVITE_REGEX = /(discord\.gg|discord\.com\/invite)\/[a-z0-9-]+/i;
 const spamTracker = new Map();
 const joinTracker = new Map();
+const pendingPanelActions = new Map();
 let tempBanInterval = null;
 
 const dataDir = path.join(__dirname, "data");
@@ -1983,6 +1984,30 @@ function buildAdminPanelCustomId(kind, action, targetId = null) {
   return `adminpanel:${kind}:${action}:${targetId || "none"}`;
 }
 
+function formatPanelRoleMentions(roleIds) {
+  return roleIds.length ? roleIds.map(id => `<@&${id}>`).join(", ").slice(0, 1024) : "None configured.";
+}
+
+function parseDurationInputOrZero(input) {
+  const normalized = (input || "").trim().toLowerCase();
+  if (!normalized || ["0", "off", "none", "disable", "disabled"].includes(normalized)) {
+    return 0;
+  }
+
+  return parseDuration(normalized);
+}
+
+function parseCommaSeparatedList(input, normalizer = value => value.trim().toLowerCase()) {
+  return Array.from(
+    new Set(
+      (input || "")
+        .split(/[\n,]/)
+        .map(entry => normalizer(entry))
+        .filter(Boolean)
+    )
+  );
+}
+
 async function resolveAdminPanelTarget(interaction, targetId) {
   if (!targetId || !interaction.guild) {
     return { member: null, user: null };
@@ -1997,7 +2022,8 @@ function buildSelectedUserSummary(targetUserId) {
   if (!targetUserId) {
     return {
       summaryText: "No user selected yet. Use the user picker below to load moderation tools for someone.",
-      historyText: "Select a member to view warnings, notes, and recent cases."
+      historyText: "Select a member to view warnings, notes, and recent cases.",
+      statusText: "Waiting for a selected user."
     };
   }
 
@@ -2010,6 +2036,7 @@ function buildSelectedUserSummary(targetUserId) {
       `Warnings: ${warnings.length}\n` +
       `Notes: ${notes.length}\n` +
       `Cases: ${getCasesForUser(targetUserId).length}`,
+    statusText: "Loading user status...",
     historyText: cases.length
       ? cases
           .map(entry => `#${entry.id} ${entry.action || "unknown"} - ${(entry.reason || "No reason").slice(0, 70)}`)
@@ -2017,6 +2044,27 @@ function buildSelectedUserSummary(targetUserId) {
           .slice(0, 1024)
       : "No recent cases for this user."
   };
+}
+
+function clearPendingPanelAction(userId) {
+  pendingPanelActions.delete(userId);
+}
+
+function setPendingPanelAction(userId, payload) {
+  pendingPanelActions.set(userId, {
+    ...payload,
+    createdAt: Date.now()
+  });
+}
+
+function getPendingPanelAction(userId) {
+  const pending = pendingPanelActions.get(userId);
+  if (!pending) return null;
+  if (Date.now() - pending.createdAt > 10 * 60 * 1000) {
+    pendingPanelActions.delete(userId);
+    return null;
+  }
+  return pending;
 }
 
 function buildAdminPanelButtons(view, targetUserId = null) {
@@ -2033,6 +2081,10 @@ function buildAdminPanelButtons(view, targetUserId = null) {
       .setCustomId(buildAdminPanelCustomId("view", "automod", targetUserId))
       .setLabel("AutoMod")
       .setStyle(view === "automod" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(buildAdminPanelCustomId("view", "staff", targetUserId))
+      .setLabel("Staff")
+      .setStyle(view === "staff" ? ButtonStyle.Primary : ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(buildAdminPanelCustomId("view", "setup", targetUserId))
       .setLabel("Setup")
@@ -2068,8 +2120,15 @@ function buildAdminPanelButtons(view, targetUserId = null) {
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "tempban", targetUserId)).setLabel("Temp Ban").setStyle(ButtonStyle.Danger).setDisabled(!targetUserId)
       ),
       new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "kick", targetUserId)).setLabel("Kick").setStyle(ButtonStyle.Danger).setDisabled(!targetUserId),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "ban", targetUserId)).setLabel("Ban").setStyle(ButtonStyle.Danger).setDisabled(!targetUserId),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "clearwarnings", targetUserId)).setLabel("Clear Warnings").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "note", targetUserId)).setLabel("Add Note").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "history", targetUserId)).setLabel("User History").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "history", targetUserId)).setLabel("Cases").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId)
+      ),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "warnings-view", targetUserId)).setLabel("Warnings").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "notes-view", targetUserId)).setLabel("Notes").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "lockdown", targetUserId)).setLabel("Lock Current Channel").setStyle(ButtonStyle.Danger),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "unlockdown", targetUserId)).setLabel("Unlock Current Channel").setStyle(ButtonStyle.Success)
       )
@@ -2081,7 +2140,54 @@ function buildAdminPanelButtons(view, targetUserId = null) {
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "spam", targetUserId)).setLabel(`Spam ${config.automod.spam ? "On" : "Off"}`).setStyle(config.automod.spam ? ButtonStyle.Success : ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "invites", targetUserId)).setLabel(`Invites ${config.automod.invites ? "On" : "Off"}`).setStyle(config.automod.invites ? ButtonStyle.Success : ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "emoji", targetUserId)).setLabel(`Emoji ${config.automod.emojiSpamEnabled ? "On" : "Off"}`).setStyle(config.automod.emojiSpamEnabled ? ButtonStyle.Success : ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "emoji", targetUserId)).setLabel(`Emoji ${config.automod.emojiSpamEnabled ? "On" : "Off"}`).setStyle(config.automod.emojiSpamEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "caps", targetUserId)).setLabel(`Caps ${config.automod.caps ? "On" : "Off"}`).setStyle(config.automod.caps ? ButtonStyle.Success : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "links", targetUserId)).setLabel(`Links ${config.automod.linksEnabled ? "On" : "Off"}`).setStyle(config.automod.linksEnabled ? ButtonStyle.Success : ButtonStyle.Secondary)
+      ),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "bannedwords", targetUserId)).setLabel(`Words ${config.automod.bannedWords ? "On" : "Off"}`).setStyle(config.automod.bannedWords ? ButtonStyle.Success : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "escalation", targetUserId)).setLabel(`Escalation ${config.automod.escalationEnabled ? "On" : "Off"}`).setStyle(config.automod.escalationEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "attachments", targetUserId)).setLabel(`Attachments ${config.automod.attachmentsEnabled ? "On" : "Off"}`).setStyle(config.automod.attachmentsEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "ageprotect", targetUserId)).setLabel(`Age Guard ${config.automod.ageProtectionEnabled ? "On" : "Off"}`).setStyle(config.automod.ageProtectionEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "allowonly", targetUserId)).setLabel(`Allow-Only ${config.automod.allowedDomainsOnly ? "On" : "Off"}`).setStyle(config.automod.allowedDomainsOnly ? ButtonStyle.Success : ButtonStyle.Secondary)
+      ),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "antiraid", targetUserId)).setLabel(`Anti-Raid ${config.automod.antiRaidEnabled ? "On" : "Off"}`).setStyle(config.automod.antiRaidEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "nicknamefilter", targetUserId)).setLabel(`Nicknames ${config.automod.nicknameFilterEnabled ? "On" : "Off"}`).setStyle(config.automod.nicknameFilterEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "mentions", targetUserId)).setLabel("Set Mentions").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "emoji-limit", targetUserId)).setLabel("Set Emoji Limit").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "thresholds", targetUserId)).setLabel("Set Thresholds").setStyle(ButtonStyle.Secondary)
+      ),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "attachment-limit", targetUserId)).setLabel("Attachment Limit").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "raid", targetUserId)).setLabel("Raid Settings").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "age-gates", targetUserId)).setLabel("Age Gates").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "terms", targetUserId)).setLabel("Edit Terms").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "domains", targetUserId)).setLabel("Edit Domains").setStyle(ButtonStyle.Secondary)
+      )
+    );
+  }
+
+  if (view === "staff") {
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        new RoleSelectMenuBuilder()
+          .setCustomId(buildAdminPanelCustomId("selectrole", "mod", targetUserId))
+          .setPlaceholder("Choose moderation panel roles")
+          .setMinValues(1)
+          .setMaxValues(10)
+      ),
+      new ActionRowBuilder().addComponents(
+        new RoleSelectMenuBuilder()
+          .setCustomId(buildAdminPanelCustomId("selectrole", "admin", targetUserId))
+          .setPlaceholder("Choose admin panel roles")
+          .setMinValues(1)
+          .setMaxValues(10)
+      ),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "reset-mod-roles", targetUserId)).setLabel("Clear Mod Roles").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "reset-admin-roles", targetUserId)).setLabel("Clear Admin Roles").setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "settings-view", targetUserId)).setLabel("View Settings").setStyle(ButtonStyle.Secondary)
       )
     );
   }
@@ -2103,6 +2209,20 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
   if (view === "moderation") {
     const { member, user } = await resolveAdminPanelTarget(interaction, targetUserId);
     const { summaryText, historyText } = buildSelectedUserSummary(targetUserId);
+    const mutedRoleId = getMutedRoleId();
+    const isMuted = Boolean(member && mutedRoleId && member.roles.cache.has(mutedRoleId));
+    const timeoutText = member?.communicationDisabledUntilTimestamp && member.communicationDisabledUntilTimestamp > Date.now()
+      ? `<t:${Math.floor(member.communicationDisabledUntilTimestamp / 1000)}:R>`
+      : "No";
+    const statusText = user
+      ? [
+          `Muted: ${isMuted ? "Yes" : "No"}`,
+          `Timed out: ${timeoutText}`,
+          `Account age: <t:${Math.floor(user.createdTimestamp / 1000)}:R>`,
+          `Joined server: ${member?.joinedTimestamp ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>` : "Unknown"}`
+        ].join("\n")
+      : "Waiting for a selected user.";
+
     return makeEmbed({
       title: "Mochi Admin Panel - Moderation",
       description: "Select a member, then run guided moderation actions directly from the panel.",
@@ -2124,13 +2244,13 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
           inline: true
         },
         {
-          name: "Membership",
-          value: member?.joinedTimestamp ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>` : "Not in server / unknown",
-          inline: true
+          name: "User Status",
+          value: statusText,
+          inline: false
         },
         {
           name: "Quick Actions",
-          value: "`Warn`, `Timeout`, `Mute`, `Unmute`, `Temp Ban`, `Add Note`, `User History`",
+          value: "`Warn`, `Timeout`, `Mute`, `Unmute`, `Kick`, `Ban`, `Temp Ban`, `Clear Warnings`, `Notes`, `Warnings`",
           inline: false
         },
         {
@@ -2145,15 +2265,54 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
   if (view === "automod") {
     return makeEmbed({
       title: "Mochi Admin Panel - AutoMod",
-      description: "Live AutoMod toggles for the fastest day-to-day adjustments.",
+      description: "Live AutoMod controls for filters, raid safety, age gates, and content lists.",
       color: COLORS.yellow,
       fields: [
         { name: "Spam Filter", value: config.automod.spam ? "Enabled" : "Disabled", inline: true },
         { name: "Invite Filter", value: config.automod.invites ? "Enabled" : "Disabled", inline: true },
         { name: "Emoji Spam", value: config.automod.emojiSpamEnabled ? `Enabled (${config.automod.maxEmojiCount})` : "Disabled", inline: true },
+        { name: "Caps Filter", value: config.automod.caps ? "Enabled" : "Disabled", inline: true },
+        { name: "Link Filter", value: config.automod.linksEnabled ? "Enabled" : "Disabled", inline: true },
+        { name: "Banned Words", value: config.automod.bannedWords ? `Enabled (${getBannedWords().length})` : "Disabled", inline: true },
+        { name: "Attachment Filter", value: config.automod.attachmentsEnabled ? `Enabled (${config.automod.maxAttachmentSizeMb}MB)` : "Disabled", inline: true },
+        { name: "Age Protection", value: config.automod.ageProtectionEnabled ? "Enabled" : "Disabled", inline: true },
+        { name: "Anti-Raid", value: config.automod.antiRaidEnabled ? `${config.automod.raidAction} @ ${config.automod.raidJoinThreshold}` : "Disabled", inline: true },
+        { name: "Nickname Filter", value: config.automod.nicknameFilterEnabled ? `Enabled (${getNicknameBlockedTerms().length})` : "Disabled", inline: true },
+        { name: "Allowed Domains Only", value: config.automod.allowedDomainsOnly ? "Enabled" : "Disabled", inline: true },
+        { name: "Allowed Domains", value: `${config.automod.allowedDomains.length}`, inline: true },
+        { name: "Blocked Domains", value: `${config.automod.blockedDomains.length}`, inline: true },
         { name: "Mentions", value: `${config.automod.maxMentions}`, inline: true },
         { name: "Escalation", value: config.automod.escalationEnabled ? "Enabled" : "Disabled", inline: true },
+        { name: "Warn Threshold", value: `${config.automod.warnThreshold}`, inline: true },
+        { name: "Timeout Threshold", value: `${config.automod.timeoutThreshold}`, inline: true },
+        { name: "Link Age Gates", value: `Account ${formatDuration(config.automod.minAccountAgeForLinksMs)} | Member ${formatDuration(config.automod.minMemberAgeForLinksMs)}`, inline: false },
+        { name: "Attachment Age Gates", value: `Account ${formatDuration(config.automod.minAccountAgeForAttachmentsMs)} | Member ${formatDuration(config.automod.minMemberAgeForAttachmentsMs)}`, inline: false },
         { name: "Alert-Only Rules", value: getAlertOnlyRules().join(", ") || "None", inline: false }
+      ]
+    });
+  }
+
+  if (view === "staff") {
+    return makeEmbed({
+      title: "Mochi Admin Panel - Staff Access",
+      description: "Manage who can use moderation tools and who gets full admin-level control in the panel.",
+      color: COLORS.mint,
+      fields: [
+        {
+          name: "Moderation Roles",
+          value: formatPanelRoleMentions(getPermissionRoleIds("mod")),
+          inline: false
+        },
+        {
+          name: "Admin Roles",
+          value: formatPanelRoleMentions(getPermissionRoleIds("admin")),
+          inline: false
+        },
+        {
+          name: "How It Works",
+          value: "Use the role pickers below to replace each access list. Slash command permissions still apply for Discord command defaults.",
+          inline: false
+        }
       ]
     });
   }
@@ -2315,7 +2474,9 @@ client.on("interactionCreate", async interaction => {
       const targetUserId = targetIdRaw && targetIdRaw !== "none" ? targetIdRaw : null;
       const accessLevel =
         kind === "toggle" ||
-        ["reload-config", "setupverify", "setuprules", "settings-view"].includes(action)
+        kind === "selectrole" ||
+        kind === "configmodal" ||
+        ["reload-config", "setupverify", "setuprules", "settings-view", "reset-mod-roles", "reset-admin-roles"].includes(action)
           ? "admin"
           : "mod";
 
@@ -2328,6 +2489,136 @@ client.on("interactionCreate", async interaction => {
           embeds: [await buildAdminPanelEmbed(action, interaction, targetUserId)],
           components: buildAdminPanelButtons(action, targetUserId)
         });
+      }
+
+      if (kind === "confirm") {
+        const pending = getPendingPanelAction(interaction.user.id);
+        if (!pending || pending.action !== action) {
+          clearPendingPanelAction(interaction.user.id);
+          return interaction.update({
+            content: "That confirmation expired. Please try again from the panel.",
+            embeds: [],
+            components: []
+          });
+        }
+
+        if (action === "cancel") {
+          clearPendingPanelAction(interaction.user.id);
+          return interaction.update({
+            content: "Cancelled.",
+            embeds: [],
+            components: []
+          });
+        }
+
+        if (action === "lockdown") {
+          await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false });
+          clearPendingPanelAction(interaction.user.id);
+          await interaction.update({
+            content: `Locked ${interaction.channel}.`,
+            embeds: [],
+            components: []
+          });
+          return interaction.message.edit({
+            embeds: [await buildAdminPanelEmbed("moderation", interaction, pending.targetUserId || targetUserId)],
+            components: buildAdminPanelButtons("moderation", pending.targetUserId || targetUserId)
+          }).catch(() => {});
+        }
+
+        if (action === "kick") {
+          const user = await client.users.fetch(pending.targetUserId).catch(() => null);
+          const member = await interaction.guild.members.fetch(pending.targetUserId).catch(() => null);
+          if (!user || !(await ensureModeratable(interaction, member, "kick"))) return;
+          if (!member?.kickable) {
+            clearPendingPanelAction(interaction.user.id);
+            return interaction.update({ content: "I cannot kick that member.", embeds: [], components: [] });
+          }
+
+          const entry = addCase({
+            action: "kick",
+            targetId: user.id,
+            targetTag: user.tag,
+            moderatorTag: interaction.user.tag,
+            reason: pending.reason
+          });
+          await member.kick(`${interaction.user.tag}: ${pending.reason}`);
+          await logEmbed(makeEmbed({
+            title: `Case #${entry.id}: kick`,
+            description: `${user.tag} was kicked.`,
+            color: COLORS.red,
+            fields: buildCaseFields(entry)
+          }));
+          clearPendingPanelAction(interaction.user.id);
+          return interaction.update({ content: `${user.tag} was kicked.`, embeds: [], components: [] });
+        }
+
+        if (action === "ban") {
+          const user = await client.users.fetch(pending.targetUserId).catch(() => null);
+          const member = await interaction.guild.members.fetch(pending.targetUserId).catch(() => null);
+          if (!user) return;
+          if (member && !(await ensureModeratable(interaction, member, "ban"))) return;
+          if (member && !member.bannable) {
+            clearPendingPanelAction(interaction.user.id);
+            return interaction.update({ content: "I cannot ban that member.", embeds: [], components: [] });
+          }
+
+          const entry = addCase({
+            action: "ban",
+            targetId: user.id,
+            targetTag: user.tag,
+            moderatorTag: interaction.user.tag,
+            reason: pending.reason
+          });
+          await interaction.guild.members.ban(user.id, { reason: `${interaction.user.tag}: ${pending.reason}` });
+          await logEmbed(makeEmbed({
+            title: `Case #${entry.id}: ban`,
+            description: `${user.tag} was banned.`,
+            color: COLORS.red,
+            fields: buildCaseFields(entry)
+          }));
+          clearPendingPanelAction(interaction.user.id);
+          return interaction.update({ content: `${user.tag} was banned.`, embeds: [], components: [] });
+        }
+
+        if (action === "tempban") {
+          const user = await client.users.fetch(pending.targetUserId).catch(() => null);
+          const member = await interaction.guild.members.fetch(pending.targetUserId).catch(() => null);
+          if (!user) return;
+          if (member && !(await ensureModeratable(interaction, member, "tempban"))) return;
+          if (member && !member.bannable) {
+            clearPendingPanelAction(interaction.user.id);
+            return interaction.update({ content: "I cannot ban that member.", embeds: [], components: [] });
+          }
+
+          addTempBan({
+            userId: user.id,
+            targetTag: user.tag,
+            moderatorTag: interaction.user.tag,
+            reason: pending.reason,
+            expiresAt: pending.expiresAt
+          });
+          await interaction.guild.members.ban(user.id, { reason: `${interaction.user.tag}: ${pending.reason}` });
+          const entry = addCase({
+            action: "tempban",
+            targetId: user.id,
+            targetTag: user.tag,
+            moderatorTag: interaction.user.tag,
+            reason: pending.reason,
+            details: [{ name: "Expires", value: `<t:${Math.floor(new Date(pending.expiresAt).getTime() / 1000)}:F>`, inline: true }]
+          });
+          await logEmbed(makeEmbed({
+            title: `Case #${entry.id}: temporary ban`,
+            description: `${user.tag} was temporarily banned.`,
+            color: COLORS.red,
+            fields: buildCaseFields(entry)
+          }));
+          clearPendingPanelAction(interaction.user.id);
+          return interaction.update({
+            content: `${user.tag} was temporarily banned for ${pending.durationLabel}.`,
+            embeds: [],
+            components: []
+          });
+        }
       }
 
       if (kind === "modal") {
@@ -2346,10 +2637,14 @@ client.on("interactionCreate", async interaction => {
                   ? "Mute User"
                   : action === "tempban"
                     ? "Temporary Ban User"
+                    : action === "kick"
+                      ? "Kick User"
+                      : action === "ban"
+                        ? "Ban User"
                     : "Add Staff Note"
           );
 
-        if (action === "warn" || action === "mute" || action === "note") {
+        if (action === "warn" || action === "mute" || action === "note" || action === "kick" || action === "ban") {
           modal.addComponents(
             new ActionRowBuilder().addComponents(
               new TextInputBuilder()
@@ -2387,10 +2682,246 @@ client.on("interactionCreate", async interaction => {
         return interaction.showModal(modal);
       }
 
+      if (kind === "configmodal") {
+        if (action === "mentions") {
+          const modal = new ModalBuilder()
+            .setCustomId(buildAdminPanelCustomId("configsubmit", "mentions", targetUserId))
+            .setTitle("Set Mention Limit")
+            .addComponents(
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("limit")
+                  .setLabel("Mention limit")
+                  .setPlaceholder(`${config.automod.maxMentions}`)
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setMaxLength(3)
+              )
+            );
+          return interaction.showModal(modal);
+        }
+
+        if (action === "emoji-limit") {
+          const modal = new ModalBuilder()
+            .setCustomId(buildAdminPanelCustomId("configsubmit", "emoji-limit", targetUserId))
+            .setTitle("Set Emoji Limit")
+            .addComponents(
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("limit")
+                  .setLabel("Emoji limit")
+                  .setPlaceholder(`${config.automod.maxEmojiCount}`)
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setMaxLength(3)
+              )
+            );
+          return interaction.showModal(modal);
+        }
+
+        if (action === "thresholds") {
+          const modal = new ModalBuilder()
+            .setCustomId(buildAdminPanelCustomId("configsubmit", "thresholds", targetUserId))
+            .setTitle("Set AutoMod Thresholds")
+            .addComponents(
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("warn")
+                  .setLabel("Warn threshold")
+                  .setPlaceholder(`${config.automod.warnThreshold}`)
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setMaxLength(3)
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("timeout")
+                  .setLabel("Timeout threshold")
+                  .setPlaceholder(`${config.automod.timeoutThreshold}`)
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setMaxLength(3)
+              )
+            );
+          return interaction.showModal(modal);
+        }
+
+        if (action === "attachment-limit") {
+          const modal = new ModalBuilder()
+            .setCustomId(buildAdminPanelCustomId("configsubmit", "attachment-limit", targetUserId))
+            .setTitle("Set Attachment Limit")
+            .addComponents(
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("limit")
+                  .setLabel("Max attachment size in MB")
+                  .setPlaceholder(`${config.automod.maxAttachmentSizeMb}`)
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setMaxLength(3)
+              )
+            );
+          return interaction.showModal(modal);
+        }
+
+        if (action === "raid") {
+          const modal = new ModalBuilder()
+            .setCustomId(buildAdminPanelCustomId("configsubmit", "raid", targetUserId))
+            .setTitle("Set Anti-Raid Rules")
+            .addComponents(
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("threshold")
+                  .setLabel("Join threshold")
+                  .setPlaceholder(`${config.automod.raidJoinThreshold}`)
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setMaxLength(3)
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("window")
+                  .setLabel("Raid window")
+                  .setPlaceholder(formatDuration(config.automod.raidWindowMs))
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setMaxLength(10)
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("accountage")
+                  .setLabel("Suspicious account age")
+                  .setPlaceholder(formatDuration(config.automod.raidAccountAgeLimitMs))
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setMaxLength(10)
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("action")
+                  .setLabel("Action: log or timeout")
+                  .setPlaceholder(config.automod.raidAction)
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setMaxLength(10)
+              )
+            );
+          return interaction.showModal(modal);
+        }
+
+        if (action === "age-gates") {
+          const modal = new ModalBuilder()
+            .setCustomId(buildAdminPanelCustomId("configsubmit", "age-gates", targetUserId))
+            .setTitle("Set Age Protection Gates")
+            .addComponents(
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("linkAccountAge")
+                  .setLabel("Link account age")
+                  .setPlaceholder(formatDuration(config.automod.minAccountAgeForLinksMs))
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setMaxLength(10)
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("linkMemberAge")
+                  .setLabel("Link member age")
+                  .setPlaceholder(formatDuration(config.automod.minMemberAgeForLinksMs))
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setMaxLength(10)
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("attachmentAccountAge")
+                  .setLabel("Attachment account age")
+                  .setPlaceholder(formatDuration(config.automod.minAccountAgeForAttachmentsMs))
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setMaxLength(10)
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("attachmentMemberAge")
+                  .setLabel("Attachment member age")
+                  .setPlaceholder(formatDuration(config.automod.minMemberAgeForAttachmentsMs))
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setMaxLength(10)
+              )
+            );
+          return interaction.showModal(modal);
+        }
+
+        if (action === "terms") {
+          const modal = new ModalBuilder()
+            .setCustomId(buildAdminPanelCustomId("configsubmit", "terms", targetUserId))
+            .setTitle("Edit Filtered Terms")
+            .addComponents(
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("bannedWords")
+                  .setLabel("Banned words or phrases")
+                  .setPlaceholder("comma or new line separated")
+                  .setStyle(TextInputStyle.Paragraph)
+                  .setRequired(false)
+                  .setValue(getBannedWords().join(", ").slice(0, 4000))
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("nicknameTerms")
+                  .setLabel("Blocked nickname terms")
+                  .setPlaceholder("comma or new line separated")
+                  .setStyle(TextInputStyle.Paragraph)
+                  .setRequired(false)
+                  .setValue(getNicknameBlockedTerms().join(", ").slice(0, 4000))
+              )
+            );
+          return interaction.showModal(modal);
+        }
+
+        if (action === "domains") {
+          const modal = new ModalBuilder()
+            .setCustomId(buildAdminPanelCustomId("configsubmit", "domains", targetUserId))
+            .setTitle("Edit Domain Lists")
+            .addComponents(
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("allowedDomains")
+                  .setLabel("Allowed domains")
+                  .setPlaceholder("example.com, docs.example.com")
+                  .setStyle(TextInputStyle.Paragraph)
+                  .setRequired(false)
+                  .setValue(config.automod.allowedDomains.join(", ").slice(0, 4000))
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("blockedDomains")
+                  .setLabel("Blocked domains")
+                  .setPlaceholder("spam.com, bad.example")
+                  .setStyle(TextInputStyle.Paragraph)
+                  .setRequired(false)
+                  .setValue(config.automod.blockedDomains.join(", ").slice(0, 4000))
+              )
+            );
+          return interaction.showModal(modal);
+        }
+      }
+
       if (kind === "toggle") {
         if (action === "spam") config.automod.spam = !config.automod.spam;
         if (action === "invites") config.automod.invites = !config.automod.invites;
         if (action === "emoji") config.automod.emojiSpamEnabled = !config.automod.emojiSpamEnabled;
+        if (action === "caps") config.automod.caps = !config.automod.caps;
+        if (action === "links") config.automod.linksEnabled = !config.automod.linksEnabled;
+        if (action === "bannedwords") config.automod.bannedWords = !config.automod.bannedWords;
+        if (action === "escalation") config.automod.escalationEnabled = !config.automod.escalationEnabled;
+        if (action === "attachments") config.automod.attachmentsEnabled = !config.automod.attachmentsEnabled;
+        if (action === "ageprotect") config.automod.ageProtectionEnabled = !config.automod.ageProtectionEnabled;
+        if (action === "allowonly") config.automod.allowedDomainsOnly = !config.automod.allowedDomainsOnly;
+        if (action === "antiraid") config.automod.antiRaidEnabled = !config.automod.antiRaidEnabled;
+        if (action === "nicknamefilter") config.automod.nicknameFilterEnabled = !config.automod.nicknameFilterEnabled;
 
         saveConfig();
         return interaction.update({
@@ -2422,12 +2953,17 @@ client.on("interactionCreate", async interaction => {
         }
 
         if (action === "lockdown") {
-          await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false });
-          await interaction.reply({ content: `Locked ${interaction.channel}.`, ephemeral: true });
-          return interaction.message.edit({
-            embeds: [await buildAdminPanelEmbed("moderation", interaction, targetUserId)],
-            components: buildAdminPanelButtons("moderation", targetUserId)
-          }).catch(() => {});
+          setPendingPanelAction(interaction.user.id, { action: "lockdown", targetUserId });
+          return interaction.reply({
+            content: `Confirm locking ${interaction.channel}?`,
+            components: [
+              new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(buildAdminPanelCustomId("confirm", "lockdown", targetUserId)).setLabel("Confirm Lockdown").setStyle(ButtonStyle.Danger),
+                new ButtonBuilder().setCustomId(buildAdminPanelCustomId("confirm", "cancel", targetUserId)).setLabel("Cancel").setStyle(ButtonStyle.Secondary)
+              )
+            ],
+            ephemeral: true
+          });
         }
 
         if (action === "unlockdown") {
@@ -2510,6 +3046,84 @@ client.on("interactionCreate", async interaction => {
           });
         }
 
+        if (action === "warnings-view") {
+          if (!targetUserId) {
+            return interaction.reply({ content: "Select a user in the moderation panel first.", ephemeral: true });
+          }
+
+          const user = await client.users.fetch(targetUserId).catch(() => null);
+          const warnings = getWarnings(targetUserId);
+          return interaction.reply({
+            embeds: [
+              makeEmbed({
+                title: "Warning history",
+                description: `Warnings for ${user ? user.tag : targetUserId}`,
+                color: COLORS.yellow,
+                fields: [
+                  {
+                    name: "Entries",
+                    value: warnings.length
+                      ? warnings.map((warning, index) => `${index + 1}. ${warning.reason} - ${warning.moderatorTag}`).join("\n").slice(0, 1024)
+                      : "No warnings saved."
+                  }
+                ]
+              })
+            ],
+            ephemeral: true
+          });
+        }
+
+        if (action === "notes-view") {
+          if (!targetUserId) {
+            return interaction.reply({ content: "Select a user in the moderation panel first.", ephemeral: true });
+          }
+
+          const user = await client.users.fetch(targetUserId).catch(() => null);
+          const notes = getNotes(targetUserId);
+          return interaction.reply({
+            embeds: [
+              makeEmbed({
+                title: "Staff notes",
+                description: `Notes for ${user ? user.tag : targetUserId}`,
+                color: COLORS.gray,
+                fields: [
+                  {
+                    name: "Entries",
+                    value: notes.length
+                      ? notes.map((note, index) => `${index + 1}. ${note.content} - ${note.moderatorTag}`).join("\n").slice(0, 1024)
+                      : "No staff notes saved."
+                  }
+                ]
+              })
+            ],
+            ephemeral: true
+          });
+        }
+
+        if (action === "clearwarnings") {
+          if (!targetUserId) {
+            return interaction.reply({ content: "Select a user in the moderation panel first.", ephemeral: true });
+          }
+
+          const user = await client.users.fetch(targetUserId).catch(() => null);
+          const count = clearWarnings(targetUserId);
+          const entry = addCase({
+            action: "clearwarnings",
+            targetId: targetUserId,
+            targetTag: user ? user.tag : targetUserId,
+            moderatorTag: interaction.user.tag,
+            reason: "Cleared from admin panel.",
+            details: [{ name: "Warnings cleared", value: `${count}`, inline: true }]
+          });
+          await logEmbed(makeEmbed({
+            title: `Case #${entry.id}: warnings cleared`,
+            description: `${user ? user.tag : targetUserId}'s warnings were cleared.`,
+            color: COLORS.mint,
+            fields: buildCaseFields(entry)
+          }));
+          return interaction.reply({ content: `Cleared ${count} warning(s).`, ephemeral: true });
+        }
+
         if (action === "setupverify") {
           const verifyChannel = await client.channels.fetch(getVerifyChannelId());
           const verifyEmbed = makeEmbed({
@@ -2564,9 +3178,48 @@ client.on("interactionCreate", async interaction => {
             ephemeral: true
           });
         }
+
+        if (action === "reset-mod-roles") {
+          config.permissions.modRoleIds = [];
+          saveConfig();
+          return interaction.update({
+            embeds: [await buildAdminPanelEmbed("staff", interaction, targetUserId)],
+            components: buildAdminPanelButtons("staff", targetUserId)
+          });
+        }
+
+        if (action === "reset-admin-roles") {
+          config.permissions.adminRoleIds = [];
+          saveConfig();
+          return interaction.update({
+            embeds: [await buildAdminPanelEmbed("staff", interaction, targetUserId)],
+            components: buildAdminPanelButtons("staff", targetUserId)
+          });
+        }
       }
 
       return;
+    }
+
+    if (interaction.isRoleSelectMenu()) {
+      if (!interaction.customId.startsWith("adminpanel:")) return;
+      const [, kind, action] = interaction.customId.split(":");
+      if (kind !== "selectrole") return;
+      if (!(await ensureStaffAccess(interaction, "admin", "the admin panel"))) return;
+
+      if (action === "mod") {
+        config.permissions.modRoleIds = interaction.values;
+      }
+
+      if (action === "admin") {
+        config.permissions.adminRoleIds = interaction.values;
+      }
+
+      saveConfig();
+      return interaction.update({
+        embeds: [await buildAdminPanelEmbed("staff", interaction)],
+        components: buildAdminPanelButtons("staff")
+      });
     }
 
     if (interaction.isUserSelectMenu()) {
@@ -2586,8 +3239,108 @@ client.on("interactionCreate", async interaction => {
       if (!interaction.customId.startsWith("adminpanel:")) return;
       const [, kind, action, targetIdRaw] = interaction.customId.split(":");
       const targetUserId = targetIdRaw && targetIdRaw !== "none" ? targetIdRaw : null;
-      if (kind !== "submit" || !targetUserId) return;
-      if (!(await ensureStaffAccess(interaction, "mod", "the admin panel"))) return;
+      if (!["submit", "configsubmit"].includes(kind)) return;
+      if (kind === "submit" && !targetUserId) return;
+      if (!(await ensureStaffAccess(interaction, kind === "configsubmit" ? "admin" : "mod", "the admin panel"))) return;
+
+      if (kind === "configsubmit") {
+        if (action === "mentions") {
+          const limit = Number(interaction.fields.getTextInputValue("limit"));
+          if (!Number.isInteger(limit) || limit < 1 || limit > 25) {
+            return interaction.reply({ content: "Mention limit must be a whole number from 1 to 25.", ephemeral: true });
+          }
+          config.automod.maxMentions = limit;
+        }
+
+        if (action === "emoji-limit") {
+          const limit = Number(interaction.fields.getTextInputValue("limit"));
+          if (!Number.isInteger(limit) || limit < 3 || limit > 100) {
+            return interaction.reply({ content: "Emoji limit must be a whole number from 3 to 100.", ephemeral: true });
+          }
+          config.automod.maxEmojiCount = limit;
+        }
+
+        if (action === "thresholds") {
+          const warn = Number(interaction.fields.getTextInputValue("warn"));
+          const timeout = Number(interaction.fields.getTextInputValue("timeout"));
+          if (!Number.isInteger(warn) || !Number.isInteger(timeout) || warn < 1 || timeout < 1 || warn > 20 || timeout > 20) {
+            return interaction.reply({ content: "Thresholds must be whole numbers from 1 to 20.", ephemeral: true });
+          }
+          config.automod.warnThreshold = warn;
+          config.automod.timeoutThreshold = timeout;
+        }
+
+        if (action === "attachment-limit") {
+          const limit = Number(interaction.fields.getTextInputValue("limit"));
+          if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+            return interaction.reply({ content: "Attachment limit must be a whole number from 1 to 100 MB.", ephemeral: true });
+          }
+          config.automod.maxAttachmentSizeMb = limit;
+        }
+
+        if (action === "raid") {
+          const threshold = Number(interaction.fields.getTextInputValue("threshold"));
+          const windowMs = parseDuration(interaction.fields.getTextInputValue("window"));
+          const accountAgeMs = parseDuration(interaction.fields.getTextInputValue("accountage"));
+          const raidAction = interaction.fields.getTextInputValue("action").trim().toLowerCase();
+
+          if (!Number.isInteger(threshold) || threshold < 2 || threshold > 100) {
+            return interaction.reply({ content: "Raid threshold must be a whole number from 2 to 100.", ephemeral: true });
+          }
+
+          if (!windowMs) {
+            return interaction.reply({ content: "Raid window must be a valid duration like 30s, 1m, or 5m.", ephemeral: true });
+          }
+
+          if (!accountAgeMs) {
+            return interaction.reply({ content: "Suspicious account age must be a valid duration like 1d or 7d.", ephemeral: true });
+          }
+
+          if (!["log", "timeout"].includes(raidAction)) {
+            return interaction.reply({ content: "Raid action must be either `log` or `timeout`.", ephemeral: true });
+          }
+
+          config.automod.raidJoinThreshold = threshold;
+          config.automod.raidWindowMs = windowMs;
+          config.automod.raidAccountAgeLimitMs = accountAgeMs;
+          config.automod.raidAction = raidAction;
+        }
+
+        if (action === "age-gates") {
+          const linkAccountAge = parseDurationInputOrZero(interaction.fields.getTextInputValue("linkAccountAge"));
+          const linkMemberAge = parseDurationInputOrZero(interaction.fields.getTextInputValue("linkMemberAge"));
+          const attachmentAccountAge = parseDurationInputOrZero(interaction.fields.getTextInputValue("attachmentAccountAge"));
+          const attachmentMemberAge = parseDurationInputOrZero(interaction.fields.getTextInputValue("attachmentMemberAge"));
+
+          if ([linkAccountAge, linkMemberAge, attachmentAccountAge, attachmentMemberAge].some(value => value === null)) {
+            return interaction.reply({ content: "Use durations like 12h or 7d. You can also enter `0` to disable a gate.", ephemeral: true });
+          }
+
+          config.automod.minAccountAgeForLinksMs = linkAccountAge;
+          config.automod.minMemberAgeForLinksMs = linkMemberAge;
+          config.automod.minAccountAgeForAttachmentsMs = attachmentAccountAge;
+          config.automod.minMemberAgeForAttachmentsMs = attachmentMemberAge;
+        }
+
+        if (action === "terms") {
+          config.automod.bannedWordList = parseCommaSeparatedList(interaction.fields.getTextInputValue("bannedWords"));
+          config.automod.nicknameBlockedTerms = parseCommaSeparatedList(interaction.fields.getTextInputValue("nicknameTerms"));
+        }
+
+        if (action === "domains") {
+          config.automod.allowedDomains = parseCommaSeparatedList(
+            interaction.fields.getTextInputValue("allowedDomains"),
+            normalizeDomain
+          );
+          config.automod.blockedDomains = parseCommaSeparatedList(
+            interaction.fields.getTextInputValue("blockedDomains"),
+            normalizeDomain
+          );
+        }
+
+        saveConfig();
+        return interaction.reply({ content: `Updated AutoMod setting: ${action}.`, ephemeral: true });
+      }
 
       const user = await client.users.fetch(targetUserId).catch(() => null);
       const member = await interaction.guild.members.fetch(targetUserId).catch(() => null);
@@ -2693,29 +3446,23 @@ client.on("interactionCreate", async interaction => {
         }
 
         const expiresAt = new Date(Date.now() + durationMs).toISOString();
-        addTempBan({
-          userId: user.id,
-          targetTag: user.tag,
-          moderatorTag: interaction.user.tag,
-          reason,
-          expiresAt
-        });
-        await interaction.guild.members.ban(user.id, { reason: `${interaction.user.tag}: ${reason}` });
-        const entry = addCase({
+        setPendingPanelAction(interaction.user.id, {
           action: "tempban",
-          targetId: user.id,
-          targetTag: user.tag,
-          moderatorTag: interaction.user.tag,
+          targetUserId: user.id,
           reason,
-          details: [{ name: "Expires", value: `<t:${Math.floor(new Date(expiresAt).getTime() / 1000)}:F>`, inline: true }]
+          expiresAt,
+          durationLabel: formatDuration(durationMs)
         });
-        await logEmbed(makeEmbed({
-          title: `Case #${entry.id}: temporary ban`,
-          description: `${user.tag} was temporarily banned.`,
-          color: COLORS.red,
-          fields: buildCaseFields(entry)
-        }));
-        return interaction.reply({ content: `${user.tag} was temporarily banned for ${formatDuration(durationMs)}.`, ephemeral: true });
+        return interaction.reply({
+          content: `Confirm temp banning ${user.tag} for ${formatDuration(durationMs)}?\nReason: ${reason}`,
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId(buildAdminPanelCustomId("confirm", "tempban", user.id)).setLabel("Confirm Temp Ban").setStyle(ButtonStyle.Danger),
+              new ButtonBuilder().setCustomId(buildAdminPanelCustomId("confirm", "cancel", user.id)).setLabel("Cancel").setStyle(ButtonStyle.Secondary)
+            )
+          ],
+          ephemeral: true
+        });
       }
 
       if (action === "note") {
@@ -2736,6 +3483,50 @@ client.on("interactionCreate", async interaction => {
           fields: buildCaseFields(entry)
         }));
         return interaction.reply({ content: `Saved a note for ${user.tag}.`, ephemeral: true });
+      }
+
+      if (action === "kick") {
+        const reason = interaction.fields.getTextInputValue("reason");
+        if (!member?.kickable) {
+          return interaction.reply({ content: "I cannot kick that member.", ephemeral: true });
+        }
+        setPendingPanelAction(interaction.user.id, {
+          action: "kick",
+          targetUserId: user.id,
+          reason
+        });
+        return interaction.reply({
+          content: `Confirm kicking ${user.tag}?\nReason: ${reason}`,
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId(buildAdminPanelCustomId("confirm", "kick", user.id)).setLabel("Confirm Kick").setStyle(ButtonStyle.Danger),
+              new ButtonBuilder().setCustomId(buildAdminPanelCustomId("confirm", "cancel", user.id)).setLabel("Cancel").setStyle(ButtonStyle.Secondary)
+            )
+          ],
+          ephemeral: true
+        });
+      }
+
+      if (action === "ban") {
+        const reason = interaction.fields.getTextInputValue("reason");
+        if (member && !member.bannable) {
+          return interaction.reply({ content: "I cannot ban that member.", ephemeral: true });
+        }
+        setPendingPanelAction(interaction.user.id, {
+          action: "ban",
+          targetUserId: user.id,
+          reason
+        });
+        return interaction.reply({
+          content: `Confirm banning ${user.tag}?\nReason: ${reason}`,
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder().setCustomId(buildAdminPanelCustomId("confirm", "ban", user.id)).setLabel("Confirm Ban").setStyle(ButtonStyle.Danger),
+              new ButtonBuilder().setCustomId(buildAdminPanelCustomId("confirm", "cancel", user.id)).setLabel("Cancel").setStyle(ButtonStyle.Secondary)
+            )
+          ],
+          ephemeral: true
+        });
       }
     }
 
