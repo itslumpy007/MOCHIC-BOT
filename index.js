@@ -11,11 +11,16 @@ const {
   Client,
   EmbedBuilder,
   GatewayIntentBits,
+  ModalBuilder,
   Partials,
   PermissionFlagsBits,
   REST,
   Routes,
   SlashCommandBuilder
+  ,
+  TextInputBuilder,
+  TextInputStyle,
+  UserSelectMenuBuilder
 } = require("discord.js");
 const { WebcastPushConnection } = require("tiktok-live-connector");
 
@@ -1974,84 +1979,164 @@ function buildDashboardEmbed() {
   });
 }
 
-function buildAdminPanelButtons(view) {
+function buildAdminPanelCustomId(kind, action, targetId = null) {
+  return `adminpanel:${kind}:${action}:${targetId || "none"}`;
+}
+
+async function resolveAdminPanelTarget(interaction, targetId) {
+  if (!targetId || !interaction.guild) {
+    return { member: null, user: null };
+  }
+
+  const member = await interaction.guild.members.fetch(targetId).catch(() => null);
+  const user = member?.user || await client.users.fetch(targetId).catch(() => null);
+  return { member, user };
+}
+
+function buildSelectedUserSummary(targetUserId) {
+  if (!targetUserId) {
+    return {
+      summaryText: "No user selected yet. Use the user picker below to load moderation tools for someone.",
+      historyText: "Select a member to view warnings, notes, and recent cases."
+    };
+  }
+
+  const warnings = getWarnings(targetUserId);
+  const notes = getNotes(targetUserId);
+  const cases = getCasesForUser(targetUserId).slice(-5).reverse();
+
+  return {
+    summaryText:
+      `Warnings: ${warnings.length}\n` +
+      `Notes: ${notes.length}\n` +
+      `Cases: ${getCasesForUser(targetUserId).length}`,
+    historyText: cases.length
+      ? cases
+          .map(entry => `#${entry.id} ${entry.action || "unknown"} - ${(entry.reason || "No reason").slice(0, 70)}`)
+          .join("\n")
+          .slice(0, 1024)
+      : "No recent cases for this user."
+  };
+}
+
+function buildAdminPanelButtons(view, targetUserId = null) {
   const navigationRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
-      .setCustomId("adminpanel:view:overview")
+      .setCustomId(buildAdminPanelCustomId("view", "overview", targetUserId))
       .setLabel("Overview")
       .setStyle(view === "overview" ? ButtonStyle.Primary : ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId("adminpanel:view:moderation")
+      .setCustomId(buildAdminPanelCustomId("view", "moderation", targetUserId))
       .setLabel("Moderation")
       .setStyle(view === "moderation" ? ButtonStyle.Primary : ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId("adminpanel:view:automod")
+      .setCustomId(buildAdminPanelCustomId("view", "automod", targetUserId))
       .setLabel("AutoMod")
       .setStyle(view === "automod" ? ButtonStyle.Primary : ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId("adminpanel:view:setup")
+      .setCustomId(buildAdminPanelCustomId("view", "setup", targetUserId))
       .setLabel("Setup")
       .setStyle(view === "setup" ? ButtonStyle.Primary : ButtonStyle.Secondary)
   );
 
-  let actionRow;
+  const rows = [navigationRow];
 
   if (view === "overview") {
-    actionRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("adminpanel:action:status").setLabel("Refresh Status").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("adminpanel:action:dashboard").setLabel("Dashboard Snapshot").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("adminpanel:action:reload-config").setLabel("Reload Config").setStyle(ButtonStyle.Success)
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "status", targetUserId)).setLabel("Refresh Status").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "dashboard", targetUserId)).setLabel("Dashboard Snapshot").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "reload-config", targetUserId)).setLabel("Reload Config").setStyle(ButtonStyle.Success)
+      )
     );
   }
 
   if (view === "moderation") {
-    actionRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("adminpanel:action:lockdown").setLabel("Lock Current Channel").setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId("adminpanel:action:unlockdown").setLabel("Unlock Current Channel").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId("adminpanel:view:overview").setLabel("Back To Home").setStyle(ButtonStyle.Secondary)
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        new UserSelectMenuBuilder()
+          .setCustomId(buildAdminPanelCustomId("selectuser", "moderation", targetUserId))
+          .setPlaceholder(targetUserId ? "Change selected user" : "Select a user to moderate")
+          .setMinValues(1)
+          .setMaxValues(1)
+      ),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "warn", targetUserId)).setLabel("Warn").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "timeout", targetUserId)).setLabel("Timeout").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "mute", targetUserId)).setLabel("Mute").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "unmute", targetUserId)).setLabel("Unmute").setStyle(ButtonStyle.Success).setDisabled(!targetUserId),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "tempban", targetUserId)).setLabel("Temp Ban").setStyle(ButtonStyle.Danger).setDisabled(!targetUserId)
+      ),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "note", targetUserId)).setLabel("Add Note").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "history", targetUserId)).setLabel("User History").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "lockdown", targetUserId)).setLabel("Lock Current Channel").setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "unlockdown", targetUserId)).setLabel("Unlock Current Channel").setStyle(ButtonStyle.Success)
+      )
     );
   }
 
   if (view === "automod") {
-    actionRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("adminpanel:toggle:spam").setLabel(`Spam ${config.automod.spam ? "On" : "Off"}`).setStyle(config.automod.spam ? ButtonStyle.Success : ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("adminpanel:toggle:invites").setLabel(`Invites ${config.automod.invites ? "On" : "Off"}`).setStyle(config.automod.invites ? ButtonStyle.Success : ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("adminpanel:toggle:emoji").setLabel(`Emoji ${config.automod.emojiSpamEnabled ? "On" : "Off"}`).setStyle(config.automod.emojiSpamEnabled ? ButtonStyle.Success : ButtonStyle.Secondary)
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "spam", targetUserId)).setLabel(`Spam ${config.automod.spam ? "On" : "Off"}`).setStyle(config.automod.spam ? ButtonStyle.Success : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "invites", targetUserId)).setLabel(`Invites ${config.automod.invites ? "On" : "Off"}`).setStyle(config.automod.invites ? ButtonStyle.Success : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "emoji", targetUserId)).setLabel(`Emoji ${config.automod.emojiSpamEnabled ? "On" : "Off"}`).setStyle(config.automod.emojiSpamEnabled ? ButtonStyle.Success : ButtonStyle.Secondary)
+      )
     );
   }
 
   if (view === "setup") {
-    actionRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("adminpanel:action:setupverify").setLabel("Post Verify Panel").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("adminpanel:action:setuprules").setLabel("Post Rules").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId("adminpanel:action:settings-view").setLabel("View Settings").setStyle(ButtonStyle.Secondary)
+    rows.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setupverify", targetUserId)).setLabel("Post Verify Panel").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setuprules", targetUserId)).setLabel("Post Rules").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "settings-view", targetUserId)).setLabel("View Settings").setStyle(ButtonStyle.Secondary)
+      )
     );
   }
 
-  return actionRow ? [navigationRow, actionRow] : [navigationRow];
+  return rows;
 }
 
-function buildAdminPanelEmbed(view, interaction) {
+async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
   if (view === "moderation") {
+    const { member, user } = await resolveAdminPanelTarget(interaction, targetUserId);
+    const { summaryText, historyText } = buildSelectedUserSummary(targetUserId);
     return makeEmbed({
       title: "Mochi Admin Panel - Moderation",
-      description: "Quick moderation controls for the current channel and shortcuts to the bot's punishment tools.",
+      description: "Select a member, then run guided moderation actions directly from the panel.",
       color: COLORS.red,
       fields: [
         {
-          name: "Live Actions",
-          value: "`Lock Current Channel`, `Unlock Current Channel`",
+          name: "Selected User",
+          value: user ? `${user.tag} (${user.id})` : "No user selected yet.",
           inline: false
         },
         {
-          name: "Punishment Commands",
-          value: "`/warn`, `/timeout`, `/mute`, `/kick`, `/ban`, `/tempban`, `/unban`",
+          name: "User Summary",
+          value: summaryText,
           inline: false
         },
         {
           name: "Current Channel",
           value: interaction.channel ? `${interaction.channel}` : "Unknown",
           inline: true
+        },
+        {
+          name: "Membership",
+          value: member?.joinedTimestamp ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>` : "Not in server / unknown",
+          inline: true
+        },
+        {
+          name: "Quick Actions",
+          value: "`Warn`, `Timeout`, `Mute`, `Unmute`, `Temp Ban`, `Add Note`, `User History`",
+          inline: false
+        },
+        {
+          name: "Recent Cases",
+          value: historyText,
+          inline: false
         }
       ]
     });
@@ -2226,8 +2311,8 @@ client.on("interactionCreate", async interaction => {
     if (interaction.isButton()) {
       if (!interaction.customId.startsWith("adminpanel:")) return;
 
-      const [, kind, action] = interaction.customId.split(":");
-      const isAdminPanelAction = ["toggle", "action"].includes(kind);
+      const [, kind, action, targetIdRaw] = interaction.customId.split(":");
+      const targetUserId = targetIdRaw && targetIdRaw !== "none" ? targetIdRaw : null;
       const accessLevel =
         kind === "toggle" ||
         ["reload-config", "setupverify", "setuprules", "settings-view"].includes(action)
@@ -2240,9 +2325,66 @@ client.on("interactionCreate", async interaction => {
 
       if (kind === "view") {
         return interaction.update({
-          embeds: [buildAdminPanelEmbed(action, interaction)],
-          components: buildAdminPanelButtons(action)
+          embeds: [await buildAdminPanelEmbed(action, interaction, targetUserId)],
+          components: buildAdminPanelButtons(action, targetUserId)
         });
+      }
+
+      if (kind === "modal") {
+        if (!targetUserId) {
+          return interaction.reply({ content: "Select a user in the moderation panel first.", ephemeral: true });
+        }
+
+        const modal = new ModalBuilder()
+          .setCustomId(buildAdminPanelCustomId("submit", action, targetUserId))
+          .setTitle(
+            action === "warn"
+              ? "Warn User"
+              : action === "timeout"
+                ? "Timeout User"
+                : action === "mute"
+                  ? "Mute User"
+                  : action === "tempban"
+                    ? "Temporary Ban User"
+                    : "Add Staff Note"
+          );
+
+        if (action === "warn" || action === "mute" || action === "note") {
+          modal.addComponents(
+            new ActionRowBuilder().addComponents(
+              new TextInputBuilder()
+                .setCustomId("reason")
+                .setLabel(action === "note" ? "Note content" : "Reason")
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(true)
+                .setMaxLength(500)
+            )
+          );
+        }
+
+        if (action === "timeout" || action === "tempban") {
+          modal.addComponents(
+            new ActionRowBuilder().addComponents(
+              new TextInputBuilder()
+                .setCustomId("duration")
+                .setLabel("Duration")
+                .setPlaceholder("Examples: 10m, 1h, 1d")
+                .setStyle(TextInputStyle.Short)
+                .setRequired(true)
+                .setMaxLength(10)
+            ),
+            new ActionRowBuilder().addComponents(
+              new TextInputBuilder()
+                .setCustomId("reason")
+                .setLabel("Reason")
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(true)
+                .setMaxLength(500)
+            )
+          );
+        }
+
+        return interaction.showModal(modal);
       }
 
       if (kind === "toggle") {
@@ -2252,8 +2394,8 @@ client.on("interactionCreate", async interaction => {
 
         saveConfig();
         return interaction.update({
-          embeds: [buildAdminPanelEmbed("automod", interaction)],
-          components: buildAdminPanelButtons("automod")
+          embeds: [await buildAdminPanelEmbed("automod", interaction, targetUserId)],
+          components: buildAdminPanelButtons("automod", targetUserId)
         });
       }
 
@@ -2274,8 +2416,8 @@ client.on("interactionCreate", async interaction => {
           }
 
           return interaction.update({
-            embeds: [buildAdminPanelEmbed("overview", interaction)],
-            components: buildAdminPanelButtons("overview")
+            embeds: [await buildAdminPanelEmbed("overview", interaction, targetUserId)],
+            components: buildAdminPanelButtons("overview", targetUserId)
           });
         }
 
@@ -2283,8 +2425,8 @@ client.on("interactionCreate", async interaction => {
           await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false });
           await interaction.reply({ content: `Locked ${interaction.channel}.`, ephemeral: true });
           return interaction.message.edit({
-            embeds: [buildAdminPanelEmbed("moderation", interaction)],
-            components: buildAdminPanelButtons("moderation")
+            embeds: [await buildAdminPanelEmbed("moderation", interaction, targetUserId)],
+            components: buildAdminPanelButtons("moderation", targetUserId)
           }).catch(() => {});
         }
 
@@ -2292,9 +2434,80 @@ client.on("interactionCreate", async interaction => {
           await interaction.channel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: null });
           await interaction.reply({ content: `Unlocked ${interaction.channel}.`, ephemeral: true });
           return interaction.message.edit({
-            embeds: [buildAdminPanelEmbed("moderation", interaction)],
-            components: buildAdminPanelButtons("moderation")
+            embeds: [await buildAdminPanelEmbed("moderation", interaction, targetUserId)],
+            components: buildAdminPanelButtons("moderation", targetUserId)
           }).catch(() => {});
+        }
+
+        if (action === "unmute") {
+          if (!targetUserId) {
+            return interaction.reply({ content: "Select a user in the moderation panel first.", ephemeral: true });
+          }
+
+          const user = await client.users.fetch(targetUserId).catch(() => null);
+          const member = await interaction.guild.members.fetch(targetUserId).catch(() => null);
+          if (!user || !(await ensureModeratable(interaction, member, "unmute"))) return;
+
+          const mutedRoleId = getMutedRoleId();
+          if (!mutedRoleId) {
+            return interaction.reply({ content: "No muted role is configured yet.", ephemeral: true });
+          }
+
+          if (!member.roles.cache.has(mutedRoleId)) {
+            return interaction.reply({ content: `${user.tag} is not muted.`, ephemeral: true });
+          }
+
+          await member.roles.remove(mutedRoleId, `${interaction.user.tag}: Unmuted from admin panel`);
+
+          const entry = addCase({
+            action: "unmute",
+            targetId: user.id,
+            targetTag: user.tag,
+            moderatorTag: interaction.user.tag,
+            reason: "Unmuted from admin panel."
+          });
+
+          await logEmbed(
+            makeEmbed({
+              title: `Case #${entry.id}: unmute`,
+              description: `${user.tag} was unmuted.`,
+              color: COLORS.mint,
+              fields: buildCaseFields(entry)
+            })
+          );
+
+          await interaction.reply({ content: `${user.tag} was unmuted.`, ephemeral: true });
+          return interaction.message.edit({
+            embeds: [await buildAdminPanelEmbed("moderation", interaction, targetUserId)],
+            components: buildAdminPanelButtons("moderation", targetUserId)
+          }).catch(() => {});
+        }
+
+        if (action === "history") {
+          if (!targetUserId) {
+            return interaction.reply({ content: "Select a user in the moderation panel first.", ephemeral: true });
+          }
+
+          const user = await client.users.fetch(targetUserId).catch(() => null);
+          const entries = getCasesForUser(targetUserId).slice(-10);
+          return interaction.reply({
+            embeds: [
+              makeEmbed({
+                title: "Recent cases",
+                description: `Recent moderation cases for ${user ? user.tag : targetUserId}`,
+                color: COLORS.blue,
+                fields: [
+                  {
+                    name: "Cases",
+                    value: entries.length
+                      ? entries.map(entry => `#${entry.id} ${entry.action} - ${entry.reason} - ${entry.moderatorTag}`).join("\n").slice(0, 1024)
+                      : "No recorded cases."
+                  }
+                ]
+              })
+            ],
+            ephemeral: true
+          });
         }
 
         if (action === "setupverify") {
@@ -2354,6 +2567,176 @@ client.on("interactionCreate", async interaction => {
       }
 
       return;
+    }
+
+    if (interaction.isUserSelectMenu()) {
+      if (!interaction.customId.startsWith("adminpanel:")) return;
+      const [, kind, action] = interaction.customId.split(":");
+      if (kind !== "selectuser") return;
+      if (!(await ensureStaffAccess(interaction, "mod", "the admin panel"))) return;
+
+      const selectedUserId = interaction.values[0];
+      return interaction.update({
+        embeds: [await buildAdminPanelEmbed(action, interaction, selectedUserId)],
+        components: buildAdminPanelButtons(action, selectedUserId)
+      });
+    }
+
+    if (interaction.isModalSubmit()) {
+      if (!interaction.customId.startsWith("adminpanel:")) return;
+      const [, kind, action, targetIdRaw] = interaction.customId.split(":");
+      const targetUserId = targetIdRaw && targetIdRaw !== "none" ? targetIdRaw : null;
+      if (kind !== "submit" || !targetUserId) return;
+      if (!(await ensureStaffAccess(interaction, "mod", "the admin panel"))) return;
+
+      const user = await client.users.fetch(targetUserId).catch(() => null);
+      const member = await interaction.guild.members.fetch(targetUserId).catch(() => null);
+      if (!user) {
+        return interaction.reply({ content: "That user could not be found.", ephemeral: true });
+      }
+
+      if (["warn", "timeout", "mute", "tempban"].includes(action) && !(await ensureModeratable(interaction, member, action))) {
+        return;
+      }
+
+      if (action === "warn") {
+        const reason = interaction.fields.getTextInputValue("reason");
+        const warnings = addWarning(user.id, interaction.user.tag, reason);
+        const entry = addCase({
+          action: "warn",
+          targetId: user.id,
+          targetTag: user.tag,
+          moderatorTag: interaction.user.tag,
+          reason,
+          details: [{ name: "Total warnings", value: `${warnings.length}`, inline: true }]
+        });
+
+        await notifyUser(user, makeEmbed({
+          title: "Warning received",
+          description: `You were warned in **${interaction.guild.name}**.`,
+          color: COLORS.yellow,
+          fields: buildCaseFields(entry)
+        }));
+
+        await logEmbed(makeEmbed({
+          title: `Case #${entry.id}: warning`,
+          description: `${user.tag} received a warning.`,
+          color: COLORS.yellow,
+          fields: buildCaseFields(entry)
+        }));
+
+        return interaction.reply({ content: `${user.tag} has been warned.`, ephemeral: true });
+      }
+
+      if (action === "timeout") {
+        const durationInput = interaction.fields.getTextInputValue("duration");
+        const reason = interaction.fields.getTextInputValue("reason");
+        const durationMs = parseDuration(durationInput);
+        if (!durationMs) {
+          return interaction.reply({ content: "Use a valid duration like 10m, 2h, or 1d.", ephemeral: true });
+        }
+        if (!member?.moderatable) {
+          return interaction.reply({ content: "I cannot timeout that member.", ephemeral: true });
+        }
+
+        await member.timeout(durationMs, `${interaction.user.tag}: ${reason}`);
+        const entry = addCase({
+          action: "timeout",
+          targetId: user.id,
+          targetTag: user.tag,
+          moderatorTag: interaction.user.tag,
+          reason,
+          details: [{ name: "Duration", value: formatDuration(durationMs), inline: true }]
+        });
+        await logEmbed(makeEmbed({
+          title: `Case #${entry.id}: timeout`,
+          description: `${user.tag} was timed out.`,
+          color: COLORS.red,
+          fields: buildCaseFields(entry)
+        }));
+        return interaction.reply({ content: `${user.tag} was timed out for ${formatDuration(durationMs)}.`, ephemeral: true });
+      }
+
+      if (action === "mute") {
+        const reason = interaction.fields.getTextInputValue("reason");
+        if (!member?.manageable) {
+          return interaction.reply({ content: "I cannot manage that member's roles.", ephemeral: true });
+        }
+        const mutedRole = await ensureMutedRole(interaction.guild);
+        await member.roles.add(mutedRole, `${interaction.user.tag}: ${reason}`);
+        const entry = addCase({
+          action: "mute",
+          targetId: user.id,
+          targetTag: user.tag,
+          moderatorTag: interaction.user.tag,
+          reason,
+          details: [{ name: "Muted role", value: `<@&${mutedRole.id}>`, inline: true }]
+        });
+        await logEmbed(makeEmbed({
+          title: `Case #${entry.id}: mute`,
+          description: `${user.tag} was muted.`,
+          color: COLORS.red,
+          fields: buildCaseFields(entry)
+        }));
+        return interaction.reply({ content: `${user.tag} was muted.`, ephemeral: true });
+      }
+
+      if (action === "tempban") {
+        const durationInput = interaction.fields.getTextInputValue("duration");
+        const reason = interaction.fields.getTextInputValue("reason");
+        const durationMs = parseDuration(durationInput);
+        if (!durationMs) {
+          return interaction.reply({ content: "Use a valid duration like 1h, 1d, or 7d.", ephemeral: true });
+        }
+        if (member && !member.bannable) {
+          return interaction.reply({ content: "I cannot ban that member.", ephemeral: true });
+        }
+
+        const expiresAt = new Date(Date.now() + durationMs).toISOString();
+        addTempBan({
+          userId: user.id,
+          targetTag: user.tag,
+          moderatorTag: interaction.user.tag,
+          reason,
+          expiresAt
+        });
+        await interaction.guild.members.ban(user.id, { reason: `${interaction.user.tag}: ${reason}` });
+        const entry = addCase({
+          action: "tempban",
+          targetId: user.id,
+          targetTag: user.tag,
+          moderatorTag: interaction.user.tag,
+          reason,
+          details: [{ name: "Expires", value: `<t:${Math.floor(new Date(expiresAt).getTime() / 1000)}:F>`, inline: true }]
+        });
+        await logEmbed(makeEmbed({
+          title: `Case #${entry.id}: temporary ban`,
+          description: `${user.tag} was temporarily banned.`,
+          color: COLORS.red,
+          fields: buildCaseFields(entry)
+        }));
+        return interaction.reply({ content: `${user.tag} was temporarily banned for ${formatDuration(durationMs)}.`, ephemeral: true });
+      }
+
+      if (action === "note") {
+        const content = interaction.fields.getTextInputValue("reason");
+        const notes = addNote(user.id, interaction.user.tag, content);
+        const entry = addCase({
+          action: "note",
+          targetId: user.id,
+          targetTag: user.tag,
+          moderatorTag: interaction.user.tag,
+          reason: content,
+          details: [{ name: "Total notes", value: `${notes.length}`, inline: true }]
+        });
+        await logEmbed(makeEmbed({
+          title: `Case #${entry.id}: staff note`,
+          description: `A staff note was saved for ${user.tag}.`,
+          color: COLORS.gray,
+          fields: buildCaseFields(entry)
+        }));
+        return interaction.reply({ content: `Saved a note for ${user.tag}.`, ephemeral: true });
+      }
     }
 
     if (!interaction.isChatInputCommand()) return;
@@ -2419,7 +2802,7 @@ client.on("interactionCreate", async interaction => {
 
     if (interaction.commandName === "adminpanel") {
       return interaction.reply({
-        embeds: [buildAdminPanelEmbed("overview", interaction)],
+        embeds: [await buildAdminPanelEmbed("overview", interaction)],
         components: buildAdminPanelButtons("overview"),
         ephemeral: true
       });
