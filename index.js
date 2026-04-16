@@ -62,6 +62,7 @@ const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
 const INVITE_REGEX = /(discord\.gg|discord\.com\/invite)\/[a-z0-9-]+/i;
 const spamTracker = new Map();
 const joinTracker = new Map();
+let tempBanInterval = null;
 
 const dataDir = path.join(__dirname, "data");
 const configPath = path.join(dataDir, "config.json");
@@ -72,6 +73,7 @@ function createDefaultConfig() {
     warnings: {},
     notes: {},
     cases: [],
+    tempBans: [],
     nextCaseId: 1,
     automod: {
       invites: true,
@@ -101,6 +103,8 @@ function createDefaultConfig() {
       nicknameBlockedTerms: [],
       alertOnlyRules: [],
       maxMentions: 5,
+      emojiSpamEnabled: false,
+      maxEmojiCount: 12,
       escalationEnabled: true,
       warnThreshold: 2,
       timeoutThreshold: 4,
@@ -115,8 +119,13 @@ function createDefaultConfig() {
       rulesChannelId: null,
       logChannelId: null,
       automodLogChannelId: null,
+      mutedRoleId: null,
       tiktokUsername: null,
       tiktokChannelId: null
+    },
+    permissions: {
+      modRoleIds: [],
+      adminRoleIds: []
     }
   };
 }
@@ -137,6 +146,7 @@ function loadConfig() {
       warnings: parsed.warnings && typeof parsed.warnings === "object" ? parsed.warnings : {},
       notes: parsed.notes && typeof parsed.notes === "object" ? parsed.notes : {},
       cases: Array.isArray(parsed.cases) ? parsed.cases : [],
+      tempBans: Array.isArray(parsed.tempBans) ? parsed.tempBans : [],
       automod: {
         ...defaults.automod,
         ...(parsed.automod || {}),
@@ -154,6 +164,12 @@ function loadConfig() {
       settings: {
         ...defaults.settings,
         ...(parsed.settings || {})
+      },
+      permissions: {
+        ...defaults.permissions,
+        ...(parsed.permissions || {}),
+        modRoleIds: Array.isArray(parsed.permissions?.modRoleIds) ? parsed.permissions.modRoleIds : [],
+        adminRoleIds: Array.isArray(parsed.permissions?.adminRoleIds) ? parsed.permissions.adminRoleIds : []
       },
       nextCaseId: Number.isInteger(parsed.nextCaseId) ? parsed.nextCaseId : defaults.nextCaseId
     };
@@ -194,6 +210,10 @@ function getTikTokChannelId() {
   return config.settings.tiktokChannelId || TIKTOK_CHANNEL_ID;
 }
 
+function getMutedRoleId() {
+  return config.settings.mutedRoleId || null;
+}
+
 function getBannedWords() {
   return Array.isArray(config.automod.bannedWordList) ? config.automod.bannedWordList : [];
 }
@@ -206,6 +226,10 @@ function getAlertOnlyRules() {
   return Array.isArray(config.automod.alertOnlyRules) ? config.automod.alertOnlyRules : [];
 }
 
+function getPermissionRoleIds(level) {
+  return Array.isArray(config.permissions?.[`${level}RoleIds`]) ? config.permissions[`${level}RoleIds`] : [];
+}
+
 function normalizeDomain(value) {
   return (value || "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "");
 }
@@ -214,6 +238,13 @@ function normalizeExtension(value) {
   const trimmed = (value || "").trim().toLowerCase();
   if (!trimmed) return "";
   return trimmed.startsWith(".") ? trimmed : `.${trimmed}`;
+}
+
+function countEmoji(content) {
+  if (!content) return 0;
+  const customMatches = content.match(/<a?:\w+:\d+>/g) || [];
+  const unicodeMatches = content.match(/\p{Extended_Pictographic}/gu) || [];
+  return customMatches.length + unicodeMatches.length;
 }
 
 function extractMessageDomains(content) {
@@ -456,7 +487,29 @@ const commands = [
       option.setName("duration").setDescription("Duration like 10m, 2h, 1d").setRequired(true)
     )
     .addStringOption(option =>
-      option.setName("reason").setDescription("Reason for the timeout").setRequired(true)
+        option.setName("reason").setDescription("Reason for the timeout").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("mute")
+    .setDescription("Mute a member with the Mochi muted role")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption(option =>
+      option.setName("user").setDescription("User to mute").setRequired(true)
+    )
+    .addStringOption(option =>
+      option.setName("reason").setDescription("Reason for the mute").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("unmute")
+    .setDescription("Remove the Mochi muted role from a member")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption(option =>
+      option.setName("user").setDescription("User to unmute").setRequired(true)
+    )
+    .addStringOption(option =>
+      option.setName("reason").setDescription("Reason for the unmute").setRequired(false)
     ),
 
   new SlashCommandBuilder()
@@ -488,7 +541,21 @@ const commands = [
       option.setName("user").setDescription("User to ban").setRequired(true)
     )
     .addStringOption(option =>
-      option.setName("reason").setDescription("Reason for the ban").setRequired(true)
+        option.setName("reason").setDescription("Reason for the ban").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("tempban")
+    .setDescription("Ban a member temporarily and unban them automatically later")
+    .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
+    .addUserOption(option =>
+      option.setName("user").setDescription("User to temporarily ban").setRequired(true)
+    )
+    .addStringOption(option =>
+      option.setName("duration").setDescription("Duration like 1h, 1d, 7d").setRequired(true)
+    )
+    .addStringOption(option =>
+      option.setName("reason").setDescription("Reason for the temporary ban").setRequired(true)
     ),
 
   new SlashCommandBuilder()
@@ -546,6 +613,17 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("editcase")
+    .setDescription("Edit the reason for an existing moderation case")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addIntegerOption(option =>
+      option.setName("id").setDescription("Case number").setRequired(true)
+    )
+    .addStringOption(option =>
+      option.setName("reason").setDescription("Updated reason").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
     .setName("automod")
     .setDescription("Manage automatic moderation")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
@@ -594,6 +672,22 @@ const commands = [
     )
     .addSubcommand(subcommand =>
       subcommand
+        .setName("emojispam")
+        .setDescription("Enable or disable emoji spam filtering")
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("emojilimit")
+        .setDescription("Set the max emoji count allowed in one message")
+        .addIntegerOption(option =>
+          option.setName("limit").setDescription("Emoji limit").setRequired(true).setMinValue(3).setMaxValue(100)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
         .setName("nicknamefilter")
         .setDescription("Enable or disable nickname filtering")
         .addBooleanOption(option =>
@@ -609,13 +703,14 @@ const commands = [
             { name: "banned-word", value: "banned-word" },
             { name: "blocked-domain", value: "blocked-domain" },
             { name: "disallowed-domain", value: "disallowed-domain" },
-            { name: "blocked-extension", value: "blocked-extension" },
-            { name: "disallowed-extension", value: "disallowed-extension" },
-            { name: "caps", value: "caps" },
-            { name: "spam", value: "spam" },
-            { name: "mass-mentions", value: "mass-mentions" },
-            { name: "invite-link", value: "invite-link" }
-          )
+             { name: "blocked-extension", value: "blocked-extension" },
+             { name: "disallowed-extension", value: "disallowed-extension" },
+             { name: "caps", value: "caps" },
+             { name: "spam", value: "spam" },
+             { name: "emoji-spam", value: "emoji-spam" },
+             { name: "mass-mentions", value: "mass-mentions" },
+             { name: "invite-link", value: "invite-link" }
+           )
         )
         .addBooleanOption(option =>
           option.setName("enabled").setDescription("Enable alert-only mode").setRequired(true)
@@ -962,6 +1057,14 @@ const commands = [
     )
     .addSubcommand(subcommand =>
       subcommand
+        .setName("mutedrole")
+        .setDescription("Set the muted role to use for /mute")
+        .addRoleOption(option =>
+          option.setName("role").setDescription("Role to use as the muted role").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
         .setName("verifychannel")
         .setDescription("Set the verify channel")
         .addChannelOption(option =>
@@ -1015,11 +1118,60 @@ const commands = [
             .setRequired(true)
             .addChoices(
               { name: "log channel", value: "logchannel" },
+              { name: "automod log channel", value: "automodlogchannel" },
+              { name: "muted role", value: "mutedrole" },
               { name: "verify channel", value: "verifychannel" },
               { name: "rules channel", value: "ruleschannel" },
               { name: "TikTok username", value: "tiktokuser" },
               { name: "TikTok alerts channel", value: "tiktokchannel" }
             )
+        )
+    ),
+
+  new SlashCommandBuilder()
+    .setName("staffroles")
+    .setDescription("Manage staff role restrictions for Mochi commands")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addSubcommand(subcommand =>
+      subcommand.setName("view").setDescription("View configured staff role restrictions")
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("add")
+        .setDescription("Add a role to a staff access tier")
+        .addStringOption(option =>
+          option.setName("tier").setDescription("Access tier").setRequired(true).addChoices(
+            { name: "moderation", value: "mod" },
+            { name: "admin", value: "admin" }
+          )
+        )
+        .addRoleOption(option =>
+          option.setName("role").setDescription("Role to add").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("remove")
+        .setDescription("Remove a role from a staff access tier")
+        .addStringOption(option =>
+          option.setName("tier").setDescription("Access tier").setRequired(true).addChoices(
+            { name: "moderation", value: "mod" },
+            { name: "admin", value: "admin" }
+          )
+        )
+        .addRoleOption(option =>
+          option.setName("role").setDescription("Role to remove").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("reset")
+        .setDescription("Clear all roles from an access tier")
+        .addStringOption(option =>
+          option.setName("tier").setDescription("Access tier").setRequired(true).addChoices(
+            { name: "moderation", value: "mod" },
+            { name: "admin", value: "admin" }
+          )
         )
     )
 ].map(command => command.toJSON());
@@ -1208,7 +1360,174 @@ function buildCaseFields(entry) {
     { name: "Reason", value: entry.reason || "No reason provided.", inline: false }
   ];
 
+  if (entry.editedAt && entry.editedBy) {
+    baseFields.push({
+      name: "Last edited",
+      value: `${entry.editedBy} - <t:${Math.floor(new Date(entry.editedAt).getTime() / 1000)}:R>`,
+      inline: false
+    });
+  }
+
   return [...baseFields, ...entry.details];
+}
+
+function updateCase(caseId, updates) {
+  const entry = getCaseById(caseId);
+  if (!entry) return null;
+
+  if (typeof updates.reason === "string") {
+    entry.reason = updates.reason;
+  }
+
+  if (Array.isArray(updates.details)) {
+    entry.details = updates.details;
+  }
+
+  if (updates.editedBy) {
+    entry.editedBy = updates.editedBy;
+    entry.editedAt = new Date().toISOString();
+  }
+
+  saveConfig();
+  return entry;
+}
+
+function memberHasConfiguredRole(member, roleIds) {
+  if (!member || !Array.isArray(roleIds) || !roleIds.length) return false;
+  return member.roles.cache.some(role => roleIds.includes(role.id));
+}
+
+function hasStaffAccess(member, level) {
+  if (!member) return false;
+  if (member.permissions.has(PermissionFlagsBits.Administrator)) return true;
+
+  const adminRoleIds = getPermissionRoleIds("admin");
+  if (memberHasConfiguredRole(member, adminRoleIds)) return true;
+
+  if (level === "admin") {
+    return false;
+  }
+
+  const modRoleIds = getPermissionRoleIds("mod");
+  if (memberHasConfiguredRole(member, modRoleIds)) return true;
+
+  return (
+    member.permissions.has(PermissionFlagsBits.ModerateMembers) ||
+    member.permissions.has(PermissionFlagsBits.ManageMessages) ||
+    member.permissions.has(PermissionFlagsBits.KickMembers) ||
+    member.permissions.has(PermissionFlagsBits.BanMembers)
+  );
+}
+
+async function ensureStaffAccess(interaction, level, label) {
+  if (hasStaffAccess(interaction.member, level)) {
+    return true;
+  }
+
+  await interaction.reply({
+    content: `You do not have permission to use ${label}.`,
+    ephemeral: true
+  });
+  return false;
+}
+
+async function ensureMutedRole(guild) {
+  const savedRoleId = getMutedRoleId();
+  let mutedRole = savedRoleId ? guild.roles.cache.get(savedRoleId) || await guild.roles.fetch(savedRoleId).catch(() => null) : null;
+
+  if (!mutedRole) {
+    mutedRole = guild.roles.cache.find(role => role.name.toLowerCase() === "mochi muted") || null;
+  }
+
+  if (!mutedRole) {
+    mutedRole = await guild.roles.create({
+      name: "Mochi Muted",
+      color: COLORS.gray,
+      reason: "Mute role for Mochi Bot moderation."
+    });
+  }
+
+  config.settings.mutedRoleId = mutedRole.id;
+  saveConfig();
+  await applyMutedRoleToChannels(guild, mutedRole);
+  return mutedRole;
+}
+
+async function applyMutedRoleToChannels(guild, mutedRole) {
+  const overwrite = {
+    SendMessages: false,
+    AddReactions: false,
+    Speak: false,
+    Connect: false,
+    SendMessagesInThreads: false,
+    CreatePublicThreads: false,
+    CreatePrivateThreads: false
+  };
+
+  for (const channel of guild.channels.cache.values()) {
+    if (!channel?.permissionOverwrites?.edit) continue;
+    await channel.permissionOverwrites.edit(mutedRole, overwrite).catch(() => {});
+  }
+}
+
+function addTempBan({ userId, targetTag, moderatorTag, reason, expiresAt }) {
+  const record = {
+    userId,
+    targetTag,
+    moderatorTag,
+    reason,
+    expiresAt,
+    createdAt: new Date().toISOString()
+  };
+
+  config.tempBans = config.tempBans.filter(entry => entry.userId !== userId);
+  config.tempBans.push(record);
+  saveConfig();
+  return record;
+}
+
+function removeTempBan(userId) {
+  const before = config.tempBans.length;
+  config.tempBans = config.tempBans.filter(entry => entry.userId !== userId);
+  if (config.tempBans.length !== before) {
+    saveConfig();
+  }
+}
+
+async function processExpiredTempBans() {
+  if (!client.isReady()) return;
+  if (!Array.isArray(config.tempBans) || !config.tempBans.length) return;
+
+  const now = Date.now();
+  const expired = config.tempBans.filter(entry => new Date(entry.expiresAt).getTime() <= now);
+  if (!expired.length) return;
+
+  const guild = await client.guilds.fetch(GUILD_ID).catch(() => null);
+  if (!guild) return;
+
+  for (const entry of expired) {
+    await guild.members.unban(entry.userId, "Temporary ban expired.").catch(() => {});
+
+    const caseEntry = addCase({
+      action: "tempban-expired",
+      targetId: entry.userId,
+      targetTag: entry.targetTag || `User ${entry.userId}`,
+      moderatorTag: "Mochi Bot",
+      reason: `Temporary ban expired automatically. Original reason: ${entry.reason}`,
+      details: [{ name: "Original moderator", value: entry.moderatorTag, inline: true }]
+    });
+
+    await logEmbed(
+      makeEmbed({
+        title: `Case #${caseEntry.id}: temporary ban expired`,
+        description: `${entry.targetTag || entry.userId} was automatically unbanned.`,
+        color: COLORS.mint,
+        fields: buildCaseFields(caseEntry)
+      })
+    );
+
+    removeTempBan(entry.userId);
+  }
 }
 
 function isAutoModExempt(message) {
@@ -1526,6 +1845,8 @@ function buildAutoModSummary() {
     `Raid account age: ${formatDuration(config.automod.raidAccountAgeLimitMs)}`,
     `Raid action: ${config.automod.raidAction}`,
     `Mention limit: ${config.automod.maxMentions}`,
+    `Emoji spam: ${config.automod.emojiSpamEnabled ? "on" : "off"}`,
+    `Emoji limit: ${config.automod.maxEmojiCount}`,
     `Escalation: ${config.automod.escalationEnabled ? "on" : "off"}`,
     `Warn threshold: ${config.automod.warnThreshold}`,
     `Timeout threshold: ${config.automod.timeoutThreshold}`,
@@ -1541,6 +1862,7 @@ function buildSettingsSummary() {
     `Log channel: ${getLogChannelId() ? `<#${getLogChannelId()}>` : "Not set"}`,
     `Verify channel: ${getVerifyChannelId() ? `<#${getVerifyChannelId()}>` : "Not set"}`,
     `Rules channel: ${getRulesChannelId() ? `<#${getRulesChannelId()}>` : "Not set"}`,
+    `Muted role: ${getMutedRoleId() ? `<@&${getMutedRoleId()}>` : "Not set"}`,
     `TikTok username: ${getTikTokUsername() ? `@${getTikTokUsername()}` : "Not set"}`,
     `TikTok alerts channel: ${getTikTokChannelId() ? `<#${getTikTokChannelId()}>` : "Not set"}`
   ].join("\n");
@@ -1555,13 +1877,13 @@ function buildHelpEmbed() {
       {
         name: "Moderation",
         value:
-          "`/warn`, `/warnings`, `/clearwarnings`, `/timeout`, `/untimeout`, `/kick`, `/ban`, `/unban`, `/slowmode`",
+          "`/warn`, `/warnings`, `/clearwarnings`, `/timeout`, `/untimeout`, `/mute`, `/unmute`, `/kick`, `/ban`, `/tempban`, `/unban`, `/slowmode`",
         inline: false
       },
       {
         name: "Staff Records",
         value:
-          "`/note`, `/notes`, `/case`, `/cases`, `/automod`, `/automodlinks`, `/automodguard`, `/bannedwords`, `/settings`, `/exportmod`, `/backup`",
+          "`/note`, `/notes`, `/case`, `/cases`, `/editcase`, `/automod`, `/automodlinks`, `/automodguard`, `/bannedwords`, `/settings`, `/staffroles`, `/exportmod`, `/backup`",
         inline: false
       },
       {
@@ -1659,6 +1981,16 @@ client.once("clientReady", async () => {
     console.log("Slash commands registered.");
     await resolveVerifyMessageId();
     await startTikTokLive();
+    await processExpiredTempBans();
+
+    if (tempBanInterval) {
+      clearInterval(tempBanInterval);
+    }
+    tempBanInterval = setInterval(() => {
+      processExpiredTempBans().catch(error => {
+        console.error("Temp ban processing error:", error.message);
+      });
+    }, 60 * 1000);
   } catch (error) {
     console.error("Ready error:", error);
   }
@@ -1719,11 +2051,85 @@ client.on("messageReactionRemove", async (reaction, user) => {
   }
 });
 
+client.on("channelCreate", async channel => {
+  try {
+    if (!channel.guild) return;
+    const mutedRoleId = getMutedRoleId();
+    if (!mutedRoleId) return;
+    const mutedRole = await channel.guild.roles.fetch(mutedRoleId).catch(() => null);
+    if (!mutedRole || !channel.permissionOverwrites?.edit) return;
+
+    await channel.permissionOverwrites.edit(mutedRole, {
+      SendMessages: false,
+      AddReactions: false,
+      Speak: false,
+      Connect: false,
+      SendMessagesInThreads: false,
+      CreatePublicThreads: false,
+      CreatePrivateThreads: false
+    }).catch(() => {});
+  } catch (error) {
+    console.error("Channel create mute overwrite error:", error.message);
+  }
+});
+
 client.on("interactionCreate", async interaction => {
   try {
     if (!interaction.isChatInputCommand()) return;
 
     const { guild, channel } = interaction;
+    const adminCommands = new Set([
+      "status",
+      "backup",
+      "reload",
+      "setupverify",
+      "setuprules",
+      "automod",
+      "automodlinks",
+      "automodguard",
+      "bannedwords",
+      "nickfilter",
+      "settings",
+      "staffroles"
+    ]);
+    const modCommands = new Set([
+      "moddashboard",
+      "exportmod",
+      "lockdown",
+      "unlockdown",
+      "announce",
+      "dm",
+      "purge",
+      "warn",
+      "warnings",
+      "clearwarnings",
+      "timeout",
+      "mute",
+      "unmute",
+      "untimeout",
+      "kick",
+      "ban",
+      "tempban",
+      "unban",
+      "slowmode",
+      "note",
+      "notes",
+      "case",
+      "cases",
+      "editcase"
+    ]);
+
+    if (adminCommands.has(interaction.commandName) && !(await ensureStaffAccess(interaction, "admin", `/${interaction.commandName}`))) {
+      return;
+    }
+
+    if (
+      modCommands.has(interaction.commandName) &&
+      !adminCommands.has(interaction.commandName) &&
+      !(await ensureStaffAccess(interaction, "mod", `/${interaction.commandName}`))
+    ) {
+      return;
+    }
 
     if (interaction.commandName === "help") {
       return interaction.reply({ embeds: [buildHelpEmbed()], ephemeral: true });
@@ -2139,6 +2545,53 @@ client.on("interactionCreate", async interaction => {
       });
     }
 
+    if (interaction.commandName === "mute") {
+      const user = interaction.options.getUser("user");
+      const reason = interaction.options.getString("reason");
+      const member = await guild.members.fetch(user.id).catch(() => null);
+      if (!(await ensureModeratable(interaction, member, "mute"))) return;
+      if (!member.manageable) {
+        return interaction.reply({ content: "I cannot manage that member's roles.", ephemeral: true });
+      }
+
+      const mutedRole = await ensureMutedRole(guild);
+      if (member.roles.cache.has(mutedRole.id)) {
+        return interaction.reply({ content: `${user.tag} is already muted.`, ephemeral: true });
+      }
+
+      await member.roles.add(mutedRole, `${interaction.user.tag}: ${reason}`);
+
+      const entry = addCase({
+        action: "mute",
+        targetId: user.id,
+        targetTag: user.tag,
+        moderatorTag: interaction.user.tag,
+        reason,
+        details: [{ name: "Muted role", value: `<@&${mutedRole.id}>`, inline: true }]
+      });
+
+      await notifyUser(
+        user,
+        makeEmbed({
+          title: "You were muted",
+          description: `You were muted in **${guild.name}**.`,
+          color: COLORS.red,
+          fields: buildCaseFields(entry)
+        })
+      );
+
+      await logEmbed(
+        makeEmbed({
+          title: `Case #${entry.id}: mute`,
+          description: `${user.tag} was muted.`,
+          color: COLORS.red,
+          fields: buildCaseFields(entry)
+        })
+      );
+
+      return interaction.reply({ content: `${user.tag} was muted.`, ephemeral: true });
+    }
+
     if (interaction.commandName === "untimeout") {
       const user = interaction.options.getUser("user");
       const reason = interaction.options.getString("reason") || "Timeout removed by staff.";
@@ -2168,6 +2621,43 @@ client.on("interactionCreate", async interaction => {
       );
 
       return interaction.reply({ content: `${user.tag}'s timeout was removed.`, ephemeral: true });
+    }
+
+    if (interaction.commandName === "unmute") {
+      const user = interaction.options.getUser("user");
+      const reason = interaction.options.getString("reason") || "Mute removed by staff.";
+      const member = await guild.members.fetch(user.id).catch(() => null);
+      if (!(await ensureModeratable(interaction, member, "unmute"))) return;
+
+      const mutedRoleId = getMutedRoleId();
+      if (!mutedRoleId) {
+        return interaction.reply({ content: "No muted role is configured yet.", ephemeral: true });
+      }
+
+      if (!member.roles.cache.has(mutedRoleId)) {
+        return interaction.reply({ content: `${user.tag} is not muted.`, ephemeral: true });
+      }
+
+      await member.roles.remove(mutedRoleId, `${interaction.user.tag}: ${reason}`);
+
+      const entry = addCase({
+        action: "unmute",
+        targetId: user.id,
+        targetTag: user.tag,
+        moderatorTag: interaction.user.tag,
+        reason
+      });
+
+      await logEmbed(
+        makeEmbed({
+          title: `Case #${entry.id}: unmute`,
+          description: `${user.tag} was unmuted.`,
+          color: COLORS.mint,
+          fields: buildCaseFields(entry)
+        })
+      );
+
+      return interaction.reply({ content: `${user.tag} was unmuted.`, ephemeral: true });
     }
 
     if (interaction.commandName === "kick") {
@@ -2253,11 +2743,73 @@ client.on("interactionCreate", async interaction => {
       return interaction.reply({ content: `${user.tag} was banned.`, ephemeral: true });
     }
 
+    if (interaction.commandName === "tempban") {
+      const user = interaction.options.getUser("user");
+      const durationInput = interaction.options.getString("duration");
+      const reason = interaction.options.getString("reason");
+      const member = await guild.members.fetch(user.id).catch(() => null);
+      const durationMs = parseDuration(durationInput);
+
+      if (!durationMs) {
+        return interaction.reply({ content: "Use a valid duration like 1h, 1d, or 7d.", ephemeral: true });
+      }
+
+      if (member && !(await ensureModeratable(interaction, member, "tempban"))) return;
+      if (member && !member.bannable) {
+        return interaction.reply({ content: "I cannot ban that member.", ephemeral: true });
+      }
+
+      const expiresAt = new Date(Date.now() + durationMs).toISOString();
+      addTempBan({
+        userId: user.id,
+        targetTag: user.tag,
+        moderatorTag: interaction.user.tag,
+        reason,
+        expiresAt
+      });
+
+      const entry = addCase({
+        action: "tempban",
+        targetId: user.id,
+        targetTag: user.tag,
+        moderatorTag: interaction.user.tag,
+        reason,
+        details: [{ name: "Expires", value: `<t:${Math.floor(new Date(expiresAt).getTime() / 1000)}:F>`, inline: true }]
+      });
+
+      await notifyUser(
+        user,
+        makeEmbed({
+          title: "You were temporarily banned",
+          description: `You were banned from **${guild.name}** for ${formatDuration(durationMs)}.`,
+          color: COLORS.red,
+          fields: buildCaseFields(entry)
+        })
+      );
+
+      await guild.members.ban(user.id, { reason: `${interaction.user.tag}: ${reason}` });
+
+      await logEmbed(
+        makeEmbed({
+          title: `Case #${entry.id}: temporary ban`,
+          description: `${user.tag} was temporarily banned.`,
+          color: COLORS.red,
+          fields: buildCaseFields(entry)
+        })
+      );
+
+      return interaction.reply({
+        content: `${user.tag} was temporarily banned for ${formatDuration(durationMs)}.`,
+        ephemeral: true
+      });
+    }
+
     if (interaction.commandName === "unban") {
       const userId = interaction.options.getString("user_id");
       const reason = interaction.options.getString("reason");
 
       await guild.members.unban(userId, `${interaction.user.tag}: ${reason}`);
+      removeTempBan(userId);
 
       const entry = addCase({
         action: "unban",
@@ -2392,6 +2944,27 @@ client.on("interactionCreate", async interaction => {
       });
     }
 
+    if (interaction.commandName === "editcase") {
+      const caseId = interaction.options.getInteger("id");
+      const reason = interaction.options.getString("reason");
+      const entry = updateCase(caseId, { reason, editedBy: interaction.user.tag });
+
+      if (!entry) {
+        return interaction.reply({ content: `Case #${caseId} was not found.`, ephemeral: true });
+      }
+
+      await logEmbed(
+        makeEmbed({
+          title: `Case #${entry.id}: case edited`,
+          description: `Case #${entry.id} was updated by ${interaction.user.tag}.`,
+          color: COLORS.blue,
+          fields: buildCaseFields(entry)
+        })
+      );
+
+      return interaction.reply({ content: `Updated case #${entry.id}.`, ephemeral: true });
+    }
+
     if (interaction.commandName === "automod") {
       const subcommand = interaction.options.getSubcommand();
 
@@ -2455,6 +3028,14 @@ client.on("interactionCreate", async interaction => {
 
       if (subcommand === "mentions") {
         config.automod.maxMentions = interaction.options.getInteger("limit");
+      }
+
+      if (subcommand === "emojispam") {
+        config.automod.emojiSpamEnabled = interaction.options.getBoolean("enabled");
+      }
+
+      if (subcommand === "emojilimit") {
+        config.automod.maxEmojiCount = interaction.options.getInteger("limit");
       }
 
       if (subcommand === "escalation") {
@@ -2816,6 +3397,10 @@ client.on("interactionCreate", async interaction => {
         config.settings.automodLogChannelId = interaction.options.getChannel("channel").id;
       }
 
+      if (subcommand === "mutedrole") {
+        config.settings.mutedRoleId = interaction.options.getRole("role").id;
+      }
+
       if (subcommand === "verifychannel") {
         config.settings.verifyChannelId = interaction.options.getChannel("channel").id;
         config.verifyMessageId = null;
@@ -2840,6 +3425,14 @@ client.on("interactionCreate", async interaction => {
           config.settings.logChannelId = null;
         }
 
+        if (target === "automodlogchannel") {
+          config.settings.automodLogChannelId = null;
+        }
+
+        if (target === "mutedrole") {
+          config.settings.mutedRoleId = null;
+        }
+
         if (target === "verifychannel") {
           config.settings.verifyChannelId = null;
           config.verifyMessageId = null;
@@ -2860,6 +3453,13 @@ client.on("interactionCreate", async interaction => {
 
       saveConfig();
 
+      if (subcommand === "mutedrole") {
+        const mutedRole = await guild.roles.fetch(config.settings.mutedRoleId).catch(() => null);
+        if (mutedRole) {
+          await applyMutedRoleToChannels(guild, mutedRole);
+        }
+      }
+
       if (subcommand === "tiktokuser" || subcommand === "tiktokchannel") {
         await resetTikTokConnection();
       }
@@ -2876,6 +3476,61 @@ client.on("interactionCreate", async interaction => {
           subcommand === "reset"
             ? `Reset setting: ${interaction.options.getString("target")}.`
             : `Updated setting: ${subcommand}.`,
+        ephemeral: true
+      });
+    }
+
+    if (interaction.commandName === "staffroles") {
+      const subcommand = interaction.options.getSubcommand();
+
+      if (subcommand === "view") {
+        return interaction.reply({
+          embeds: [
+            makeEmbed({
+              title: "Staff role restrictions",
+              description: "Configured roles that can access Mochi moderation tiers.",
+              color: COLORS.blue,
+              fields: [
+                {
+                  name: "Moderation tier",
+                  value: getPermissionRoleIds("mod").map(id => `<@&${id}>`).join(", ") || "No custom roles set",
+                  inline: false
+                },
+                {
+                  name: "Admin tier",
+                  value: getPermissionRoleIds("admin").map(id => `<@&${id}>`).join(", ") || "No custom roles set",
+                  inline: false
+                }
+              ]
+            })
+          ],
+          ephemeral: true
+        });
+      }
+
+      const tier = interaction.options.getString("tier");
+      const role = interaction.options.getRole("role");
+      const key = `${tier}RoleIds`;
+      const current = Array.isArray(config.permissions[key]) ? config.permissions[key] : [];
+
+      if (subcommand === "add" && role && !current.includes(role.id)) {
+        config.permissions[key] = [...current, role.id];
+      }
+
+      if (subcommand === "remove" && role) {
+        config.permissions[key] = current.filter(id => id !== role.id);
+      }
+
+      if (subcommand === "reset") {
+        config.permissions[key] = [];
+      }
+
+      saveConfig();
+      return interaction.reply({
+        content:
+          subcommand === "reset"
+            ? `Cleared ${tier} staff role restrictions.`
+            : `Updated ${tier} staff roles.`,
         ephemeral: true
       });
     }
@@ -3011,6 +3666,11 @@ client.on("messageCreate", async message => {
 
     if (config.automod.maxMentions > 0 && (message.mentions.users?.size || 0) >= config.automod.maxMentions) {
       await handleAutoModViolation(message, "please do not mass mention members.", "mass-mentions");
+      return;
+    }
+
+    if (config.automod.emojiSpamEnabled && config.automod.maxEmojiCount > 0 && countEmoji(message.content) >= config.automod.maxEmojiCount) {
+      await handleAutoModViolation(message, "please avoid emoji spam.", "emoji-spam");
       return;
     }
 
