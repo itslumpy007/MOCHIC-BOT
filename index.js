@@ -1904,8 +1904,27 @@ async function ensureVoiceChannel(interaction) {
     return null;
   }
 
-  if (!voiceChannel.joinable || !voiceChannel.speakable) {
-    await interaction.reply({ content: "I need permission to join and speak in your voice channel.", ephemeral: true });
+  const botMember = interaction.guild.members.me || await interaction.guild.members.fetchMe().catch(() => null);
+  const permissions = botMember ? voiceChannel.permissionsFor(botMember) : null;
+  const missing = [];
+
+  if (!permissions?.has(PermissionFlagsBits.ViewChannel)) {
+    missing.push("View Channel");
+  }
+
+  if (!permissions?.has(PermissionFlagsBits.Connect)) {
+    missing.push("Connect");
+  }
+
+  if (!permissions?.has(PermissionFlagsBits.Speak)) {
+    missing.push("Speak");
+  }
+
+  if (missing.length) {
+    await interaction.reply({
+      content: `I can't use ${voiceChannel} yet. Missing voice permissions: ${missing.join(", ")}.`,
+      ephemeral: true
+    });
     return null;
   }
 
