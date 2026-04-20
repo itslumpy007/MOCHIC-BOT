@@ -1931,6 +1931,32 @@ async function ensureVoiceChannel(interaction) {
   return voiceChannel;
 }
 
+async function describeVoiceJoinFailure(interaction, voiceChannel, error) {
+  const botMember = interaction.guild.members.me || await interaction.guild.members.fetchMe().catch(() => null);
+  const permissions = botMember ? voiceChannel.permissionsFor(botMember) : null;
+  const missing = [];
+
+  if (!permissions?.has(PermissionFlagsBits.ViewChannel)) missing.push("View Channel");
+  if (!permissions?.has(PermissionFlagsBits.Connect)) missing.push("Connect");
+  if (!permissions?.has(PermissionFlagsBits.Speak)) missing.push("Speak");
+  if (!permissions?.has(PermissionFlagsBits.UseVAD)) missing.push("Use Voice Activity");
+
+  if (missing.length) {
+    return `I couldn't fully join ${voiceChannel}. Missing permissions: ${missing.join(", ")}.`;
+  }
+
+  if (voiceChannel.type === ChannelType.GuildStageVoice) {
+    return `I reached ${voiceChannel}, but it's a Stage channel. I may need to be invited to speak before audio can work.`;
+  }
+
+  if (typeof voiceChannel.full === "boolean" && voiceChannel.full) {
+    return `${voiceChannel} is full right now, so I can't join it.`;
+  }
+
+  const reason = String(error?.message || error || "unknown voice connection issue").slice(0, 200);
+  return `I could see ${voiceChannel}, but the voice connection never became ready. Discord reported: ${reason}`;
+}
+
 function ensureSameVoiceChannel(interaction, queue) {
   const memberChannelId = interaction.member?.voice?.channelId;
   if (!queue || !queue.voiceChannelId || queue.voiceChannelId === memberChannelId) {
@@ -3914,7 +3940,7 @@ client.on("interactionCreate", async interaction => {
             await entersState(queue.connection, VoiceConnectionStatus.Ready, 20_000);
           } catch (error) {
             destroyMusicQueue(interaction.guild.id);
-            return interaction.editReply("I couldn't join the voice channel. Check my voice permissions and try again.");
+            return interaction.editReply(await describeVoiceJoinFailure(interaction, voiceChannel, error));
           }
         }
 
@@ -4323,7 +4349,7 @@ client.on("interactionCreate", async interaction => {
           await entersState(queue.connection, VoiceConnectionStatus.Ready, 20_000);
         } catch (error) {
           destroyMusicQueue(guild.id);
-          return interaction.editReply("I couldn't join the voice channel. Check my voice permissions and try again.");
+          return interaction.editReply(await describeVoiceJoinFailure(interaction, voiceChannel, error));
         }
       }
 
