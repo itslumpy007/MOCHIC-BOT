@@ -68,6 +68,10 @@ const FOOTER = {
 
 const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
 const INVITE_REGEX = /(discord\.gg|discord\.com\/invite)\/[a-z0-9-]+/i;
+const TIKTOK_LIVE_RECONNECT_MS = 20 * 1000;
+const TIKTOK_OFFLINE_RECHECK_MS = 60 * 1000;
+const TIKTOK_HEALTHCHECK_MS = 90 * 1000;
+const TIKTOK_OFFLINE_CONFIRMATION_ATTEMPTS = 2;
 const spamTracker = new Map();
 const joinTracker = new Map();
 const pendingPanelActions = new Map();
@@ -1193,6 +1197,13 @@ const commands = [
 let tiktokConnection = null;
 let reconnectTimeout = null;
 let wasLive = false;
+let tiktokHealthInterval = null;
+let tiktokConnectionVersion = 0;
+let tiktokOfflineChecks = 0;
+let tiktokLastConnectAt = null;
+let tiktokLastDisconnectAt = null;
+let tiktokLastError = null;
+let tiktokCurrentUsername = null;
 const startedAt = Date.now();
 
 function makeEmbed({ title, description, color = COLORS.pink, fields = [], thumbnail = null }) {
@@ -1747,33 +1758,112 @@ async function handleAutoModViolation(message, reason, actionLabel) {
   );
 }
 
-function scheduleTikTokReconnect() {
+function isLikelyTikTokOfflineError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return [
+    "offline",
+    "room_id",
+    "user_not_found",
+    "not currently live",
+    "live has ended",
+    "failed to fetch room info",
+    "is not live"
+  ].some(fragment => message.includes(fragment));
+}
+
+function clearTikTokReconnect() {
+  if (!reconnectTimeout) return;
+  clearTimeout(reconnectTimeout);
+  reconnectTimeout = null;
+}
+
+function cleanupTikTokConnection() {
+  if (!tiktokConnection) return;
+
+  try {
+    tiktokConnection.removeAllListeners();
+  } catch (error) {
+    console.error("TikTok listener cleanup error:", error.message);
+  }
+
+  try {
+    tiktokConnection.disconnect();
+  } catch (error) {
+    console.error("TikTok disconnect error:", error.message);
+  }
+
+  tiktokConnection = null;
+}
+
+async function sendTikTokEndedMessage(username, channelId, reason = null) {
+  if (!wasLive) return;
+
+  wasLive = false;
+  await safeSend(channelId, {
+    embeds: [
+      makeEmbed({
+        title: "TikTok LIVE ended",
+        description: reason
+          ? `@${username}'s stream appears to have ended.\n\nReason: ${reason}`
+          : `@${username}'s stream has ended.`,
+        color: COLORS.purple
+      })
+    ]
+  });
+}
+
+function scheduleTikTokReconnect(delayMs = TIKTOK_OFFLINE_RECHECK_MS, reason = "retry") {
   if (reconnectTimeout) return;
 
-  console.log("Retrying TikTok connection in 60 seconds...");
+  console.log(`Retrying TikTok connection in ${Math.floor(delayMs / 1000)} seconds (${reason})...`);
 
   reconnectTimeout = setTimeout(() => {
     reconnectTimeout = null;
-    startTikTokLive();
-  }, 60000);
+    startTikTokLive().catch(error => {
+      console.error("TikTok retry error:", error.message);
+    });
+  }, delayMs);
+}
+
+function ensureTikTokHealthcheck() {
+  if (tiktokHealthInterval) {
+    clearInterval(tiktokHealthInterval);
+  }
+
+  tiktokHealthInterval = setInterval(() => {
+    const tiktokUsername = getTikTokUsername();
+    const tiktokChannelId = getTikTokChannelId();
+
+    if (!tiktokUsername || !tiktokChannelId) {
+      clearTikTokReconnect();
+      cleanupTikTokConnection();
+      tiktokCurrentUsername = null;
+      return;
+    }
+
+    if (tiktokCurrentUsername && tiktokCurrentUsername !== tiktokUsername) {
+      resetTikTokConnection().catch(error => {
+        console.error("TikTok username refresh error:", error.message);
+      });
+      return;
+    }
+
+    if (!tiktokConnection && !reconnectTimeout) {
+      startTikTokLive().catch(error => {
+        console.error("TikTok healthcheck restart error:", error.message);
+      });
+    }
+  }, TIKTOK_HEALTHCHECK_MS);
 }
 
 async function resetTikTokConnection() {
-  if (reconnectTimeout) {
-    clearTimeout(reconnectTimeout);
-    reconnectTimeout = null;
-  }
-
+  clearTikTokReconnect();
   wasLive = false;
-
-  if (tiktokConnection) {
-    try {
-      tiktokConnection.disconnect();
-    } catch (error) {
-      console.error("TikTok disconnect error:", error.message);
-    }
-    tiktokConnection = null;
-  }
+  tiktokOfflineChecks = 0;
+  tiktokLastDisconnectAt = null;
+  tiktokLastError = null;
+  tiktokCurrentUsername = null;
+  cleanupTikTokConnection();
 
   await startTikTokLive();
 }
@@ -1784,14 +1874,32 @@ async function startTikTokLive() {
 
   if (!tiktokUsername || !tiktokChannelId) {
     console.log("TikTok LIVE not configured.");
+    tiktokCurrentUsername = null;
+    cleanupTikTokConnection();
+    clearTikTokReconnect();
     return;
   }
+
+  clearTikTokReconnect();
+  cleanupTikTokConnection();
+  const connectionVersion = ++tiktokConnectionVersion;
+  tiktokCurrentUsername = tiktokUsername;
 
   try {
     console.log(`Trying TikTok LIVE connection for @${tiktokUsername}...`);
     tiktokConnection = new WebcastPushConnection(tiktokUsername);
     await tiktokConnection.connect();
+
+    if (connectionVersion !== tiktokConnectionVersion) {
+      cleanupTikTokConnection();
+      return;
+    }
+
     console.log(`Connected to TikTok LIVE for @${tiktokUsername}`);
+    tiktokLastConnectAt = new Date().toISOString();
+    tiktokLastDisconnectAt = null;
+    tiktokLastError = null;
+    tiktokOfflineChecks = 0;
 
     if (!wasLive) {
       wasLive = true;
@@ -1808,28 +1916,60 @@ async function startTikTokLive() {
       });
     }
 
+    tiktokConnection.on("connected", () => {
+      if (connectionVersion !== tiktokConnectionVersion) return;
+      tiktokLastConnectAt = new Date().toISOString();
+      tiktokLastError = null;
+      tiktokOfflineChecks = 0;
+    });
+
     tiktokConnection.on("streamEnd", async () => {
-      wasLive = false;
-      await safeSend(tiktokChannelId, {
-        embeds: [
-          makeEmbed({
-            title: "TikTok LIVE ended",
-            description: `@${tiktokUsername}'s stream has ended.`,
-            color: COLORS.purple
-          })
-        ]
-      });
-      scheduleTikTokReconnect();
+      if (connectionVersion !== tiktokConnectionVersion) return;
+      tiktokLastDisconnectAt = new Date().toISOString();
+      tiktokOfflineChecks = TIKTOK_OFFLINE_CONFIRMATION_ATTEMPTS;
+      await sendTikTokEndedMessage(tiktokUsername, tiktokChannelId);
+      cleanupTikTokConnection();
+      scheduleTikTokReconnect(TIKTOK_OFFLINE_RECHECK_MS, "stream end");
     });
 
     tiktokConnection.on("disconnected", () => {
-      wasLive = false;
-      scheduleTikTokReconnect();
+      if (connectionVersion !== tiktokConnectionVersion) return;
+      tiktokLastDisconnectAt = new Date().toISOString();
+      tiktokLastError = "socket disconnected";
+      cleanupTikTokConnection();
+      scheduleTikTokReconnect(wasLive ? TIKTOK_LIVE_RECONNECT_MS : TIKTOK_OFFLINE_RECHECK_MS, "socket disconnect");
+    });
+
+    tiktokConnection.on("error", error => {
+      if (connectionVersion !== tiktokConnectionVersion) return;
+      tiktokLastError = error?.message || "unknown TikTok socket error";
+      console.error("TikTok socket error:", tiktokLastError);
+      cleanupTikTokConnection();
+      scheduleTikTokReconnect(wasLive ? TIKTOK_LIVE_RECONNECT_MS : TIKTOK_OFFLINE_RECHECK_MS, "socket error");
     });
   } catch (error) {
-    console.log(`TikTok user offline or unavailable: ${error.message}`);
-    wasLive = false;
-    scheduleTikTokReconnect();
+    tiktokConnection = null;
+    tiktokLastError = error?.message || "unknown TikTok connect error";
+    tiktokLastDisconnectAt = new Date().toISOString();
+
+    if (isLikelyTikTokOfflineError(error)) {
+      tiktokOfflineChecks += 1;
+      console.log(`TikTok user offline or unavailable: ${error.message}`);
+
+      if (wasLive && tiktokOfflineChecks >= TIKTOK_OFFLINE_CONFIRMATION_ATTEMPTS) {
+        await sendTikTokEndedMessage(
+          tiktokUsername,
+          tiktokChannelId,
+          "the watcher confirmed the account is offline"
+        );
+      }
+
+      scheduleTikTokReconnect(TIKTOK_OFFLINE_RECHECK_MS, "offline check");
+      return;
+    }
+
+    console.log(`TikTok connection error: ${error.message}`);
+    scheduleTikTokReconnect(wasLive ? TIKTOK_LIVE_RECONNECT_MS : TIKTOK_OFFLINE_RECHECK_MS, "connect error");
   }
 }
 
@@ -1941,7 +2081,19 @@ function buildStatusEmbed() {
       { name: "AutoMod Log Channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
       { name: "TikTok User", value: tiktokUsername ? `@${tiktokUsername}` : "Not set", inline: true },
       { name: "TikTok Alerts", value: tiktokChannelId ? `<#${tiktokChannelId}>` : "Not set", inline: true },
-      { name: "TikTok Connected", value: tiktokConnection ? "Yes" : "No", inline: true },
+      {
+        name: "TikTok Watcher",
+        value: tiktokConnection ? "Connected" : reconnectTimeout ? "Retrying" : wasLive ? "Watching live state" : "Idle",
+        inline: true
+      },
+      {
+        name: "TikTok Health",
+        value:
+          `Offline checks: ${tiktokOfflineChecks}\n` +
+          `Last connect: ${tiktokLastConnectAt ? `<t:${Math.floor(new Date(tiktokLastConnectAt).getTime() / 1000)}:R>` : "Never"}\n` +
+          `Last issue: ${tiktokLastError ? tiktokLastError.slice(0, 120) : "None"}`,
+        inline: false
+      },
       { name: "Verify Message", value: config.verifyMessageId || "Not cached", inline: false },
       { name: "Cases Logged", value: `${config.cases.length}`, inline: true },
       { name: "Banned Words", value: `${getBannedWords().length}`, inline: true }
@@ -2372,6 +2524,7 @@ client.once("clientReady", async () => {
 
     console.log("Slash commands registered.");
     await resolveVerifyMessageId();
+    ensureTikTokHealthcheck();
     await startTikTokLive();
     await processExpiredTempBans();
 
