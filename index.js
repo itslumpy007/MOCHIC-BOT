@@ -91,6 +91,7 @@ const INVITE_REGEX = /(discord\.gg|discord\.com\/invite)\/[a-z0-9-]+/i;
 const TIKTOK_LIVE_RECONNECT_MS = 20 * 1000;
 const TIKTOK_OFFLINE_RECHECK_MS = 60 * 1000;
 const TIKTOK_HEALTHCHECK_MS = 90 * 1000;
+const TIKTOK_ROOMINFO_POLL_MS = 45 * 1000;
 const TIKTOK_OFFLINE_CONFIRMATION_ATTEMPTS = 2;
 const spamTracker = new Map();
 const joinTracker = new Map();
@@ -1296,6 +1297,11 @@ let tiktokLastConnectAt = null;
 let tiktokLastDisconnectAt = null;
 let tiktokLastError = null;
 let tiktokCurrentUsername = null;
+let tiktokLastRoomCheckAt = null;
+let tiktokLastRoomStatus = null;
+let tiktokLastRoomId = null;
+let tiktokAnnouncedRoomId = null;
+let tiktokRoomInfoSyncPromise = null;
 const startedAt = Date.now();
 
 function makeEmbed({ title, description, color = COLORS.pink, fields = [], thumbnail = null }) {
@@ -2232,6 +2238,63 @@ function isLikelyTikTokOfflineError(error) {
   ].some(fragment => message.includes(fragment));
 }
 
+function isTikTokRoomLive(roomInfo) {
+  return Number(roomInfo?.status) === 2;
+}
+
+function getTikTokRoomIdentifier(roomInfo, fallbackRoomId = null) {
+  return String(
+    roomInfo?.stream_id_str ||
+    roomInfo?.stream_id ||
+    roomInfo?.id_str ||
+    roomInfo?.id ||
+    fallbackRoomId ||
+    ""
+  );
+}
+
+async function fetchTikTokRoomInfo(uniqueId) {
+  const probe = new WebcastPushConnection(uniqueId, {
+    processInitialData: false,
+    fetchRoomInfoOnConnect: false,
+    enableWebsocketUpgrade: false
+  });
+
+  return probe.getRoomInfo();
+}
+
+async function announceTikTokLiveStarted(username, channelId, roomId, roomInfo = null) {
+  const liveId = roomId || getTikTokRoomIdentifier(roomInfo);
+  wasLive = true;
+
+  if (liveId) {
+    tiktokLastRoomId = liveId;
+    if (tiktokAnnouncedRoomId === liveId) {
+      return;
+    }
+    tiktokAnnouncedRoomId = liveId;
+  }
+
+  const viewerCount = roomInfo?.stats?.user_count_str || roomInfo?.stats?.user_count || null;
+  const liveTitle = roomInfo?.title || null;
+
+  await safeSend(channelId, {
+    embeds: [
+      makeEmbed({
+        title: "TikTok LIVE started",
+        description:
+          `**@${username}** is live right now.\n\n` +
+          `Come join the stream here:\nhttps://tiktok.com/@${username}/live`,
+        color: COLORS.rose,
+        fields: [
+          ...(liveTitle ? [{ name: "Title", value: String(liveTitle).slice(0, 1024), inline: false }] : []),
+          ...(viewerCount ? [{ name: "Viewers", value: `${viewerCount}`, inline: true }] : [])
+        ]
+      })
+    ]
+  });
+}
+
 function clearTikTokReconnect() {
   if (!reconnectTimeout) return;
   clearTimeout(reconnectTimeout);
@@ -2260,6 +2323,7 @@ async function sendTikTokEndedMessage(username, channelId, reason = null) {
   if (!wasLive) return;
 
   wasLive = false;
+  tiktokAnnouncedRoomId = null;
   await safeSend(channelId, {
     embeds: [
       makeEmbed({
@@ -2291,7 +2355,7 @@ function ensureTikTokHealthcheck() {
     clearInterval(tiktokHealthInterval);
   }
 
-  tiktokHealthInterval = setInterval(() => {
+  tiktokHealthInterval = setInterval(async () => {
     const tiktokUsername = getTikTokUsername();
     const tiktokChannelId = getTikTokChannelId();
 
@@ -2309,12 +2373,82 @@ function ensureTikTokHealthcheck() {
       return;
     }
 
-    if (!tiktokConnection && !reconnectTimeout) {
+    const shouldPollRoomInfo =
+      !tiktokLastRoomCheckAt ||
+      Date.now() - new Date(tiktokLastRoomCheckAt).getTime() >= TIKTOK_ROOMINFO_POLL_MS;
+
+    if (shouldPollRoomInfo) {
+      await syncTikTokRoomInfo("healthcheck");
+    }
+
+    if (!tiktokConnection && !reconnectTimeout && wasLive) {
       startTikTokLive().catch(error => {
         console.error("TikTok healthcheck restart error:", error.message);
       });
     }
   }, TIKTOK_HEALTHCHECK_MS);
+}
+
+async function syncTikTokRoomInfo(trigger = "poll") {
+  if (tiktokRoomInfoSyncPromise) {
+    return tiktokRoomInfoSyncPromise;
+  }
+
+  const tiktokUsername = getTikTokUsername();
+  const tiktokChannelId = getTikTokChannelId();
+
+  if (!tiktokUsername || !tiktokChannelId) return null;
+
+  tiktokRoomInfoSyncPromise = (async () => {
+    try {
+      const roomInfo = await fetchTikTokRoomInfo(tiktokUsername);
+      tiktokLastRoomCheckAt = new Date().toISOString();
+      tiktokLastRoomStatus = roomInfo?.status ?? null;
+      const liveRoomId = getTikTokRoomIdentifier(roomInfo);
+      if (liveRoomId) {
+        tiktokLastRoomId = liveRoomId;
+      }
+
+      if (isTikTokRoomLive(roomInfo)) {
+        tiktokOfflineChecks = 0;
+        tiktokLastError = null;
+
+        if (!wasLive) {
+          await announceTikTokLiveStarted(tiktokUsername, tiktokChannelId, liveRoomId, roomInfo);
+        }
+
+        if (!tiktokConnection && !reconnectTimeout) {
+          startTikTokLive(roomInfo).catch(error => {
+            console.error("TikTok room-info reconnect error:", error.message);
+          });
+        }
+
+        return roomInfo;
+      }
+
+      tiktokOfflineChecks += 1;
+
+      if (wasLive && tiktokOfflineChecks >= TIKTOK_OFFLINE_CONFIRMATION_ATTEMPTS) {
+        await sendTikTokEndedMessage(
+          tiktokUsername,
+          tiktokChannelId,
+          `room info check marked the stream offline (${trigger})`
+        );
+        cleanupTikTokConnection();
+      }
+
+      return roomInfo;
+    } catch (error) {
+      tiktokLastError = error?.message || "failed to poll room info";
+      tiktokLastRoomCheckAt = new Date().toISOString();
+      console.error("TikTok room info poll error:", tiktokLastError);
+      return null;
+    } finally {
+      tiktokRoomInfoSyncPromise = null;
+    }
+  })();
+
+  return tiktokRoomInfoSyncPromise;
 }
 
 async function resetTikTokConnection() {
@@ -2324,12 +2458,17 @@ async function resetTikTokConnection() {
   tiktokLastDisconnectAt = null;
   tiktokLastError = null;
   tiktokCurrentUsername = null;
+  tiktokLastRoomCheckAt = null;
+  tiktokLastRoomStatus = null;
+  tiktokLastRoomId = null;
+  tiktokAnnouncedRoomId = null;
   cleanupTikTokConnection();
 
-  await startTikTokLive();
+  const roomInfo = await syncTikTokRoomInfo("reset");
+  await startTikTokLive(roomInfo);
 }
 
-async function startTikTokLive() {
+async function startTikTokLive(preloadedRoomInfo = null) {
   const tiktokUsername = getTikTokUsername();
   const tiktokChannelId = getTikTokChannelId();
 
@@ -2338,6 +2477,20 @@ async function startTikTokLive() {
     tiktokCurrentUsername = null;
     cleanupTikTokConnection();
     clearTikTokReconnect();
+    return;
+  }
+
+  const roomInfo = preloadedRoomInfo || await syncTikTokRoomInfo("connect");
+  if (roomInfo) {
+    tiktokLastRoomStatus = roomInfo?.status ?? null;
+    const roomId = getTikTokRoomIdentifier(roomInfo);
+    if (roomId) {
+      tiktokLastRoomId = roomId;
+    }
+  }
+
+  if (roomInfo && !isTikTokRoomLive(roomInfo)) {
+    scheduleTikTokReconnect(TIKTOK_OFFLINE_RECHECK_MS, "room info offline");
     return;
   }
 
@@ -2362,20 +2515,12 @@ async function startTikTokLive() {
     tiktokLastError = null;
     tiktokOfflineChecks = 0;
 
-    if (!wasLive) {
-      wasLive = true;
-      await safeSend(tiktokChannelId, {
-        embeds: [
-          makeEmbed({
-            title: "TikTok LIVE started",
-            description:
-              `**@${tiktokUsername}** is live right now.\n\n` +
-              `Come join the stream here:\nhttps://tiktok.com/@${tiktokUsername}/live`,
-            color: COLORS.rose
-          })
-        ]
-      });
-    }
+    await announceTikTokLiveStarted(
+      tiktokUsername,
+      tiktokChannelId,
+      getTikTokRoomIdentifier(roomInfo),
+      roomInfo
+    );
 
     tiktokConnection.on("connected", () => {
       if (connectionVersion !== tiktokConnectionVersion) return;
@@ -2577,6 +2722,9 @@ function buildStatusEmbed() {
         value:
           `Offline checks: ${tiktokOfflineChecks}\n` +
           `Last connect: ${tiktokLastConnectAt ? `<t:${Math.floor(new Date(tiktokLastConnectAt).getTime() / 1000)}:R>` : "Never"}\n` +
+          `Last room check: ${tiktokLastRoomCheckAt ? `<t:${Math.floor(new Date(tiktokLastRoomCheckAt).getTime() / 1000)}:R>` : "Never"}\n` +
+          `Last room status: ${tiktokLastRoomStatus ?? "Unknown"}\n` +
+          `Last room id: ${tiktokLastRoomId || "Unknown"}\n` +
           `Last issue: ${tiktokLastError ? tiktokLastError.slice(0, 120) : "None"}`,
         inline: false
       },
