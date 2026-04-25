@@ -51,6 +51,14 @@ const {
   TARO_ROLE_ID
 } = process.env;
 
+function envFlag(value, fallback = false) {
+  if (value == null || value === "") return fallback;
+  return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
+}
+
+const ENABLE_CORE_BOT = envFlag(process.env.ENABLE_CORE_BOT, true);
+const ENABLE_MUSIC = envFlag(process.env.ENABLE_MUSIC, true);
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -329,11 +337,15 @@ function recordAutoModOffense(userId, action, reason) {
 }
 
 function validateEnv() {
-  const requiredVars = ["TOKEN", "CLIENT_ID", "GUILD_ID", "VERIFY_CHANNEL_ID"];
+  const requiredVars = ["TOKEN", "CLIENT_ID", "GUILD_ID"];
   const missing = requiredVars.filter(key => !process.env[key]);
 
   if (missing.length) {
     throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
+  }
+
+  if (!ENABLE_CORE_BOT && !ENABLE_MUSIC) {
+    throw new Error("At least one bot feature must be enabled. Set ENABLE_CORE_BOT=true or ENABLE_MUSIC=true.");
   }
 }
 
@@ -349,7 +361,7 @@ const ALL_ROLES = Object.values(MOCHI_ROLES)
   .map(role => role.id)
   .filter(Boolean);
 
-const commands = [
+const allCommands = [
   new SlashCommandBuilder()
     .setName("help")
     .setDescription("Show the bot's main commands"),
@@ -1244,7 +1256,35 @@ const commands = [
           )
         )
     )
-].map(command => command.toJSON());
+];
+
+const MUSIC_COMMAND_NAMES = new Set([
+  "play",
+  "skip",
+  "stop",
+  "pause",
+  "resume",
+  "queue",
+  "musicpanel",
+  "nowplaying",
+  "leave"
+]);
+
+const SHARED_COMMAND_NAMES = new Set(["help"]);
+
+const commands = allCommands
+  .filter(command => {
+    if (SHARED_COMMAND_NAMES.has(command.name)) {
+      return true;
+    }
+
+    if (MUSIC_COMMAND_NAMES.has(command.name)) {
+      return ENABLE_MUSIC;
+    }
+
+    return ENABLE_CORE_BOT;
+  })
+  .map(command => command.toJSON());
 
 let tiktokConnection = null;
 let reconnectTimeout = null;
@@ -1389,6 +1429,13 @@ function clearWarnings(userId) {
 
 function getNotes(userId) {
   return Array.isArray(config.notes[userId]) ? config.notes[userId] : [];
+}
+
+function clearNotes(userId) {
+  const count = getNotes(userId).length;
+  delete config.notes[userId];
+  saveConfig();
+  return count;
 }
 
 function addNote(userId, moderatorTag, content) {
@@ -2437,11 +2484,10 @@ function buildSettingsSummary() {
 }
 
 function buildHelpEmbed() {
-  return makeEmbed({
-    title: "Mochi Bot Help",
-    description: "Main moderation and server commands.",
-    color: COLORS.blue,
-    fields: [
+  const fields = [];
+
+  if (ENABLE_CORE_BOT) {
+    fields.push(
       {
         name: "Moderation",
         value:
@@ -2460,21 +2506,40 @@ function buildHelpEmbed() {
         inline: false
       },
       {
-        name: "Music",
-        value: "`/musicpanel`, `/play`, `/skip`, `/stop`, `/pause`, `/resume`, `/queue`, `/nowplaying`, `/leave`",
-        inline: false
-      },
-      {
         name: "Server Tools",
         value: "`/setupverify`, `/setuprules`, `/announce`, `/purge`, `/lockdown`, `/unlockdown`",
         inline: false
-      },
-      {
-        name: "Info",
-        value: "`/userinfo`, `/serverstats`, `/help`",
-        inline: false
       }
-    ]
+    );
+  }
+
+  if (ENABLE_MUSIC) {
+    fields.push({
+      name: "Music",
+      value: "`/musicpanel`, `/play`, `/skip`, `/stop`, `/pause`, `/resume`, `/queue`, `/nowplaying`, `/leave`",
+      inline: false
+    });
+  }
+
+  if (ENABLE_CORE_BOT) {
+    fields.push({
+      name: "Info",
+      value: "`/userinfo`, `/serverstats`, `/help`",
+      inline: false
+    });
+  } else {
+    fields.push({
+      name: "Info",
+      value: "`/help`",
+      inline: false
+    });
+  }
+
+  return makeEmbed({
+    title: "Mochi Bot Help",
+    description: "Main commands for the currently enabled bot features.",
+    color: COLORS.blue,
+    fields
   });
 }
 
@@ -2498,6 +2563,8 @@ function buildStatusEmbed() {
       { name: "Rules Channel", value: rulesChannelId ? `<#${rulesChannelId}>` : "Not set", inline: true },
       { name: "Log Channel", value: logChannelId ? `<#${logChannelId}>` : "Not set", inline: true },
       { name: "AutoMod Log Channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
+      { name: "Core Features", value: ENABLE_CORE_BOT ? "Enabled" : "Disabled", inline: true },
+      { name: "Music Features", value: ENABLE_MUSIC ? "Enabled" : "Disabled", inline: true },
       { name: "TikTok User", value: tiktokUsername ? `@${tiktokUsername}` : "Not set", inline: true },
       { name: "TikTok Alerts", value: tiktokChannelId ? `<#${tiktokChannelId}>` : "Not set", inline: true },
       {
@@ -2594,13 +2661,17 @@ function buildSelectedUserSummary(targetUserId) {
     return {
       summaryText: "No user selected yet. Use the user picker below to load moderation tools for someone.",
       historyText: "Select a member to view warnings, notes, and recent cases.",
-      statusText: "Waiting for a selected user."
+      statusText: "Waiting for a selected user.",
+      recentSignalsText: "No moderation data loaded yet."
     };
   }
 
   const warnings = getWarnings(targetUserId);
   const notes = getNotes(targetUserId);
   const cases = getCasesForUser(targetUserId).slice(-5).reverse();
+  const latestWarning = warnings.at(-1);
+  const latestNote = notes.at(-1);
+  const latestCase = cases[0] || null;
 
   return {
     summaryText:
@@ -2608,6 +2679,11 @@ function buildSelectedUserSummary(targetUserId) {
       `Notes: ${notes.length}\n` +
       `Cases: ${getCasesForUser(targetUserId).length}`,
     statusText: "Loading user status...",
+    recentSignalsText: [
+      latestWarning ? `Latest warning: ${(latestWarning.reason || "No reason").slice(0, 80)}` : "Latest warning: None",
+      latestNote ? `Latest note: ${(latestNote.content || "No note").slice(0, 80)}` : "Latest note: None",
+      latestCase ? `Latest case: #${latestCase.id} ${latestCase.action}` : "Latest case: None"
+    ].join("\n").slice(0, 1024),
     historyText: cases.length
       ? cases
           .map(entry => `#${entry.id} ${entry.action || "unknown"} - ${(entry.reason || "No reason").slice(0, 70)}`)
@@ -2615,6 +2691,48 @@ function buildSelectedUserSummary(targetUserId) {
           .slice(0, 1024)
       : "No recent cases for this user."
   };
+}
+
+function buildMemberRoleSummary(member) {
+  if (!member) return "Not in server / unknown";
+
+  const visibleRoles = member.roles.cache
+    .filter(role => role.id !== member.guild.id)
+    .sort((a, b) => b.position - a.position)
+    .map(role => role.toString());
+
+  if (!visibleRoles.length) return "No assigned roles.";
+  const shown = visibleRoles.slice(0, 6).join(", ");
+  return visibleRoles.length > 6 ? `${shown} +${visibleRoles.length - 6} more` : shown;
+}
+
+function buildMemberPermissionSnapshot(member) {
+  if (!member) return "Not in server / unknown";
+
+  const labels = [];
+  if (member.permissions.has(PermissionFlagsBits.Administrator)) labels.push("Administrator");
+  if (member.permissions.has(PermissionFlagsBits.ModerateMembers)) labels.push("Moderate Members");
+  if (member.permissions.has(PermissionFlagsBits.ManageMessages)) labels.push("Manage Messages");
+  if (member.permissions.has(PermissionFlagsBits.KickMembers)) labels.push("Kick Members");
+  if (member.permissions.has(PermissionFlagsBits.BanMembers)) labels.push("Ban Members");
+
+  return labels.length ? labels.join(", ") : "No major staff permissions.";
+}
+
+async function getRecentMessagesForUser(channel, userId, limit = 5) {
+  if (!channel?.messages?.fetch) return [];
+
+  const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  if (!messages) return [];
+
+  return messages
+    .filter(message => message.author?.id === userId)
+    .sort((a, b) => b.createdTimestamp - a.createdTimestamp)
+    .first(limit)
+    .map(message => {
+      const content = (message.content || "*No text content*").replace(/\n/g, " ").slice(0, 120);
+      return `<t:${Math.floor(message.createdTimestamp / 1000)}:R> - ${content}`;
+    });
 }
 
 function clearPendingPanelAction(userId) {
@@ -2700,8 +2818,15 @@ function buildAdminPanelButtons(view, targetUserId = null) {
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "warnings-view", targetUserId)).setLabel("Warnings").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "notes-view", targetUserId)).setLabel("Notes").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "untimeout", targetUserId)).setLabel("Untimeout").setStyle(ButtonStyle.Success).setDisabled(!targetUserId),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "lockdown", targetUserId)).setLabel("Lock Current Channel").setStyle(ButtonStyle.Danger),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "unlockdown", targetUserId)).setLabel("Unlock Current Channel").setStyle(ButtonStyle.Success)
+      ),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "profile", targetUserId)).setLabel("Profile").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "recent-messages", targetUserId)).setLabel("Recent Messages").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "dmuser", targetUserId)).setLabel("DM User").setStyle(ButtonStyle.Primary).setDisabled(!targetUserId),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "clearnotes", targetUserId)).setLabel("Clear Notes").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId)
       )
     );
   }
@@ -2779,7 +2904,7 @@ function buildAdminPanelButtons(view, targetUserId = null) {
 async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
   if (view === "moderation") {
     const { member, user } = await resolveAdminPanelTarget(interaction, targetUserId);
-    const { summaryText, historyText } = buildSelectedUserSummary(targetUserId);
+    const { summaryText, historyText, recentSignalsText } = buildSelectedUserSummary(targetUserId);
     const mutedRoleId = getMutedRoleId();
     const isMuted = Boolean(member && mutedRoleId && member.roles.cache.has(mutedRoleId));
     const timeoutText = member?.communicationDisabledUntilTimestamp && member.communicationDisabledUntilTimestamp > Date.now()
@@ -2815,13 +2940,34 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
           inline: true
         },
         {
+          name: "Role Snapshot",
+          value: user
+            ? [
+                `Top role: ${member?.roles?.highest ? member.roles.highest.toString() : "None"}`,
+                `Roles: ${member ? member.roles.cache.filter(role => role.id !== member.guild.id).size : 0}`,
+                `Key permissions: ${buildMemberPermissionSnapshot(member)}`
+              ].join("\n").slice(0, 1024)
+            : "Waiting for a selected user.",
+          inline: false
+        },
+        {
           name: "User Status",
           value: statusText,
           inline: false
         },
         {
+          name: "Server Roles",
+          value: buildMemberRoleSummary(member),
+          inline: false
+        },
+        {
+          name: "Recent Signals",
+          value: recentSignalsText,
+          inline: false
+        },
+        {
           name: "Quick Actions",
-          value: "`Warn`, `Timeout`, `Mute`, `Unmute`, `Kick`, `Ban`, `Temp Ban`, `Clear Warnings`, `Notes`, `Warnings`",
+          value: "`Warn`, `Timeout`, `Untimeout`, `Mute`, `Unmute`, `Kick`, `Ban`, `Temp Ban`, `Clear Warnings`, `Notes`, `Warnings`",
           inline: false
         },
         {
@@ -2935,6 +3081,7 @@ function buildJsonExportAttachment(prefix, payload) {
 client.once("clientReady", async () => {
   try {
     console.log(`Logged in as ${client.user.tag}`);
+    console.log(`Feature flags -> core: ${ENABLE_CORE_BOT ? "on" : "off"}, music: ${ENABLE_MUSIC ? "on" : "off"}`);
     const rest = new REST({ version: "10" }).setToken(TOKEN);
 
     await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
@@ -2942,19 +3089,22 @@ client.once("clientReady", async () => {
     });
 
     console.log("Slash commands registered.");
-    await resolveVerifyMessageId();
-    ensureTikTokHealthcheck();
-    await startTikTokLive();
-    await processExpiredTempBans();
 
-    if (tempBanInterval) {
-      clearInterval(tempBanInterval);
+    if (ENABLE_CORE_BOT) {
+      await resolveVerifyMessageId();
+      ensureTikTokHealthcheck();
+      await startTikTokLive();
+      await processExpiredTempBans();
+
+      if (tempBanInterval) {
+        clearInterval(tempBanInterval);
+      }
+      tempBanInterval = setInterval(() => {
+        processExpiredTempBans().catch(error => {
+          console.error("Temp ban processing error:", error.message);
+        });
+      }, 60 * 1000);
     }
-    tempBanInterval = setInterval(() => {
-      processExpiredTempBans().catch(error => {
-        console.error("Temp ban processing error:", error.message);
-      });
-    }, 60 * 1000);
   } catch (error) {
     console.error("Ready error:", error);
   }
@@ -2962,6 +3112,7 @@ client.once("clientReady", async () => {
 
 client.on("messageReactionAdd", async (reaction, user) => {
   try {
+    if (!ENABLE_CORE_BOT) return;
     if (user.bot) return;
     if (reaction.partial) await reaction.fetch();
     if (reaction.message.partial) await reaction.message.fetch();
@@ -2989,6 +3140,7 @@ client.on("messageReactionAdd", async (reaction, user) => {
 });
 client.on("messageReactionRemove", async (reaction, user) => {
   try {
+    if (!ENABLE_CORE_BOT) return;
     if (user.bot) return;
     if (reaction.partial) await reaction.fetch();
     if (reaction.message.partial) await reaction.message.fetch();
@@ -3017,6 +3169,7 @@ client.on("messageReactionRemove", async (reaction, user) => {
 
 client.on("channelCreate", async channel => {
   try {
+    if (!ENABLE_CORE_BOT) return;
     if (!channel.guild) return;
     const mutedRoleId = getMutedRoleId();
     if (!mutedRoleId) return;
@@ -3041,6 +3194,10 @@ client.on("interactionCreate", async interaction => {
   try {
     if (interaction.isButton()) {
       if (interaction.customId.startsWith("musicpanel:")) {
+        if (!ENABLE_MUSIC) {
+          return interaction.reply({ content: "Music controls are disabled on this deployment.", ephemeral: true });
+        }
+
         const [, kind, action] = interaction.customId.split(":");
         const queue = musicQueues.get(interaction.guild.id);
 
@@ -3153,6 +3310,9 @@ client.on("interactionCreate", async interaction => {
       }
 
       if (!interaction.customId.startsWith("adminpanel:")) return;
+      if (!ENABLE_CORE_BOT) {
+        return interaction.reply({ content: "Admin controls are disabled on this deployment.", ephemeral: true });
+      }
 
       const [, kind, action, targetIdRaw] = interaction.customId.split(":");
       const targetUserId = targetIdRaw && targetIdRaw !== "none" ? targetIdRaw : null;
@@ -3325,15 +3485,17 @@ client.on("interactionCreate", async interaction => {
                       ? "Kick User"
                       : action === "ban"
                         ? "Ban User"
-                    : "Add Staff Note"
+                        : action === "dmuser"
+                          ? "DM User"
+                          : "Add Staff Note"
           );
 
-        if (action === "warn" || action === "mute" || action === "note" || action === "kick" || action === "ban") {
+        if (action === "warn" || action === "mute" || action === "note" || action === "kick" || action === "ban" || action === "dmuser") {
           modal.addComponents(
             new ActionRowBuilder().addComponents(
               new TextInputBuilder()
                 .setCustomId("reason")
-                .setLabel(action === "note" ? "Note content" : "Reason")
+                .setLabel(action === "note" ? "Note content" : action === "dmuser" ? "Message" : "Reason")
                 .setStyle(TextInputStyle.Paragraph)
                 .setRequired(true)
                 .setMaxLength(500)
@@ -3703,6 +3865,44 @@ client.on("interactionCreate", async interaction => {
           }).catch(() => {});
         }
 
+        if (action === "untimeout") {
+          if (!targetUserId) {
+            return interaction.reply({ content: "Select a user in the moderation panel first.", ephemeral: true });
+          }
+
+          const user = await client.users.fetch(targetUserId).catch(() => null);
+          const member = await interaction.guild.members.fetch(targetUserId).catch(() => null);
+          if (!user || !(await ensureModeratable(interaction, member, "untimeout"))) return;
+
+          if (!member?.communicationDisabledUntilTimestamp || member.communicationDisabledUntilTimestamp <= Date.now()) {
+            return interaction.reply({ content: `${user.tag} is not currently timed out.`, ephemeral: true });
+          }
+
+          await member.timeout(null, `${interaction.user.tag}: Timeout removed from admin panel.`);
+          const entry = addCase({
+            action: "untimeout",
+            targetId: user.id,
+            targetTag: user.tag,
+            moderatorTag: interaction.user.tag,
+            reason: "Timeout removed from admin panel."
+          });
+
+          await logEmbed(
+            makeEmbed({
+              title: `Case #${entry.id}: timeout removed`,
+              description: `${user.tag}'s timeout was removed.`,
+              color: COLORS.mint,
+              fields: buildCaseFields(entry)
+            })
+          );
+
+          await interaction.reply({ content: `${user.tag} is no longer timed out.`, ephemeral: true });
+          return interaction.message.edit({
+            embeds: [await buildAdminPanelEmbed("moderation", interaction, targetUserId)],
+            components: buildAdminPanelButtons("moderation", targetUserId)
+          }).catch(() => {});
+        }
+
         if (action === "history") {
           if (!targetUserId) {
             return interaction.reply({ content: "Select a user in the moderation panel first.", ephemeral: true });
@@ -3722,6 +3922,69 @@ client.on("interactionCreate", async interaction => {
                     value: entries.length
                       ? entries.map(entry => `#${entry.id} ${entry.action} - ${entry.reason} - ${entry.moderatorTag}`).join("\n").slice(0, 1024)
                       : "No recorded cases."
+                  }
+                ]
+              })
+            ],
+            ephemeral: true
+          });
+        }
+
+        if (action === "profile") {
+          if (!targetUserId) {
+            return interaction.reply({ content: "Select a user in the moderation panel first.", ephemeral: true });
+          }
+
+          const { member, user } = await resolveAdminPanelTarget(interaction, targetUserId);
+          if (!user) {
+            return interaction.reply({ content: "That user could not be found.", ephemeral: true });
+          }
+
+          const warnings = getWarnings(targetUserId);
+          const notes = getNotes(targetUserId);
+          const cases = getCasesForUser(targetUserId);
+
+          return interaction.reply({
+            embeds: [
+              makeEmbed({
+                title: "Member profile",
+                description: `${user.tag} (${user.id})`,
+                color: COLORS.blue,
+                fields: [
+                  { name: "Account Created", value: `<t:${Math.floor(user.createdTimestamp / 1000)}:F>`, inline: true },
+                  { name: "Joined Server", value: member?.joinedTimestamp ? `<t:${Math.floor(member.joinedTimestamp / 1000)}:F>` : "Unknown", inline: true },
+                  { name: "Top Role", value: member?.roles?.highest ? member.roles.highest.toString() : "None", inline: true },
+                  { name: "Warnings", value: `${warnings.length}`, inline: true },
+                  { name: "Notes", value: `${notes.length}`, inline: true },
+                  { name: "Cases", value: `${cases.length}`, inline: true },
+                  { name: "Permissions", value: buildMemberPermissionSnapshot(member), inline: false },
+                  { name: "Roles", value: buildMemberRoleSummary(member), inline: false }
+                ],
+                thumbnail: user.displayAvatarURL({ dynamic: true })
+              })
+            ],
+            ephemeral: true
+          });
+        }
+
+        if (action === "recent-messages") {
+          if (!targetUserId) {
+            return interaction.reply({ content: "Select a user in the moderation panel first.", ephemeral: true });
+          }
+
+          const user = await client.users.fetch(targetUserId).catch(() => null);
+          const messages = await getRecentMessagesForUser(interaction.channel, targetUserId);
+
+          return interaction.reply({
+            embeds: [
+              makeEmbed({
+                title: "Recent messages",
+                description: `Recent messages from ${user ? user.tag : targetUserId} in ${interaction.channel}.`,
+                color: COLORS.blue,
+                fields: [
+                  {
+                    name: "Messages",
+                    value: messages.length ? messages.join("\n").slice(0, 1024) : "No recent messages found in this channel."
                   }
                 ]
               })
@@ -3808,6 +4071,31 @@ client.on("interactionCreate", async interaction => {
           return interaction.reply({ content: `Cleared ${count} warning(s).`, ephemeral: true });
         }
 
+        if (action === "clearnotes") {
+          if (!targetUserId) {
+            return interaction.reply({ content: "Select a user in the moderation panel first.", ephemeral: true });
+          }
+
+          const user = await client.users.fetch(targetUserId).catch(() => null);
+          const count = clearNotes(targetUserId);
+          const entry = addCase({
+            action: "clearnotes",
+            targetId: targetUserId,
+            targetTag: user ? user.tag : targetUserId,
+            moderatorTag: interaction.user.tag,
+            reason: "Cleared notes from admin panel.",
+            details: [{ name: "Notes cleared", value: `${count}`, inline: true }]
+          });
+
+          await logEmbed(makeEmbed({
+            title: `Case #${entry.id}: notes cleared`,
+            description: `${user ? user.tag : targetUserId}'s staff notes were cleared.`,
+            color: COLORS.mint,
+            fields: buildCaseFields(entry)
+          }));
+          return interaction.reply({ content: `Cleared ${count} note(s).`, ephemeral: true });
+        }
+
         if (action === "setupverify") {
           const verifyChannel = await client.channels.fetch(getVerifyChannelId());
           const verifyEmbed = makeEmbed({
@@ -3886,6 +4174,10 @@ client.on("interactionCreate", async interaction => {
     }
 
     if (interaction.isRoleSelectMenu()) {
+      if (!ENABLE_CORE_BOT) {
+        return interaction.reply({ content: "Admin controls are disabled on this deployment.", ephemeral: true });
+      }
+
       if (!interaction.customId.startsWith("adminpanel:")) return;
       const [, kind, action] = interaction.customId.split(":");
       if (kind !== "selectrole") return;
@@ -3907,6 +4199,10 @@ client.on("interactionCreate", async interaction => {
     }
 
     if (interaction.isUserSelectMenu()) {
+      if (!ENABLE_CORE_BOT) {
+        return interaction.reply({ content: "Admin controls are disabled on this deployment.", ephemeral: true });
+      }
+
       if (!interaction.customId.startsWith("adminpanel:")) return;
       const [, kind, action] = interaction.customId.split(":");
       if (kind !== "selectuser") return;
@@ -3921,6 +4217,10 @@ client.on("interactionCreate", async interaction => {
 
     if (interaction.isModalSubmit()) {
       if (interaction.customId.startsWith("musicpanel:")) {
+        if (!ENABLE_MUSIC) {
+          return interaction.reply({ content: "Music controls are disabled on this deployment.", ephemeral: true });
+        }
+
         const [, kind, action] = interaction.customId.split(":");
         if (kind !== "submit" || action !== "play") return;
 
@@ -3970,6 +4270,9 @@ client.on("interactionCreate", async interaction => {
       }
 
       if (!interaction.customId.startsWith("adminpanel:")) return;
+      if (!ENABLE_CORE_BOT) {
+        return interaction.reply({ content: "Admin controls are disabled on this deployment.", ephemeral: true });
+      }
       const [, kind, action, targetIdRaw] = interaction.customId.split(":");
       const targetUserId = targetIdRaw && targetIdRaw !== "none" ? targetIdRaw : null;
       if (!["submit", "configsubmit"].includes(kind)) return;
@@ -4216,6 +4519,34 @@ client.on("interactionCreate", async interaction => {
           fields: buildCaseFields(entry)
         }));
         return interaction.reply({ content: `Saved a note for ${user.tag}.`, ephemeral: true });
+      }
+
+      if (action === "dmuser") {
+        const content = interaction.fields.getTextInputValue("reason");
+        await notifyUser(
+          user,
+          makeEmbed({
+            title: "Message from staff",
+            description: content,
+            color: COLORS.pink
+          })
+        );
+
+        const entry = addCase({
+          action: "dm",
+          targetId: user.id,
+          targetTag: user.tag,
+          moderatorTag: interaction.user.tag,
+          reason: content
+        });
+
+        await logEmbed(makeEmbed({
+          title: `Case #${entry.id}: direct message`,
+          description: `A staff DM was sent to ${user.tag}.`,
+          color: COLORS.blue,
+          fields: buildCaseFields(entry)
+        }));
+        return interaction.reply({ content: `Sent a DM to ${user.tag}.`, ephemeral: true });
       }
 
       if (action === "kick") {
@@ -5896,6 +6227,7 @@ client.on("interactionCreate", async interaction => {
 
 client.on("messageCreate", async message => {
   try {
+    if (!ENABLE_CORE_BOT) return;
     if (!message.guild || message.author.bot || !message.member) return;
     if (isAutoModExempt(message)) return;
 
@@ -6043,6 +6375,7 @@ client.on("messageCreate", async message => {
 
 client.on("messageDelete", async message => {
   try {
+    if (!ENABLE_CORE_BOT) return;
     if (!message || message.author?.bot) return;
 
     await logEmbed(
@@ -6087,6 +6420,7 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
 
 client.on("guildMemberAdd", async member => {
   try {
+    if (!ENABLE_CORE_BOT) return;
     if (config.automod.antiRaidEnabled) {
       const joinCount = trackJoin(member.guild.id);
       const accountAgeMs = getAccountAgeMs(member.user);
@@ -6181,6 +6515,7 @@ client.on("guildMemberAdd", async member => {
 
 client.on("guildMemberUpdate", async (oldMember, newMember) => {
   try {
+    if (!ENABLE_CORE_BOT) return;
     if (!config.automod.nicknameFilterEnabled) return;
 
     const previousName = (oldMember.nickname || oldMember.user.username || "").toLowerCase();
