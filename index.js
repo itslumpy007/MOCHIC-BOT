@@ -8,6 +8,7 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ChannelSelectMenuBuilder,
   ChannelType,
   Client,
   EmbedBuilder,
@@ -88,6 +89,56 @@ const FOOTER = {
 
 const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
 const INVITE_REGEX = /(discord\.gg|discord\.com\/invite)\/[a-z0-9-]+/i;
+const AUTOMOD_RULE_KEYS = [
+  "account-age-links",
+  "member-age-links",
+  "blocked-domain",
+  "disallowed-domain",
+  "account-age-attachments",
+  "member-age-attachments",
+  "attachment-size",
+  "blocked-extension",
+  "disallowed-extension",
+  "invite-link",
+  "mass-mentions",
+  "emoji-spam",
+  "caps",
+  "banned-word",
+  "spam",
+  "scam-phrase",
+  "scam-link",
+  "masked-link",
+  "obfuscated-invite",
+  "obfuscated-banned-word",
+  "raid-join",
+  "nickname"
+];
+const AUTOMOD_RULE_ACTIONS = new Set(["delete", "alert", "warn", "timeout"]);
+const BUILT_IN_SCAM_PHRASES = [
+  "free nitro",
+  "steam gift",
+  "claim your reward",
+  "claim reward",
+  "gift inventory",
+  "airdrop",
+  "wallet connect",
+  "connect your wallet",
+  "double your crypto",
+  "verify your account",
+  "staff application form",
+  "download this build",
+  "test my game",
+  "check this file",
+  "limited time reward"
+];
+const SUSPICIOUS_SCAM_DOMAINS = [
+  "bit.ly",
+  "cutt.ly",
+  "tinyurl.com",
+  "grabify.link",
+  "linktr.ee",
+  "lnk.bio"
+];
 const TIKTOK_LIVE_RECONNECT_MS = 20 * 1000;
 const TIKTOK_OFFLINE_RECHECK_MS = 60 * 1000;
 const TIKTOK_HEALTHCHECK_MS = 90 * 1000;
@@ -136,7 +187,11 @@ function createDefaultConfig() {
       raidAccountAgeLimitMs: 24 * 60 * 60 * 1000,
       nicknameFilterEnabled: false,
       nicknameBlockedTerms: [],
+      scamFilterEnabled: true,
+      evasionFilterEnabled: true,
+      scamPhraseList: [],
       alertOnlyRules: [],
+      ruleActions: {},
       maxMentions: 5,
       emojiSpamEnabled: false,
       maxEmojiCount: 12,
@@ -146,8 +201,14 @@ function createDefaultConfig() {
       timeoutDurationMs: 10 * 60 * 1000,
       offenseWindowMs: 24 * 60 * 60 * 1000,
       offenses: {},
+      analytics: {
+        totalDetections: 0,
+        ruleCounts: {},
+        recentViolations: []
+      },
       exemptChannelIds: [],
-      exemptRoleIds: []
+      exemptRoleIds: [],
+      exemptUserIds: []
     },
     settings: {
       verifyChannelId: null,
@@ -191,10 +252,23 @@ function loadConfig() {
         allowedAttachmentExtensions: Array.isArray(parsed.automod?.allowedAttachmentExtensions) ? parsed.automod.allowedAttachmentExtensions : [],
         blockedAttachmentExtensions: Array.isArray(parsed.automod?.blockedAttachmentExtensions) ? parsed.automod.blockedAttachmentExtensions : defaults.automod.blockedAttachmentExtensions,
         nicknameBlockedTerms: Array.isArray(parsed.automod?.nicknameBlockedTerms) ? parsed.automod.nicknameBlockedTerms : [],
+        scamPhraseList: Array.isArray(parsed.automod?.scamPhraseList) ? parsed.automod.scamPhraseList : [],
         alertOnlyRules: Array.isArray(parsed.automod?.alertOnlyRules) ? parsed.automod.alertOnlyRules : [],
+        ruleActions: parsed.automod?.ruleActions && typeof parsed.automod.ruleActions === "object" ? parsed.automod.ruleActions : {},
         offenses: parsed.automod?.offenses && typeof parsed.automod.offenses === "object" ? parsed.automod.offenses : {},
+        analytics: {
+          ...defaults.automod.analytics,
+          ...(parsed.automod?.analytics || {}),
+          ruleCounts: parsed.automod?.analytics?.ruleCounts && typeof parsed.automod.analytics.ruleCounts === "object"
+            ? parsed.automod.analytics.ruleCounts
+            : {},
+          recentViolations: Array.isArray(parsed.automod?.analytics?.recentViolations)
+            ? parsed.automod.analytics.recentViolations.slice(0, 25)
+            : []
+        },
         exemptChannelIds: Array.isArray(parsed.automod?.exemptChannelIds) ? parsed.automod.exemptChannelIds : [],
-        exemptRoleIds: Array.isArray(parsed.automod?.exemptRoleIds) ? parsed.automod.exemptRoleIds : []
+        exemptRoleIds: Array.isArray(parsed.automod?.exemptRoleIds) ? parsed.automod.exemptRoleIds : [],
+        exemptUserIds: Array.isArray(parsed.automod?.exemptUserIds) ? parsed.automod.exemptUserIds : []
       },
       settings: {
         ...defaults.settings,
@@ -261,6 +335,57 @@ function getAlertOnlyRules() {
   return Array.isArray(config.automod.alertOnlyRules) ? config.automod.alertOnlyRules : [];
 }
 
+function getScamPhrases() {
+  const customPhrases = Array.isArray(config.automod.scamPhraseList) ? config.automod.scamPhraseList : [];
+  return [...new Set([...BUILT_IN_SCAM_PHRASES, ...customPhrases].map(value => normalizeComparisonText(value)).filter(Boolean))];
+}
+
+function getAutoModAnalytics() {
+  if (!config.automod.analytics || typeof config.automod.analytics !== "object") {
+    config.automod.analytics = {
+      totalDetections: 0,
+      ruleCounts: {},
+      recentViolations: []
+    };
+  }
+  return config.automod.analytics;
+}
+
+function normalizeRuleAction(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return AUTOMOD_RULE_ACTIONS.has(normalized) ? normalized : null;
+}
+
+function getAutoModRuleAction(ruleKey) {
+  const configured = normalizeRuleAction(config.automod.ruleActions?.[ruleKey]);
+  if (configured) return configured;
+  if (getAlertOnlyRules().includes(ruleKey)) return "alert";
+  return "delete";
+}
+
+function normalizeRuleKey(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return AUTOMOD_RULE_KEYS.includes(normalized) ? normalized : null;
+}
+
+function parseRuleKeyList(input) {
+  return [...new Set(
+    String(input || "")
+      .split(",")
+      .map(value => normalizeRuleKey(value))
+      .filter(Boolean)
+  )];
+}
+
+function parseIdList(input) {
+  return [...new Set(
+    String(input || "")
+      .split(",")
+      .map(value => value.trim().replace(/[<#@&>]/g, ""))
+      .filter(Boolean)
+  )];
+}
+
 function getPermissionRoleIds(level) {
   return Array.isArray(config.permissions?.[`${level}RoleIds`]) ? config.permissions[`${level}RoleIds`] : [];
 }
@@ -273,6 +398,21 @@ function normalizeExtension(value) {
   const trimmed = (value || "").trim().toLowerCase();
   if (!trimmed) return "";
   return trimmed.startsWith(".") ? trimmed : `.${trimmed}`;
+}
+
+function stripZeroWidth(content) {
+  return String(content || "").replace(/[\u200B-\u200D\uFEFF]/g, "");
+}
+
+function normalizeComparisonText(content) {
+  return stripZeroWidth(content)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function normalizeBypassText(content) {
+  return normalizeComparisonText(content).replace(/[^a-z0-9]/g, "");
 }
 
 function countEmoji(content) {
@@ -295,6 +435,90 @@ function extractMessageDomains(content) {
   }
 
   return domains.filter(Boolean);
+}
+
+function detectMaskedLink(content) {
+  const regex = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/gi;
+  let match = regex.exec(content);
+
+  while (match) {
+    const display = normalizeComparisonText(match[1]);
+    try {
+      const hostname = normalizeDomain(new URL(match[2]).hostname);
+      const domainLabel = hostname.split(".").slice(-2).join(".");
+      if (hostname && !display.includes(hostname) && !display.includes(domainLabel)) {
+        return hostname;
+      }
+    } catch (error) {
+      // Ignore invalid links and continue scanning.
+    }
+
+    match = regex.exec(content);
+  }
+
+  return null;
+}
+
+function detectScamAttempt(message) {
+  const content = message.content || "";
+  const normalizedText = normalizeComparisonText(content);
+  const domains = extractMessageDomains(content);
+
+  const maskedDomain = detectMaskedLink(content);
+  if (maskedDomain) {
+    return {
+      actionLabel: "masked-link",
+      reason: `masked links pointing to ${maskedDomain} are not allowed here.`
+    };
+  }
+
+  const suspiciousDomain = domains.find(domain =>
+    domain.startsWith("xn--") ||
+    SUSPICIOUS_SCAM_DOMAINS.some(entry => domain === entry || domain.endsWith(`.${entry}`))
+  );
+
+  const matchedPhrase = getScamPhrases().find(phrase => normalizedText.includes(phrase));
+  if (matchedPhrase && suspiciousDomain) {
+    return {
+      actionLabel: "scam-link",
+      reason: `that message matched scam wording and linked to ${suspiciousDomain}.`
+    };
+  }
+
+  if (matchedPhrase) {
+    return {
+      actionLabel: "scam-phrase",
+      reason: `that message matched a scam or phishing phrase (${matchedPhrase}).`
+    };
+  }
+
+  return null;
+}
+
+function detectBypassAttempt(content) {
+  const normalized = normalizeBypassText(content);
+  if (!normalized) return null;
+
+  if (normalized.includes("discordgg") || normalized.includes("discordcominvite")) {
+    return {
+      actionLabel: "obfuscated-invite",
+      reason: "obfuscated invite links are not allowed here."
+    };
+  }
+
+  const blockedWord = getBannedWords().find(term => {
+    const normalizedTerm = normalizeBypassText(term);
+    return normalizedTerm && normalized.includes(normalizedTerm);
+  });
+
+  if (blockedWord) {
+    return {
+      actionLabel: "obfuscated-banned-word",
+      reason: `that phrase matched a blocked term after bypass normalization (${blockedWord}).`
+    };
+  }
+
+  return null;
 }
 
 function getAccountAgeMs(user) {
@@ -335,6 +559,58 @@ function recordAutoModOffense(userId, action, reason) {
   config.automod.offenses[userId] = offenses;
   saveConfig();
   return offenses;
+}
+
+function recordAutoModAnalytics(action, reason, userTag = "Unknown user") {
+  const analytics = getAutoModAnalytics();
+  analytics.totalDetections = Number(analytics.totalDetections || 0) + 1;
+  analytics.ruleCounts[action] = Number(analytics.ruleCounts[action] || 0) + 1;
+  analytics.recentViolations = [
+    {
+      action,
+      reason: String(reason || "").slice(0, 200),
+      userTag: String(userTag || "Unknown user").slice(0, 80),
+      createdAt: new Date().toISOString()
+    },
+    ...(Array.isArray(analytics.recentViolations) ? analytics.recentViolations : [])
+  ].slice(0, 20);
+}
+
+function buildAutoModAnalyticsLines(limit = 5) {
+  const analytics = getAutoModAnalytics();
+  const topRules = Object.entries(analytics.ruleCounts || {})
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([rule, count]) => `${rule}: ${count}`);
+
+  return topRules.length ? topRules.join("\n") : "No triggers recorded.";
+}
+
+function buildRecentAutoModAnalyticsLines(limit = 5) {
+  const analytics = getAutoModAnalytics();
+  return (analytics.recentViolations || [])
+    .slice(0, limit)
+    .map(entry => {
+      const at = Math.floor(new Date(entry.createdAt).getTime() / 1000);
+      return `<t:${at}:R> - ${entry.action} - ${entry.userTag}`;
+    })
+    .join("\n") || "No recent detections.";
+}
+
+function buildAutoModAnalyticsEmbed() {
+  const analytics = getAutoModAnalytics();
+  return makeEmbed({
+    title: "AutoMod Analytics",
+    description: "Recent trigger volume and the rules firing most often.",
+    color: COLORS.yellow,
+    fields: [
+      { name: "Total Detections", value: `${analytics.totalDetections || 0}`, inline: true },
+      { name: "Tracked Rules", value: `${Object.keys(analytics.ruleCounts || {}).length}`, inline: true },
+      { name: "Exempt Users", value: `${config.automod.exemptUserIds.length}`, inline: true },
+      { name: "Top Rules", value: buildAutoModAnalyticsLines(), inline: false },
+      { name: "Recent Detections", value: buildRecentAutoModAnalyticsLines(), inline: false }
+    ]
+  });
 }
 
 function validateEnv() {
@@ -792,7 +1068,12 @@ const allCommands = [
              { name: "spam", value: "spam" },
              { name: "emoji-spam", value: "emoji-spam" },
              { name: "mass-mentions", value: "mass-mentions" },
-             { name: "invite-link", value: "invite-link" }
+             { name: "invite-link", value: "invite-link" },
+             { name: "scam-phrase", value: "scam-phrase" },
+             { name: "scam-link", value: "scam-link" },
+             { name: "masked-link", value: "masked-link" },
+             { name: "obfuscated-invite", value: "obfuscated-invite" },
+             { name: "obfuscated-banned-word", value: "obfuscated-banned-word" }
            )
         )
         .addBooleanOption(option =>
@@ -1664,6 +1945,7 @@ function isAutoModExempt(message) {
   if (!message.member) return true;
   if (message.member.permissions.has(PermissionFlagsBits.ManageMessages)) return true;
   if (config.automod.exemptChannelIds.includes(message.channel.id)) return true;
+  if (config.automod.exemptUserIds.includes(message.author.id)) return true;
 
   return message.member.roles.cache.some(role => config.automod.exemptRoleIds.includes(role.id));
 }
@@ -2091,7 +2373,8 @@ async function ensureModeratable(interaction, member, actionLabel) {
 }
 
 async function handleAutoModViolation(message, reason, actionLabel) {
-  const alertOnly = getAlertOnlyRules().includes(actionLabel);
+  const ruleAction = getAutoModRuleAction(actionLabel);
+  const alertOnly = ruleAction === "alert";
 
   if (!alertOnly) {
     await message.delete().catch(() => {});
@@ -2104,6 +2387,8 @@ async function handleAutoModViolation(message, reason, actionLabel) {
       setTimeout(() => notice.delete().catch(() => {}), 10000);
     }
   }
+
+  recordAutoModAnalytics(actionLabel, reason, message.author.tag);
 
   const entry = addCase({
     action: `automod:${actionLabel}`,
@@ -2123,9 +2408,88 @@ async function handleAutoModViolation(message, reason, actionLabel) {
 
   const offenses = recordAutoModOffense(message.author.id, actionLabel, reason);
   const activeOffenseCount = offenses.length;
-  let escalationText = alertOnly ? "Alert only" : null;
+  let escalationText = alertOnly ? "Alert only" : `Deleted (${ruleAction})`;
 
-  if (config.automod.escalationEnabled && !alertOnly) {
+  if (!alertOnly && ruleAction === "timeout" && message.member?.moderatable) {
+    await message.member.timeout(
+      config.automod.timeoutDurationMs,
+      `AutoMod rule action (${actionLabel}): ${reason}`
+    ).catch(() => {});
+
+    const timeoutEntry = addCase({
+      action: "automod:timeout",
+      targetId: message.author.id,
+      targetTag: message.author.tag,
+      moderatorTag: "AutoMod",
+      reason: `Automatic timeout from the ${actionLabel} rule. Latest: ${reason}`,
+      details: [
+        { name: "Rule action", value: "timeout", inline: true },
+        { name: "Duration", value: formatDuration(config.automod.timeoutDurationMs), inline: true }
+      ]
+    });
+
+    escalationText = `Rule action timeout applied for ${formatDuration(config.automod.timeoutDurationMs)}.`;
+
+    await notifyUser(
+      message.author,
+      makeEmbed({
+        title: "Automatic timeout",
+        description: `You were automatically timed out in **${message.guild.name}** by AutoMod.`,
+        color: COLORS.red,
+        fields: buildCaseFields(timeoutEntry)
+      })
+    );
+
+    await logEmbed(
+      makeEmbed({
+        title: `Case #${timeoutEntry.id}: automod timeout`,
+        description: `${message.author.tag} was automatically timed out by rule action.`,
+        color: COLORS.red,
+        fields: buildCaseFields(timeoutEntry)
+      })
+    );
+  } else if (!alertOnly && ruleAction === "warn") {
+    const warnings = addWarning(
+      message.author.id,
+      "AutoMod",
+      `Automatic warning from the ${actionLabel} rule. Latest: ${reason}`
+    );
+
+    const warningEntry = addCase({
+      action: "automod:warn",
+      targetId: message.author.id,
+      targetTag: message.author.tag,
+      moderatorTag: "AutoMod",
+      reason: `Automatic warning from the ${actionLabel} rule. Latest: ${reason}`,
+      details: [
+        { name: "Rule action", value: "warn", inline: true },
+        { name: "Total warnings", value: `${warnings.length}`, inline: true }
+      ]
+    });
+
+    escalationText = `Rule action warning issued. Total warnings: ${warnings.length}.`;
+
+    await notifyUser(
+      message.author,
+      makeEmbed({
+        title: "Automatic warning",
+        description: `You received an automatic warning in **${message.guild.name}** from AutoMod.`,
+        color: COLORS.yellow,
+        fields: buildCaseFields(warningEntry)
+      })
+    );
+
+    await logEmbed(
+      makeEmbed({
+        title: `Case #${warningEntry.id}: automod warning`,
+        description: `${message.author.tag} received an automatic warning by rule action.`,
+        color: COLORS.yellow,
+        fields: buildCaseFields(warningEntry)
+      })
+    );
+  }
+
+  if (config.automod.escalationEnabled && !alertOnly && ruleAction !== "timeout") {
     if (
       activeOffenseCount >= config.automod.timeoutThreshold &&
       message.member &&
@@ -2168,7 +2532,7 @@ async function handleAutoModViolation(message, reason, actionLabel) {
           fields: buildCaseFields(timeoutEntry)
         })
       );
-    } else if (activeOffenseCount >= config.automod.warnThreshold) {
+    } else if (activeOffenseCount >= config.automod.warnThreshold && ruleAction !== "warn") {
       const warnings = addWarning(
         message.author.id,
         "AutoMod",
@@ -2218,7 +2582,7 @@ async function handleAutoModViolation(message, reason, actionLabel) {
       fields: [
         ...buildCaseFields(entry),
         { name: "Offenses in window", value: `${activeOffenseCount}`, inline: true },
-        { name: "Mode", value: alertOnly ? "Alert only" : "Enforced", inline: true },
+        { name: "Mode", value: ruleAction, inline: true },
         { name: "Escalation", value: escalationText || "None", inline: false }
       ]
     })
@@ -2586,6 +2950,9 @@ function buildAutoModSummary() {
     `Caps: ${config.automod.caps ? "on" : "off"}`,
     `Banned words: ${config.automod.bannedWords ? "on" : "off"}`,
     `Banned word count: ${getBannedWords().length}`,
+    `Scam filter: ${config.automod.scamFilterEnabled ? "on" : "off"}`,
+    `Scam phrase count: ${getScamPhrases().length}`,
+    `Evasion filter: ${config.automod.evasionFilterEnabled ? "on" : "off"}`,
     `Link filtering: ${config.automod.linksEnabled ? "on" : "off"}`,
     `Allowed links only: ${config.automod.allowedDomainsOnly ? "on" : "off"}`,
     `Allowed domains: ${config.automod.allowedDomains.length}`,
@@ -2613,7 +2980,9 @@ function buildAutoModSummary() {
     `Timeout duration: ${formatDuration(config.automod.timeoutDurationMs)}`,
     `Offense window: ${formatDuration(config.automod.offenseWindowMs)}`,
     `Exempt channels: ${config.automod.exemptChannelIds.length}`,
-    `Exempt roles: ${config.automod.exemptRoleIds.length}`
+    `Exempt roles: ${config.automod.exemptRoleIds.length}`,
+    `Exempt users: ${config.automod.exemptUserIds.length}`,
+    `Custom rule actions: ${Object.keys(config.automod.ruleActions || {}).length}`
   ].join("\n");
 }
 
@@ -2783,6 +3152,16 @@ function parseDurationInputOrZero(input) {
   return parseDuration(normalized);
 }
 
+function parseDurationPairInput(input) {
+  const [firstRaw = "", secondRaw = ""] = String(input || "").split(/[|,]/).map(value => value.trim());
+  const first = parseDurationInputOrZero(firstRaw);
+  const second = parseDurationInputOrZero(secondRaw);
+  if (first === null || second === null) {
+    return null;
+  }
+  return [first, second];
+}
+
 function parseCommaSeparatedList(input, normalizer = value => value.trim().toLowerCase()) {
   return Array.from(
     new Set(
@@ -2904,6 +3283,57 @@ function getPendingPanelAction(userId) {
   return pending;
 }
 
+function buildAutoModExemptionEmbed() {
+  return makeEmbed({
+    title: "AutoMod Exemptions",
+    description: "Use the selectors below to replace the current exempt channels, roles, and users.",
+    color: COLORS.yellow,
+    fields: [
+      {
+        name: "Channels",
+        value: config.automod.exemptChannelIds.map(id => `<#${id}>`).join(", ") || "None",
+        inline: false
+      },
+      {
+        name: "Roles",
+        value: config.automod.exemptRoleIds.map(id => `<@&${id}>`).join(", ") || "None",
+        inline: false
+      },
+      {
+        name: "Users",
+        value: config.automod.exemptUserIds.map(id => `<@${id}>`).join(", ") || "None",
+        inline: false
+      }
+    ]
+  });
+}
+
+function buildAutoModExemptionComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ChannelSelectMenuBuilder()
+        .setCustomId(buildAdminPanelCustomId("exemptselect", "channels"))
+        .setPlaceholder("Choose exempt channels")
+        .setMinValues(0)
+        .setMaxValues(10)
+    ),
+    new ActionRowBuilder().addComponents(
+      new RoleSelectMenuBuilder()
+        .setCustomId(buildAdminPanelCustomId("exemptselect", "roles"))
+        .setPlaceholder("Choose exempt roles")
+        .setMinValues(0)
+        .setMaxValues(10)
+    ),
+    new ActionRowBuilder().addComponents(
+      new UserSelectMenuBuilder()
+        .setCustomId(buildAdminPanelCustomId("exemptselect", "users"))
+        .setPlaceholder("Choose exempt users")
+        .setMinValues(0)
+        .setMaxValues(10)
+    )
+  ];
+}
+
 function buildAdminPanelButtons(view, targetUserId = null) {
   const navigationRow = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
@@ -2990,24 +3420,25 @@ function buildAdminPanelButtons(view, targetUserId = null) {
       ),
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "bannedwords", targetUserId)).setLabel(`Words ${config.automod.bannedWords ? "On" : "Off"}`).setStyle(config.automod.bannedWords ? ButtonStyle.Success : ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "escalation", targetUserId)).setLabel(`Escalation ${config.automod.escalationEnabled ? "On" : "Off"}`).setStyle(config.automod.escalationEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "scam", targetUserId)).setLabel(`Scam ${config.automod.scamFilterEnabled ? "On" : "Off"}`).setStyle(config.automod.scamFilterEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "evasion", targetUserId)).setLabel(`Evasion ${config.automod.evasionFilterEnabled ? "On" : "Off"}`).setStyle(config.automod.evasionFilterEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "attachments", targetUserId)).setLabel(`Attachments ${config.automod.attachmentsEnabled ? "On" : "Off"}`).setStyle(config.automod.attachmentsEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "nicknamefilter", targetUserId)).setLabel(`Nicknames ${config.automod.nicknameFilterEnabled ? "On" : "Off"}`).setStyle(config.automod.nicknameFilterEnabled ? ButtonStyle.Success : ButtonStyle.Secondary)
+      ),
+      new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "ageprotect", targetUserId)).setLabel(`Age Guard ${config.automod.ageProtectionEnabled ? "On" : "Off"}`).setStyle(config.automod.ageProtectionEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "allowonly", targetUserId)).setLabel(`Allow-Only ${config.automod.allowedDomainsOnly ? "On" : "Off"}`).setStyle(config.automod.allowedDomainsOnly ? ButtonStyle.Success : ButtonStyle.Secondary)
-      ),
-      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "allowonly", targetUserId)).setLabel(`Allow-Only ${config.automod.allowedDomainsOnly ? "On" : "Off"}`).setStyle(config.automod.allowedDomainsOnly ? ButtonStyle.Success : ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "antiraid", targetUserId)).setLabel(`Anti-Raid ${config.automod.antiRaidEnabled ? "On" : "Off"}`).setStyle(config.automod.antiRaidEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "nicknamefilter", targetUserId)).setLabel(`Nicknames ${config.automod.nicknameFilterEnabled ? "On" : "Off"}`).setStyle(config.automod.nicknameFilterEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "mentions", targetUserId)).setLabel("Set Mentions").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "emoji-limit", targetUserId)).setLabel("Set Emoji Limit").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "thresholds", targetUserId)).setLabel("Set Thresholds").setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "escalation", targetUserId)).setLabel(`Escalation ${config.automod.escalationEnabled ? "On" : "Off"}`).setStyle(config.automod.escalationEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "automod-analytics", targetUserId)).setLabel("Analytics").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "automod-exemptions", targetUserId)).setLabel("Exemptions").setStyle(ButtonStyle.Secondary)
       ),
       new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "attachment-limit", targetUserId)).setLabel("Attachment Limit").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "raid", targetUserId)).setLabel("Raid Settings").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "age-gates", targetUserId)).setLabel("Age Gates").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "terms", targetUserId)).setLabel("Edit Terms").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "domains", targetUserId)).setLabel("Edit Domains").setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "limits", targetUserId)).setLabel("Limits").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "guard", targetUserId)).setLabel("Guard Settings").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "lists", targetUserId)).setLabel("Lists").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "rule-actions", targetUserId)).setLabel("Rule Actions").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "domains", targetUserId)).setLabel("Domains").setStyle(ButtonStyle.Secondary)
       )
     );
   }
@@ -3128,9 +3559,10 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
   }
 
   if (view === "automod") {
+    const analytics = getAutoModAnalytics();
     return makeEmbed({
       title: "Mochi Admin Panel - AutoMod",
-      description: "Live AutoMod controls for filters, raid safety, age gates, and content lists.",
+      description: "Live AutoMod controls for filters, raid safety, rule actions, and analytics.",
       color: COLORS.yellow,
       fields: [
         { name: "Spam Filter", value: config.automod.spam ? "Enabled" : "Disabled", inline: true },
@@ -3139,6 +3571,8 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
         { name: "Caps Filter", value: config.automod.caps ? "Enabled" : "Disabled", inline: true },
         { name: "Link Filter", value: config.automod.linksEnabled ? "Enabled" : "Disabled", inline: true },
         { name: "Banned Words", value: config.automod.bannedWords ? `Enabled (${getBannedWords().length})` : "Disabled", inline: true },
+        { name: "Scam Filter", value: config.automod.scamFilterEnabled ? `Enabled (${getScamPhrases().length})` : "Disabled", inline: true },
+        { name: "Evasion Filter", value: config.automod.evasionFilterEnabled ? "Enabled" : "Disabled", inline: true },
         { name: "Attachment Filter", value: config.automod.attachmentsEnabled ? `Enabled (${config.automod.maxAttachmentSizeMb}MB)` : "Disabled", inline: true },
         { name: "Age Protection", value: config.automod.ageProtectionEnabled ? "Enabled" : "Disabled", inline: true },
         { name: "Anti-Raid", value: config.automod.antiRaidEnabled ? `${config.automod.raidAction} @ ${config.automod.raidJoinThreshold}` : "Disabled", inline: true },
@@ -3146,13 +3580,19 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
         { name: "Allowed Domains Only", value: config.automod.allowedDomainsOnly ? "Enabled" : "Disabled", inline: true },
         { name: "Allowed Domains", value: `${config.automod.allowedDomains.length}`, inline: true },
         { name: "Blocked Domains", value: `${config.automod.blockedDomains.length}`, inline: true },
+        { name: "Exempt Channels", value: `${config.automod.exemptChannelIds.length}`, inline: true },
+        { name: "Exempt Roles", value: `${config.automod.exemptRoleIds.length}`, inline: true },
+        { name: "Exempt Users", value: `${config.automod.exemptUserIds.length}`, inline: true },
         { name: "Mentions", value: `${config.automod.maxMentions}`, inline: true },
         { name: "Escalation", value: config.automod.escalationEnabled ? "Enabled" : "Disabled", inline: true },
         { name: "Warn Threshold", value: `${config.automod.warnThreshold}`, inline: true },
         { name: "Timeout Threshold", value: `${config.automod.timeoutThreshold}`, inline: true },
         { name: "Link Age Gates", value: `Account ${formatDuration(config.automod.minAccountAgeForLinksMs)} | Member ${formatDuration(config.automod.minMemberAgeForLinksMs)}`, inline: false },
         { name: "Attachment Age Gates", value: `Account ${formatDuration(config.automod.minAccountAgeForAttachmentsMs)} | Member ${formatDuration(config.automod.minMemberAgeForAttachmentsMs)}`, inline: false },
-        { name: "Alert-Only Rules", value: getAlertOnlyRules().join(", ") || "None", inline: false }
+        { name: "Rule Actions", value: Object.keys(config.automod.ruleActions || {}).slice(0, 8).map(rule => `${rule}: ${getAutoModRuleAction(rule)}`).join("\n") || "Using default delete behavior for all rules.", inline: false },
+        { name: "Top Triggered Rules", value: buildAutoModAnalyticsLines(5), inline: false },
+        { name: "Recent Detections", value: buildRecentAutoModAnalyticsLines(4), inline: false },
+        { name: "Analytics Total", value: `${analytics.totalDetections || 0}`, inline: true }
       ]
     });
   }
@@ -3468,6 +3908,7 @@ client.on("interactionCreate", async interaction => {
         kind === "toggle" ||
         kind === "selectrole" ||
         kind === "configmodal" ||
+        kind === "exemptselect" ||
         ["reload-config", "setupverify", "setuprules", "settings-view", "reset-mod-roles", "reset-admin-roles"].includes(action)
           ? "admin"
           : "mod";
@@ -3480,6 +3921,26 @@ client.on("interactionCreate", async interaction => {
         return interaction.update({
           embeds: [await buildAdminPanelEmbed(action, interaction, targetUserId)],
           components: buildAdminPanelButtons(action, targetUserId)
+        });
+      }
+
+      if (kind === "exemptselect") {
+        if (action === "channels") {
+          config.automod.exemptChannelIds = interaction.values;
+        }
+
+        if (action === "roles") {
+          config.automod.exemptRoleIds = interaction.values;
+        }
+
+        if (action === "users") {
+          config.automod.exemptUserIds = interaction.values;
+        }
+
+        saveConfig();
+        return interaction.update({
+          embeds: [buildAutoModExemptionEmbed()],
+          components: buildAutoModExemptionComponents()
         });
       }
 
@@ -3901,6 +4362,105 @@ client.on("interactionCreate", async interaction => {
             );
           return interaction.showModal(modal);
         }
+
+        if (action === "limits") {
+          const modal = new ModalBuilder()
+            .setCustomId(buildAdminPanelCustomId("configsubmit", "limits", targetUserId))
+            .setTitle("Set AutoMod Limits")
+            .addComponents(
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("mentions").setLabel("Mention limit").setStyle(TextInputStyle.Short).setRequired(true).setValue(`${config.automod.maxMentions}`)
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("emojiLimit").setLabel("Emoji limit").setStyle(TextInputStyle.Short).setRequired(true).setValue(`${config.automod.maxEmojiCount}`)
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("attachmentLimit").setLabel("Attachment limit (MB)").setStyle(TextInputStyle.Short).setRequired(true).setValue(`${config.automod.maxAttachmentSizeMb}`)
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("warnThreshold").setLabel("Warn threshold").setStyle(TextInputStyle.Short).setRequired(true).setValue(`${config.automod.warnThreshold}`)
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("timeoutThreshold").setLabel("Timeout threshold").setStyle(TextInputStyle.Short).setRequired(true).setValue(`${config.automod.timeoutThreshold}`)
+              )
+            );
+          return interaction.showModal(modal);
+        }
+
+        if (action === "guard") {
+          const modal = new ModalBuilder()
+            .setCustomId(buildAdminPanelCustomId("configsubmit", "guard", targetUserId))
+            .setTitle("Set Guard Rules")
+            .addComponents(
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("raidThreshold").setLabel("Raid threshold").setStyle(TextInputStyle.Short).setRequired(true).setValue(`${config.automod.raidJoinThreshold}`)
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("raidWindow").setLabel("Raid window").setStyle(TextInputStyle.Short).setRequired(true).setValue(formatDuration(config.automod.raidWindowMs))
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("raidAction").setLabel("Raid action,account age").setStyle(TextInputStyle.Short).setRequired(true).setValue(`${config.automod.raidAction}, ${formatDuration(config.automod.raidAccountAgeLimitMs)}`)
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("linkAges").setLabel("Link ages: account,member").setStyle(TextInputStyle.Short).setRequired(true).setValue(`${formatDuration(config.automod.minAccountAgeForLinksMs)}, ${formatDuration(config.automod.minMemberAgeForLinksMs)}`)
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("attachmentAges").setLabel("Attachment ages: account,member").setStyle(TextInputStyle.Short).setRequired(true).setValue(`${formatDuration(config.automod.minAccountAgeForAttachmentsMs)}, ${formatDuration(config.automod.minMemberAgeForAttachmentsMs)}`)
+              )
+            );
+          return interaction.showModal(modal);
+        }
+
+        if (action === "lists") {
+          const modal = new ModalBuilder()
+            .setCustomId(buildAdminPanelCustomId("configsubmit", "lists", targetUserId))
+            .setTitle("Edit AutoMod Lists")
+            .addComponents(
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("bannedWords").setLabel("Banned words").setStyle(TextInputStyle.Paragraph).setRequired(false).setValue(getBannedWords().join(", ").slice(0, 4000))
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("nicknameTerms").setLabel("Blocked nickname terms").setStyle(TextInputStyle.Paragraph).setRequired(false).setValue(getNicknameBlockedTerms().join(", ").slice(0, 4000))
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("allowedDomains").setLabel("Allowed domains").setStyle(TextInputStyle.Paragraph).setRequired(false).setValue(config.automod.allowedDomains.join(", ").slice(0, 4000))
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("blockedDomains").setLabel("Blocked domains").setStyle(TextInputStyle.Paragraph).setRequired(false).setValue(config.automod.blockedDomains.join(", ").slice(0, 4000))
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("scamPhrases").setLabel("Extra scam phrases").setStyle(TextInputStyle.Paragraph).setRequired(false).setValue((config.automod.scamPhraseList || []).join(", ").slice(0, 4000))
+              )
+            );
+          return interaction.showModal(modal);
+        }
+
+        if (action === "rule-actions") {
+          const groupedRules = AUTOMOD_RULE_KEYS.reduce((acc, rule) => {
+            const mode = getAutoModRuleAction(rule);
+            acc[mode] = [...(acc[mode] || []), rule];
+            return acc;
+          }, {});
+
+          const modal = new ModalBuilder()
+            .setCustomId(buildAdminPanelCustomId("configsubmit", "rule-actions", targetUserId))
+            .setTitle("Set Rule Actions")
+            .addComponents(
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("alertRules").setLabel("Alert-only rules").setStyle(TextInputStyle.Paragraph).setRequired(false).setValue((groupedRules.alert || []).join(", ").slice(0, 4000))
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("warnRules").setLabel("Warn rules").setStyle(TextInputStyle.Paragraph).setRequired(false).setValue((groupedRules.warn || []).join(", ").slice(0, 4000))
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("timeoutRules").setLabel("Timeout rules").setStyle(TextInputStyle.Paragraph).setRequired(false).setValue((groupedRules.timeout || []).join(", ").slice(0, 4000))
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder().setCustomId("resetRules").setLabel("Reset custom rules to default delete").setStyle(TextInputStyle.Paragraph).setRequired(false).setPlaceholder("spam, caps")
+              )
+            );
+          return interaction.showModal(modal);
+        }
       }
 
       if (kind === "toggle") {
@@ -3910,6 +4470,8 @@ client.on("interactionCreate", async interaction => {
         if (action === "caps") config.automod.caps = !config.automod.caps;
         if (action === "links") config.automod.linksEnabled = !config.automod.linksEnabled;
         if (action === "bannedwords") config.automod.bannedWords = !config.automod.bannedWords;
+        if (action === "scam") config.automod.scamFilterEnabled = !config.automod.scamFilterEnabled;
+        if (action === "evasion") config.automod.evasionFilterEnabled = !config.automod.evasionFilterEnabled;
         if (action === "escalation") config.automod.escalationEnabled = !config.automod.escalationEnabled;
         if (action === "attachments") config.automod.attachmentsEnabled = !config.automod.attachmentsEnabled;
         if (action === "ageprotect") config.automod.ageProtectionEnabled = !config.automod.ageProtectionEnabled;
@@ -3927,6 +4489,18 @@ client.on("interactionCreate", async interaction => {
       if (kind === "action") {
         if (action === "status") {
           return interaction.reply({ embeds: [buildStatusEmbed()], ephemeral: true });
+        }
+
+        if (action === "automod-analytics") {
+          return interaction.reply({ embeds: [buildAutoModAnalyticsEmbed()], ephemeral: true });
+        }
+
+        if (action === "automod-exemptions") {
+          return interaction.reply({
+            embeds: [buildAutoModExemptionEmbed()],
+            components: buildAutoModExemptionComponents(),
+            ephemeral: true
+          });
         }
 
         if (action === "dashboard") {
@@ -4328,15 +4902,24 @@ client.on("interactionCreate", async interaction => {
 
       if (!interaction.customId.startsWith("adminpanel:")) return;
       const [, kind, action] = interaction.customId.split(":");
-      if (kind !== "selectrole") return;
+      if (!["selectrole", "exemptselect"].includes(kind)) return;
       if (!(await ensureStaffAccess(interaction, "admin", "the admin panel"))) return;
 
-      if (action === "mod") {
+      if (kind === "selectrole" && action === "mod") {
         config.permissions.modRoleIds = interaction.values;
       }
 
-      if (action === "admin") {
+      if (kind === "selectrole" && action === "admin") {
         config.permissions.adminRoleIds = interaction.values;
+      }
+
+      if (kind === "exemptselect" && action === "roles") {
+        config.automod.exemptRoleIds = interaction.values;
+        saveConfig();
+        return interaction.update({
+          embeds: [buildAutoModExemptionEmbed()],
+          components: buildAutoModExemptionComponents()
+        });
       }
 
       saveConfig();
@@ -4353,13 +4936,40 @@ client.on("interactionCreate", async interaction => {
 
       if (!interaction.customId.startsWith("adminpanel:")) return;
       const [, kind, action] = interaction.customId.split(":");
-      if (kind !== "selectuser") return;
-      if (!(await ensureStaffAccess(interaction, "mod", "the admin panel"))) return;
+      if (!["selectuser", "exemptselect"].includes(kind)) return;
+      if (!(await ensureStaffAccess(interaction, kind === "exemptselect" ? "admin" : "mod", "the admin panel"))) return;
+
+      if (kind === "exemptselect" && action === "users") {
+        config.automod.exemptUserIds = interaction.values;
+        saveConfig();
+        return interaction.update({
+          embeds: [buildAutoModExemptionEmbed()],
+          components: buildAutoModExemptionComponents()
+        });
+      }
 
       const selectedUserId = interaction.values[0];
       return interaction.update({
         embeds: [await buildAdminPanelEmbed(action, interaction, selectedUserId)],
         components: buildAdminPanelButtons(action, selectedUserId)
+      });
+    }
+
+    if (interaction.isChannelSelectMenu()) {
+      if (!ENABLE_CORE_BOT) {
+        return interaction.reply({ content: "Admin controls are disabled on this deployment.", ephemeral: true });
+      }
+
+      if (!interaction.customId.startsWith("adminpanel:")) return;
+      const [, kind, action] = interaction.customId.split(":");
+      if (kind !== "exemptselect" || action !== "channels") return;
+      if (!(await ensureStaffAccess(interaction, "admin", "the admin panel"))) return;
+
+      config.automod.exemptChannelIds = interaction.values;
+      saveConfig();
+      return interaction.update({
+        embeds: [buildAutoModExemptionEmbed()],
+        components: buildAutoModExemptionComponents()
       });
     }
 
@@ -4520,6 +5130,89 @@ client.on("interactionCreate", async interaction => {
             interaction.fields.getTextInputValue("blockedDomains"),
             normalizeDomain
           );
+        }
+
+        if (action === "limits") {
+          const mentions = Number(interaction.fields.getTextInputValue("mentions"));
+          const emojiLimit = Number(interaction.fields.getTextInputValue("emojiLimit"));
+          const attachmentLimit = Number(interaction.fields.getTextInputValue("attachmentLimit"));
+          const warnThreshold = Number(interaction.fields.getTextInputValue("warnThreshold"));
+          const timeoutThreshold = Number(interaction.fields.getTextInputValue("timeoutThreshold"));
+
+          if (
+            !Number.isInteger(mentions) || mentions < 1 || mentions > 25 ||
+            !Number.isInteger(emojiLimit) || emojiLimit < 3 || emojiLimit > 100 ||
+            !Number.isInteger(attachmentLimit) || attachmentLimit < 1 || attachmentLimit > 100 ||
+            !Number.isInteger(warnThreshold) || warnThreshold < 1 || warnThreshold > 20 ||
+            !Number.isInteger(timeoutThreshold) || timeoutThreshold < 1 || timeoutThreshold > 20
+          ) {
+            return interaction.reply({ content: "Check the limits: mentions 1-25, emoji 3-100, attachments 1-100 MB, thresholds 1-20.", ephemeral: true });
+          }
+
+          config.automod.maxMentions = mentions;
+          config.automod.maxEmojiCount = emojiLimit;
+          config.automod.maxAttachmentSizeMb = attachmentLimit;
+          config.automod.warnThreshold = warnThreshold;
+          config.automod.timeoutThreshold = timeoutThreshold;
+        }
+
+        if (action === "guard") {
+          const raidThreshold = Number(interaction.fields.getTextInputValue("raidThreshold"));
+          const raidWindow = parseDuration(interaction.fields.getTextInputValue("raidWindow"));
+          const [raidActionRaw = "", raidAccountAgeRaw = ""] = interaction.fields.getTextInputValue("raidAction").split(/[|,]/).map(value => value.trim());
+          const raidAction = raidActionRaw.toLowerCase();
+          const raidAccountAge = parseDurationInputOrZero(raidAccountAgeRaw);
+          const linkAges = parseDurationPairInput(interaction.fields.getTextInputValue("linkAges"));
+          const attachmentAges = parseDurationPairInput(interaction.fields.getTextInputValue("attachmentAges"));
+
+          if (!Number.isInteger(raidThreshold) || raidThreshold < 2 || raidThreshold > 100) {
+            return interaction.reply({ content: "Raid threshold must be a whole number from 2 to 100.", ephemeral: true });
+          }
+          if (!raidWindow) {
+            return interaction.reply({ content: "Raid window must be a valid duration like 30s, 1m, or 5m.", ephemeral: true });
+          }
+          if (!["log", "timeout"].includes(raidAction)) {
+            return interaction.reply({ content: "Raid action must be either `log` or `timeout`.", ephemeral: true });
+          }
+          if (raidAccountAge === null) {
+            return interaction.reply({ content: "Raid account age must be a valid duration like `1d` or `7d`.", ephemeral: true });
+          }
+          if (!linkAges || !attachmentAges) {
+            return interaction.reply({ content: "Age pairs must use `account, member` durations like `7d, 1d` or `0, 0`.", ephemeral: true });
+          }
+
+          config.automod.raidJoinThreshold = raidThreshold;
+          config.automod.raidWindowMs = raidWindow;
+          config.automod.raidAction = raidAction;
+          config.automod.raidAccountAgeLimitMs = raidAccountAge;
+          config.automod.minAccountAgeForLinksMs = linkAges[0];
+          config.automod.minMemberAgeForLinksMs = linkAges[1];
+          config.automod.minAccountAgeForAttachmentsMs = attachmentAges[0];
+          config.automod.minMemberAgeForAttachmentsMs = attachmentAges[1];
+        }
+
+        if (action === "lists") {
+          config.automod.bannedWordList = parseCommaSeparatedList(interaction.fields.getTextInputValue("bannedWords"));
+          config.automod.nicknameBlockedTerms = parseCommaSeparatedList(interaction.fields.getTextInputValue("nicknameTerms"));
+          config.automod.allowedDomains = parseCommaSeparatedList(interaction.fields.getTextInputValue("allowedDomains"), normalizeDomain);
+          config.automod.blockedDomains = parseCommaSeparatedList(interaction.fields.getTextInputValue("blockedDomains"), normalizeDomain);
+          config.automod.scamPhraseList = parseCommaSeparatedList(interaction.fields.getTextInputValue("scamPhrases"), normalizeComparisonText);
+        }
+
+        if (action === "rule-actions") {
+          const alertRules = parseRuleKeyList(interaction.fields.getTextInputValue("alertRules"));
+          const warnRules = parseRuleKeyList(interaction.fields.getTextInputValue("warnRules"));
+          const timeoutRules = parseRuleKeyList(interaction.fields.getTextInputValue("timeoutRules"));
+          const resetRules = parseRuleKeyList(interaction.fields.getTextInputValue("resetRules"));
+          const ruleActions = {};
+
+          for (const rule of alertRules) ruleActions[rule] = "alert";
+          for (const rule of warnRules) ruleActions[rule] = "warn";
+          for (const rule of timeoutRules) ruleActions[rule] = "timeout";
+          for (const rule of resetRules) delete ruleActions[rule];
+
+          config.automod.ruleActions = ruleActions;
+          config.automod.alertOnlyRules = alertRules;
         }
 
         saveConfig();
@@ -5849,6 +6542,12 @@ client.on("interactionCreate", async interaction => {
         if (!enabled) {
           config.automod.alertOnlyRules = config.automod.alertOnlyRules.filter(entry => entry !== rule);
         }
+
+         if (enabled) {
+          config.automod.ruleActions[rule] = "alert";
+        } else {
+          delete config.automod.ruleActions[rule];
+        }
       }
 
       if (subcommand === "mentions") {
@@ -6385,6 +7084,22 @@ client.on("messageCreate", async message => {
     const normalizedBlockedDomains = config.automod.blockedDomains.map(normalizeDomain);
     const normalizedAllowedDomains = config.automod.allowedDomains.map(normalizeDomain);
 
+    if (config.automod.scamFilterEnabled) {
+      const scamMatch = detectScamAttempt(message);
+      if (scamMatch) {
+        await handleAutoModViolation(message, scamMatch.reason, scamMatch.actionLabel);
+        return;
+      }
+    }
+
+    if (config.automod.evasionFilterEnabled) {
+      const bypassMatch = detectBypassAttempt(message.content);
+      if (bypassMatch) {
+        await handleAutoModViolation(message, bypassMatch.reason, bypassMatch.actionLabel);
+        return;
+      }
+    }
+
     if (config.automod.ageProtectionEnabled && messageDomains.length) {
       if (config.automod.minAccountAgeForLinksMs > 0 && accountAgeMs < config.automod.minAccountAgeForLinksMs) {
         await handleAutoModViolation(
@@ -6598,6 +7313,7 @@ client.on("guildMemberAdd", async member => {
           reason: raidReason,
           details
         });
+        recordAutoModAnalytics("raid-join", raidReason, member.user.tag);
 
         await logEmbed(
           makeEmbed({
@@ -6645,6 +7361,7 @@ client.on("guildMemberAdd", async member => {
           moderatorTag: "AutoMod",
           reason: `Nickname matched blocked term "${blockedTerm}" on join.`
         });
+        recordAutoModAnalytics("nickname", `Nickname matched blocked term "${blockedTerm}" on join.`, member.user.tag);
 
         await logAutoModEmbed(
           makeEmbed({
@@ -6681,6 +7398,7 @@ client.on("guildMemberUpdate", async (oldMember, newMember) => {
       reason: `Nickname matched blocked term "${blockedTerm}".`,
       details: [{ name: "Nickname", value: newMember.displayName.slice(0, 1024), inline: false }]
     });
+    recordAutoModAnalytics("nickname", `Nickname matched blocked term "${blockedTerm}".`, newMember.user.tag);
 
     await logAutoModEmbed(
       makeEmbed({
