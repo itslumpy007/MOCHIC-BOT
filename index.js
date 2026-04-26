@@ -3558,28 +3558,58 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
       description: "Live AutoMod controls for filters, raid safety, rule actions, and analytics.",
       color: COLORS.yellow,
       fields: [
-        { name: "Spam Filter", value: config.automod.spam ? "Enabled" : "Disabled", inline: true },
-        { name: "Invite Filter", value: config.automod.invites ? "Enabled" : "Disabled", inline: true },
-        { name: "Emoji Spam", value: config.automod.emojiSpamEnabled ? `Enabled (${config.automod.maxEmojiCount})` : "Disabled", inline: true },
-        { name: "Caps Filter", value: config.automod.caps ? "Enabled" : "Disabled", inline: true },
-        { name: "Link Filter", value: config.automod.linksEnabled ? "Enabled" : "Disabled", inline: true },
-        { name: "Banned Words", value: config.automod.bannedWords ? `Enabled (${getBannedWords().length})` : "Disabled", inline: true },
-        { name: "Scam Filter", value: config.automod.scamFilterEnabled ? `Enabled (${getScamPhrases().length})` : "Disabled", inline: true },
-        { name: "Evasion Filter", value: config.automod.evasionFilterEnabled ? "Enabled" : "Disabled", inline: true },
-        { name: "Attachment Filter", value: config.automod.attachmentsEnabled ? `Enabled (${config.automod.maxAttachmentSizeMb}MB)` : "Disabled", inline: true },
-        { name: "Age Protection", value: config.automod.ageProtectionEnabled ? "Enabled" : "Disabled", inline: true },
-        { name: "Anti-Raid", value: config.automod.antiRaidEnabled ? `${config.automod.raidAction} @ ${config.automod.raidJoinThreshold}` : "Disabled", inline: true },
-        { name: "Nickname Filter", value: config.automod.nicknameFilterEnabled ? `Enabled (${getNicknameBlockedTerms().length})` : "Disabled", inline: true },
-        { name: "Allowed Domains Only", value: config.automod.allowedDomainsOnly ? "Enabled" : "Disabled", inline: true },
-        { name: "Allowed Domains", value: `${config.automod.allowedDomains.length}`, inline: true },
-        { name: "Blocked Domains", value: `${config.automod.blockedDomains.length}`, inline: true },
-        { name: "Exempt Channels", value: `${config.automod.exemptChannelIds.length}`, inline: true },
-        { name: "Exempt Roles", value: `${config.automod.exemptRoleIds.length}`, inline: true },
-        { name: "Exempt Users", value: `${config.automod.exemptUserIds.length}`, inline: true },
-        { name: "Mentions", value: `${config.automod.maxMentions}`, inline: true },
-        { name: "Escalation", value: config.automod.escalationEnabled ? "Enabled" : "Disabled", inline: true },
-        { name: "Warn Threshold", value: `${config.automod.warnThreshold}`, inline: true },
-        { name: "Timeout Threshold", value: `${config.automod.timeoutThreshold}`, inline: true },
+        {
+          name: "Core Filters",
+          value: [
+            `Spam: ${config.automod.spam ? "On" : "Off"}`,
+            `Invites: ${config.automod.invites ? "On" : "Off"}`,
+            `Caps: ${config.automod.caps ? "On" : "Off"}`,
+            `Links: ${config.automod.linksEnabled ? "On" : "Off"}`,
+            `Words: ${config.automod.bannedWords ? `On (${getBannedWords().length})` : "Off"}`
+          ].join("\n"),
+          inline: true
+        },
+        {
+          name: "Advanced Filters",
+          value: [
+            `Scam: ${config.automod.scamFilterEnabled ? `On (${getScamPhrases().length})` : "Off"}`,
+            `Evasion: ${config.automod.evasionFilterEnabled ? "On" : "Off"}`,
+            `Nicknames: ${config.automod.nicknameFilterEnabled ? `On (${getNicknameBlockedTerms().length})` : "Off"}`,
+            `Emoji: ${config.automod.emojiSpamEnabled ? `On (${config.automod.maxEmojiCount})` : "Off"}`,
+            `Mentions: ${config.automod.maxMentions}`
+          ].join("\n"),
+          inline: true
+        },
+        {
+          name: "Attachments And Links",
+          value: [
+            `Attachments: ${config.automod.attachmentsEnabled ? `On (${config.automod.maxAttachmentSizeMb}MB)` : "Off"}`,
+            `Allow-only domains: ${config.automod.allowedDomainsOnly ? "On" : "Off"}`,
+            `Allowed domains: ${config.automod.allowedDomains.length}`,
+            `Blocked domains: ${config.automod.blockedDomains.length}`
+          ].join("\n"),
+          inline: true
+        },
+        {
+          name: "Protection",
+          value: [
+            `Age guard: ${config.automod.ageProtectionEnabled ? "On" : "Off"}`,
+            `Anti-raid: ${config.automod.antiRaidEnabled ? `${config.automod.raidAction} @ ${config.automod.raidJoinThreshold}` : "Off"}`,
+            `Escalation: ${config.automod.escalationEnabled ? "On" : "Off"}`,
+            `Warn threshold: ${config.automod.warnThreshold}`,
+            `Timeout threshold: ${config.automod.timeoutThreshold}`
+          ].join("\n"),
+          inline: true
+        },
+        {
+          name: "Exemptions",
+          value: [
+            `Channels: ${config.automod.exemptChannelIds.length}`,
+            `Roles: ${config.automod.exemptRoleIds.length}`,
+            `Users: ${config.automod.exemptUserIds.length}`
+          ].join("\n"),
+          inline: true
+        },
         { name: "Link Age Gates", value: `Account ${formatDuration(config.automod.minAccountAgeForLinksMs)} | Member ${formatDuration(config.automod.minMemberAgeForLinksMs)}`, inline: false },
         { name: "Attachment Age Gates", value: `Account ${formatDuration(config.automod.minAccountAgeForAttachmentsMs)} | Member ${formatDuration(config.automod.minMemberAgeForAttachmentsMs)}`, inline: false },
         { name: "Rule Actions", value: Object.keys(config.automod.ruleActions || {}).slice(0, 8).map(rule => `${rule}: ${getAutoModRuleAction(rule)}`).join("\n") || "Using default delete behavior for all rules.", inline: false },
