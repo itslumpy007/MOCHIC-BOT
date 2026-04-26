@@ -2,7 +2,6 @@
 
 const fs = require("fs");
 const path = require("path");
-const play = require("play-dl");
 
 const {
   ActionRowBuilder,
@@ -24,17 +23,6 @@ const {
   TextInputStyle,
   UserSelectMenuBuilder
 } = require("discord.js");
-const {
-  AudioPlayerStatus,
-  createAudioPlayer,
-  createAudioResource,
-  entersState,
-  joinVoiceChannel,
-  NoSubscriberBehavior,
-  StreamType,
-  VoiceConnectionStatus
-} = require("@discordjs/voice");
-const { WebcastPushConnection } = require("tiktok-live-connector");
 
 const {
   TOKEN,
@@ -43,8 +31,6 @@ const {
   VERIFY_CHANNEL_ID,
   RULES_CHANNEL_ID,
   LOG_CHANNEL_ID,
-  TIKTOK_USERNAME,
-  TIKTOK_CHANNEL_ID,
   SAKURA_ROLE_ID,
   STRAWBERRY_ROLE_ID,
   MATCHA_ROLE_ID,
@@ -58,7 +44,6 @@ function envFlag(value, fallback = false) {
 }
 
 const ENABLE_CORE_BOT = envFlag(process.env.ENABLE_CORE_BOT, true);
-const ENABLE_MUSIC = envFlag(process.env.ENABLE_MUSIC, true);
 
 const client = new Client({
   intents: [
@@ -66,7 +51,6 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildMessageReactions,
-    GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.MessageContent
   ],
   partials: [Partials.Message, Partials.Channel, Partials.Reaction]
@@ -139,14 +123,8 @@ const SUSPICIOUS_SCAM_DOMAINS = [
   "linktr.ee",
   "lnk.bio"
 ];
-const TIKTOK_LIVE_RECONNECT_MS = 20 * 1000;
-const TIKTOK_OFFLINE_RECHECK_MS = 60 * 1000;
-const TIKTOK_HEALTHCHECK_MS = 90 * 1000;
-const TIKTOK_ROOMINFO_POLL_MS = 45 * 1000;
-const TIKTOK_OFFLINE_CONFIRMATION_ATTEMPTS = 2;
 const spamTracker = new Map();
 const joinTracker = new Map();
-const musicQueues = new Map();
 const pendingPanelActions = new Map();
 let tempBanInterval = null;
 
@@ -215,9 +193,7 @@ function createDefaultConfig() {
       rulesChannelId: null,
       logChannelId: null,
       automodLogChannelId: null,
-      mutedRoleId: null,
-      tiktokUsername: null,
-      tiktokChannelId: null
+      mutedRoleId: null
     },
     permissions: {
       modRoleIds: [],
@@ -309,14 +285,6 @@ function getLogChannelId() {
 
 function getAutoModLogChannelId() {
   return config.settings.automodLogChannelId || getLogChannelId();
-}
-
-function getTikTokUsername() {
-  return config.settings.tiktokUsername || TIKTOK_USERNAME;
-}
-
-function getTikTokChannelId() {
-  return config.settings.tiktokChannelId || TIKTOK_CHANNEL_ID;
 }
 
 function getMutedRoleId() {
@@ -621,8 +589,8 @@ function validateEnv() {
     throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
   }
 
-  if (!ENABLE_CORE_BOT && !ENABLE_MUSIC) {
-    throw new Error("At least one bot feature must be enabled. Set ENABLE_CORE_BOT=true or ENABLE_MUSIC=true.");
+  if (!ENABLE_CORE_BOT) {
+    throw new Error("At least one bot feature must be enabled. Set ENABLE_CORE_BOT=true.");
   }
 }
 
@@ -642,45 +610,6 @@ const allCommands = [
   new SlashCommandBuilder()
     .setName("help")
     .setDescription("Show the bot's main commands"),
-
-  new SlashCommandBuilder()
-    .setName("play")
-    .setDescription("Join voice and play a YouTube song or search result")
-    .addStringOption(option =>
-      option.setName("query").setDescription("YouTube URL or search query").setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName("skip")
-    .setDescription("Skip the current song"),
-
-  new SlashCommandBuilder()
-    .setName("stop")
-    .setDescription("Stop playback and clear the queue"),
-
-  new SlashCommandBuilder()
-    .setName("pause")
-    .setDescription("Pause the current song"),
-
-  new SlashCommandBuilder()
-    .setName("resume")
-    .setDescription("Resume paused playback"),
-
-  new SlashCommandBuilder()
-    .setName("queue")
-    .setDescription("View the current music queue"),
-
-  new SlashCommandBuilder()
-    .setName("musicpanel")
-    .setDescription("Open the interactive music control panel"),
-
-  new SlashCommandBuilder()
-    .setName("nowplaying")
-    .setDescription("Show the currently playing song"),
-
-  new SlashCommandBuilder()
-    .setName("leave")
-    .setDescription("Make the bot leave the voice channel"),
 
   new SlashCommandBuilder()
     .setName("adminpanel")
@@ -741,9 +670,7 @@ const allCommands = [
         .setDescription("What to reload")
         .setRequired(true)
         .addChoices(
-          { name: "TikTok connection", value: "tiktok" },
-          { name: "Config from disk", value: "config" },
-          { name: "Both", value: "all" }
+          { name: "Config from disk", value: "config" }
         )
     ),
 
@@ -1453,26 +1380,6 @@ const allCommands = [
     )
     .addSubcommand(subcommand =>
       subcommand
-        .setName("tiktokuser")
-        .setDescription("Set the TikTok username to watch")
-        .addStringOption(option =>
-          option.setName("username").setDescription("TikTok username without @").setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("tiktokchannel")
-        .setDescription("Set the Discord channel for TikTok alerts")
-        .addChannelOption(option =>
-          option
-            .setName("channel")
-            .setDescription("Channel for TikTok notifications")
-            .addChannelTypes(ChannelType.GuildText)
-            .setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
         .setName("reset")
         .setDescription("Reset one saved setting back to its env default")
         .addStringOption(option =>
@@ -1485,9 +1392,7 @@ const allCommands = [
               { name: "automod log channel", value: "automodlogchannel" },
               { name: "muted role", value: "mutedrole" },
               { name: "verify channel", value: "verifychannel" },
-              { name: "rules channel", value: "ruleschannel" },
-              { name: "TikTok username", value: "tiktokuser" },
-              { name: "TikTok alerts channel", value: "tiktokchannel" }
+              { name: "rules channel", value: "ruleschannel" }
             )
         )
     ),
@@ -1540,49 +1445,7 @@ const allCommands = [
     )
 ];
 
-const MUSIC_COMMAND_NAMES = new Set([
-  "play",
-  "skip",
-  "stop",
-  "pause",
-  "resume",
-  "queue",
-  "musicpanel",
-  "nowplaying",
-  "leave"
-]);
-
-const SHARED_COMMAND_NAMES = new Set(["help"]);
-
-const commands = allCommands
-  .filter(command => {
-    if (SHARED_COMMAND_NAMES.has(command.name)) {
-      return true;
-    }
-
-    if (MUSIC_COMMAND_NAMES.has(command.name)) {
-      return ENABLE_MUSIC;
-    }
-
-    return ENABLE_CORE_BOT;
-  })
-  .map(command => command.toJSON());
-
-let tiktokConnection = null;
-let reconnectTimeout = null;
-let wasLive = false;
-let tiktokHealthInterval = null;
-let tiktokConnectionVersion = 0;
-let tiktokOfflineChecks = 0;
-let tiktokLastConnectAt = null;
-let tiktokLastDisconnectAt = null;
-let tiktokLastError = null;
-let tiktokCurrentUsername = null;
-let tiktokLastRoomCheckAt = null;
-let tiktokLastRoomStatus = null;
-let tiktokLastRoomId = null;
-let tiktokAnnouncedRoomId = null;
-let tiktokRoomInfoSyncPromise = null;
+const commands = allCommands.map(command => command.toJSON());
 const startedAt = Date.now();
 
 function makeEmbed({ title, description, color = COLORS.pink, fields = [], thumbnail = null }) {
@@ -1975,368 +1838,6 @@ async function notifyUser(user, embed) {
   await user.send({ embeds: [embed] }).catch(() => {});
 }
 
-function formatTrackDuration(seconds) {
-  if (!Number.isFinite(seconds) || seconds <= 0) return "Live";
-  const total = Math.floor(seconds);
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const remaining = total % 60;
-  return hours > 0
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remaining).padStart(2, "0")}`
-    : `${minutes}:${String(remaining).padStart(2, "0")}`;
-}
-
-function buildMusicSummary(track, prefix = "Now playing") {
-  return makeEmbed({
-    title: prefix,
-    description: `[${track.title}](${track.url})`,
-    color: COLORS.rose,
-    fields: [
-      { name: "Duration", value: track.durationText, inline: true },
-      { name: "Requested by", value: track.requestedBy, inline: true }
-    ],
-    thumbnail: track.thumbnail || null
-  });
-}
-
-function buildMusicPanelCustomId(kind, action) {
-  return `musicpanel:${kind}:${action}`;
-}
-
-function buildMusicPanelButtons(guildId) {
-  const queue = musicQueues.get(guildId);
-  const hasCurrent = Boolean(queue?.current);
-  const hasQueue = Boolean(queue && (queue.current || queue.tracks.length));
-  const isPaused = queue?.player?.state?.status === AudioPlayerStatus.Paused;
-
-  return [
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(buildMusicPanelCustomId("modal", "play"))
-        .setLabel("Request Song")
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId(buildMusicPanelCustomId("action", "pause"))
-        .setLabel("Pause")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(!hasCurrent || isPaused),
-      new ButtonBuilder()
-        .setCustomId(buildMusicPanelCustomId("action", "resume"))
-        .setLabel("Resume")
-        .setStyle(ButtonStyle.Success)
-        .setDisabled(!hasCurrent || !isPaused),
-      new ButtonBuilder()
-        .setCustomId(buildMusicPanelCustomId("action", "skip"))
-        .setLabel("Skip")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(!hasCurrent),
-      new ButtonBuilder()
-        .setCustomId(buildMusicPanelCustomId("action", "refresh"))
-        .setLabel("Refresh")
-        .setStyle(ButtonStyle.Secondary)
-    ),
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(buildMusicPanelCustomId("action", "queue"))
-        .setLabel("Queue")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(!hasQueue),
-      new ButtonBuilder()
-        .setCustomId(buildMusicPanelCustomId("action", "nowplaying"))
-        .setLabel("Now Playing")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(!hasCurrent),
-      new ButtonBuilder()
-        .setCustomId(buildMusicPanelCustomId("action", "stop"))
-        .setLabel("Stop")
-        .setStyle(ButtonStyle.Danger)
-        .setDisabled(!hasQueue),
-      new ButtonBuilder()
-        .setCustomId(buildMusicPanelCustomId("action", "leave"))
-        .setLabel("Leave")
-        .setStyle(ButtonStyle.Danger)
-        .setDisabled(!hasQueue)
-    )
-  ];
-}
-
-function buildMusicPanelEmbed(guildId) {
-  const queue = musicQueues.get(guildId);
-  const upcoming = queue?.tracks?.length
-    ? queue.tracks.slice(0, 5).map((track, index) => `${index + 1}. ${track.title} • ${track.durationText}`).join("\n")
-    : "Nothing queued yet.";
-  const status =
-    queue?.player?.state?.status === AudioPlayerStatus.Playing
-      ? "Playing"
-      : queue?.player?.state?.status === AudioPlayerStatus.Paused
-        ? "Paused"
-        : queue?.current
-          ? "Buffering"
-          : "Idle";
-
-  return makeEmbed({
-    title: "Mochi Music Panel",
-    description: queue?.current
-      ? `Current track: [${queue.current.title}](${queue.current.url})`
-      : "Use the panel buttons below to request and control music in voice chat.",
-    color: COLORS.rose,
-    fields: [
-      { name: "Status", value: status, inline: true },
-      { name: "Voice Channel", value: queue?.voiceChannelId ? `<#${queue.voiceChannelId}>` : "Not connected", inline: true },
-      { name: "Queued Songs", value: `${queue?.tracks?.length || 0}`, inline: true },
-      { name: "Now Playing", value: queue?.current ? `${queue.current.title}\n${queue.current.durationText} • ${queue.current.requestedBy}` : "Nothing is playing right now.", inline: false },
-      { name: "Up Next", value: upcoming.slice(0, 1024), inline: false }
-    ],
-    thumbnail: queue?.current?.thumbnail || null
-  });
-}
-
-async function sendMusicMessage(queue, payload) {
-  try {
-    if (!queue?.textChannelId || !queue?.guildId) return;
-    const guild = client.guilds.cache.get(queue.guildId) || await client.guilds.fetch(queue.guildId).catch(() => null);
-    const channel = guild?.channels?.cache?.get(queue.textChannelId) || await client.channels.fetch(queue.textChannelId).catch(() => null);
-    if (!channel?.send) return;
-    await channel.send(payload);
-  } catch (error) {
-    console.error("Music message error:", error.message);
-  }
-}
-
-function destroyMusicQueue(guildId) {
-  const queue = musicQueues.get(guildId);
-  if (!queue) return;
-
-  try {
-    queue.connection?.destroy();
-  } catch (error) {
-    console.error("Music disconnect error:", error.message);
-  }
-
-  try {
-    queue.player?.stop();
-  } catch (error) {
-    console.error("Music player stop error:", error.message);
-  }
-
-  musicQueues.delete(guildId);
-}
-
-async function stopMusicQueue(guildId, reason = "Playback stopped.") {
-  const queue = musicQueues.get(guildId);
-  if (!queue) return;
-
-  destroyMusicQueue(guildId);
-  await sendMusicMessage(queue, {
-    embeds: [
-      makeEmbed({
-        title: "Music stopped",
-        description: reason,
-        color: COLORS.purple
-      })
-    ]
-  });
-}
-
-async function playNextTrack(guildId) {
-  const queue = musicQueues.get(guildId);
-  if (!queue) return;
-
-  if (!queue.tracks.length) {
-    queue.current = null;
-    await stopMusicQueue(guildId, "The queue finished, so I left the voice channel.");
-    return;
-  }
-
-  const nextTrack = queue.tracks.shift();
-  queue.current = nextTrack;
-
-  try {
-    const stream = await play.stream(nextTrack.url);
-    const resource = createAudioResource(stream.stream, {
-      inputType: stream.type || StreamType.Arbitrary,
-      metadata: nextTrack
-    });
-    queue.player.play(resource);
-    await sendMusicMessage(queue, { embeds: [buildMusicSummary(nextTrack)] });
-  } catch (error) {
-    console.error("Music playback error:", error.message);
-    await sendMusicMessage(queue, {
-      embeds: [
-        makeEmbed({
-          title: "Playback error",
-          description: `I couldn't play **${nextTrack.title}**. Skipping to the next song.`,
-          color: COLORS.red
-        })
-      ]
-    });
-    queue.current = null;
-    await playNextTrack(guildId);
-  }
-}
-
-function createMusicQueue(guild, voiceChannel, textChannel) {
-  const player = createAudioPlayer({
-    behaviors: {
-      noSubscriber: NoSubscriberBehavior.Pause
-    }
-  });
-
-  const connection = joinVoiceChannel({
-    channelId: voiceChannel.id,
-    guildId: guild.id,
-    adapterCreator: guild.voiceAdapterCreator,
-    selfDeaf: true
-  });
-
-  const queue = {
-    guildId: guild.id,
-    textChannelId: textChannel.id,
-    voiceChannelId: voiceChannel.id,
-    connection,
-    player,
-    tracks: [],
-    current: null
-  };
-
-  connection.subscribe(player);
-
-  player.on(AudioPlayerStatus.Idle, () => {
-    queue.current = null;
-    playNextTrack(guild.id).catch(error => {
-      console.error("Music queue idle error:", error.message);
-    });
-  });
-
-  player.on("error", error => {
-    console.error("Music player error:", error.message);
-    playNextTrack(guild.id).catch(nextError => {
-      console.error("Music recovery error:", nextError.message);
-    });
-  });
-
-  connection.on(VoiceConnectionStatus.Disconnected, async () => {
-    try {
-      await Promise.race([
-        entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
-        entersState(connection, VoiceConnectionStatus.Connecting, 5_000)
-      ]);
-    } catch (error) {
-      await stopMusicQueue(guild.id, "I got disconnected from voice, so I cleared the queue.");
-    }
-  });
-
-  musicQueues.set(guild.id, queue);
-  return queue;
-}
-
-async function ensureVoiceChannel(interaction) {
-  const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-  const voiceChannel = member?.voice?.channel || null;
-
-  if (!voiceChannel) {
-    await interaction.reply({ content: "Join a voice channel first, then try that again.", ephemeral: true });
-    return null;
-  }
-
-  const botMember = interaction.guild.members.me || await interaction.guild.members.fetchMe().catch(() => null);
-  const permissions = botMember ? voiceChannel.permissionsFor(botMember) : null;
-  const missing = [];
-
-  if (!permissions?.has(PermissionFlagsBits.ViewChannel)) {
-    missing.push("View Channel");
-  }
-
-  if (!permissions?.has(PermissionFlagsBits.Connect)) {
-    missing.push("Connect");
-  }
-
-  if (!permissions?.has(PermissionFlagsBits.Speak)) {
-    missing.push("Speak");
-  }
-
-  if (missing.length) {
-    await interaction.reply({
-      content: `I can't use ${voiceChannel} yet. Missing voice permissions: ${missing.join(", ")}.`,
-      ephemeral: true
-    });
-    return null;
-  }
-
-  return voiceChannel;
-}
-
-async function describeVoiceJoinFailure(interaction, voiceChannel, error) {
-  const botMember = interaction.guild.members.me || await interaction.guild.members.fetchMe().catch(() => null);
-  const permissions = botMember ? voiceChannel.permissionsFor(botMember) : null;
-  const missing = [];
-
-  if (!permissions?.has(PermissionFlagsBits.ViewChannel)) missing.push("View Channel");
-  if (!permissions?.has(PermissionFlagsBits.Connect)) missing.push("Connect");
-  if (!permissions?.has(PermissionFlagsBits.Speak)) missing.push("Speak");
-  if (!permissions?.has(PermissionFlagsBits.UseVAD)) missing.push("Use Voice Activity");
-
-  if (missing.length) {
-    return `I couldn't fully join ${voiceChannel}. Missing permissions: ${missing.join(", ")}.`;
-  }
-
-  if (voiceChannel.type === ChannelType.GuildStageVoice) {
-    return `I reached ${voiceChannel}, but it's a Stage channel. I may need to be invited to speak before audio can work.`;
-  }
-
-  if (typeof voiceChannel.full === "boolean" && voiceChannel.full) {
-    return `${voiceChannel} is full right now, so I can't join it.`;
-  }
-
-  const reason = String(error?.message || error || "unknown voice connection issue").slice(0, 200);
-  return `I could see ${voiceChannel}, but the voice connection never became ready. Discord reported: ${reason}`;
-}
-
-function ensureSameVoiceChannel(interaction, queue) {
-  const memberChannelId = interaction.member?.voice?.channelId;
-  if (!queue || !queue.voiceChannelId || queue.voiceChannelId === memberChannelId) {
-    return true;
-  }
-
-  interaction.reply({
-    content: "You need to be in the same voice channel as the bot to use that music control.",
-    ephemeral: true
-  }).catch(() => {});
-  return false;
-}
-
-async function resolveMusicTrack(query, requestedBy) {
-  const trimmed = query.trim();
-  const validation = play.yt_validate(trimmed);
-  let video = null;
-
-  if (validation === "video") {
-    const info = await play.video_basic_info(trimmed);
-    video = info.video_details;
-  } else {
-    const results = await play.search(trimmed, {
-      limit: 1,
-      source: { youtube: "video" }
-    });
-    video = results[0] || null;
-  }
-
-  if (!video?.url) {
-    return null;
-  }
-
-  const durationInSec = Number(video.durationInSec || video.durationRaw || 0) || 0;
-
-  return {
-    title: video.title || "Unknown track",
-    url: video.url,
-    durationInSec,
-    durationText: formatTrackDuration(durationInSec),
-    thumbnail: video.thumbnails?.[0]?.url || video.thumbnail?.url || null,
-    requestedBy
-  };
-}
-
 async function ensureModeratable(interaction, member, actionLabel) {
   if (!member) {
     await interaction.reply({ content: "That member could not be found.", ephemeral: true });
@@ -2589,360 +2090,6 @@ async function handleAutoModViolation(message, reason, actionLabel) {
   );
 }
 
-function isLikelyTikTokOfflineError(error) {
-  const message = String(error?.message || error || "").toLowerCase();
-  return [
-    "offline",
-    "room_id",
-    "user_not_found",
-    "not currently live",
-    "live has ended",
-    "failed to fetch room info",
-    "is not live"
-  ].some(fragment => message.includes(fragment));
-}
-
-function isTikTokRoomLive(roomInfo) {
-  return Number(roomInfo?.status) === 2;
-}
-
-function getTikTokRoomIdentifier(roomInfo, fallbackRoomId = null) {
-  return String(
-    roomInfo?.stream_id_str ||
-    roomInfo?.stream_id ||
-    roomInfo?.id_str ||
-    roomInfo?.id ||
-    fallbackRoomId ||
-    ""
-  );
-}
-
-async function fetchTikTokRoomInfo(uniqueId) {
-  const probe = new WebcastPushConnection(uniqueId, {
-    processInitialData: false,
-    fetchRoomInfoOnConnect: false,
-    enableWebsocketUpgrade: false
-  });
-
-  return probe.getRoomInfo();
-}
-
-async function announceTikTokLiveStarted(username, channelId, roomId, roomInfo = null) {
-  const liveId = roomId || getTikTokRoomIdentifier(roomInfo);
-  wasLive = true;
-
-  if (liveId) {
-    tiktokLastRoomId = liveId;
-    if (tiktokAnnouncedRoomId === liveId) {
-      return;
-    }
-    tiktokAnnouncedRoomId = liveId;
-  }
-
-  const viewerCount = roomInfo?.stats?.user_count_str || roomInfo?.stats?.user_count || null;
-  const liveTitle = roomInfo?.title || null;
-
-  await safeSend(channelId, {
-    embeds: [
-      makeEmbed({
-        title: "TikTok LIVE started",
-        description:
-          `**@${username}** is live right now.\n\n` +
-          `Come join the stream here:\nhttps://tiktok.com/@${username}/live`,
-        color: COLORS.rose,
-        fields: [
-          ...(liveTitle ? [{ name: "Title", value: String(liveTitle).slice(0, 1024), inline: false }] : []),
-          ...(viewerCount ? [{ name: "Viewers", value: `${viewerCount}`, inline: true }] : [])
-        ]
-      })
-    ]
-  });
-}
-
-function clearTikTokReconnect() {
-  if (!reconnectTimeout) return;
-  clearTimeout(reconnectTimeout);
-  reconnectTimeout = null;
-}
-
-function cleanupTikTokConnection() {
-  if (!tiktokConnection) return;
-
-  try {
-    tiktokConnection.removeAllListeners();
-  } catch (error) {
-    console.error("TikTok listener cleanup error:", error.message);
-  }
-
-  try {
-    tiktokConnection.disconnect();
-  } catch (error) {
-    console.error("TikTok disconnect error:", error.message);
-  }
-
-  tiktokConnection = null;
-}
-
-async function sendTikTokEndedMessage(username, channelId, reason = null) {
-  if (!wasLive) return;
-
-  wasLive = false;
-  tiktokAnnouncedRoomId = null;
-  await safeSend(channelId, {
-    embeds: [
-      makeEmbed({
-        title: "TikTok LIVE ended",
-        description: reason
-          ? `@${username}'s stream appears to have ended.\n\nReason: ${reason}`
-          : `@${username}'s stream has ended.`,
-        color: COLORS.purple
-      })
-    ]
-  });
-}
-
-function scheduleTikTokReconnect(delayMs = TIKTOK_OFFLINE_RECHECK_MS, reason = "retry") {
-  if (reconnectTimeout) return;
-
-  console.log(`Retrying TikTok connection in ${Math.floor(delayMs / 1000)} seconds (${reason})...`);
-
-  reconnectTimeout = setTimeout(() => {
-    reconnectTimeout = null;
-    startTikTokLive().catch(error => {
-      console.error("TikTok retry error:", error.message);
-    });
-  }, delayMs);
-}
-
-function ensureTikTokHealthcheck() {
-  if (tiktokHealthInterval) {
-    clearInterval(tiktokHealthInterval);
-  }
-
-  tiktokHealthInterval = setInterval(async () => {
-    const tiktokUsername = getTikTokUsername();
-    const tiktokChannelId = getTikTokChannelId();
-
-    if (!tiktokUsername || !tiktokChannelId) {
-      clearTikTokReconnect();
-      cleanupTikTokConnection();
-      tiktokCurrentUsername = null;
-      return;
-    }
-
-    if (tiktokCurrentUsername && tiktokCurrentUsername !== tiktokUsername) {
-      resetTikTokConnection().catch(error => {
-        console.error("TikTok username refresh error:", error.message);
-      });
-      return;
-    }
-
-    const shouldPollRoomInfo =
-      !tiktokLastRoomCheckAt ||
-      Date.now() - new Date(tiktokLastRoomCheckAt).getTime() >= TIKTOK_ROOMINFO_POLL_MS;
-
-    if (shouldPollRoomInfo) {
-      await syncTikTokRoomInfo("healthcheck");
-    }
-
-    if (!tiktokConnection && !reconnectTimeout && wasLive) {
-      startTikTokLive().catch(error => {
-        console.error("TikTok healthcheck restart error:", error.message);
-      });
-    }
-  }, TIKTOK_HEALTHCHECK_MS);
-}
-
-async function syncTikTokRoomInfo(trigger = "poll") {
-  if (tiktokRoomInfoSyncPromise) {
-    return tiktokRoomInfoSyncPromise;
-  }
-
-  const tiktokUsername = getTikTokUsername();
-  const tiktokChannelId = getTikTokChannelId();
-
-  if (!tiktokUsername || !tiktokChannelId) return null;
-
-  tiktokRoomInfoSyncPromise = (async () => {
-    try {
-      const roomInfo = await fetchTikTokRoomInfo(tiktokUsername);
-      tiktokLastRoomCheckAt = new Date().toISOString();
-      tiktokLastRoomStatus = roomInfo?.status ?? null;
-      const liveRoomId = getTikTokRoomIdentifier(roomInfo);
-      if (liveRoomId) {
-        tiktokLastRoomId = liveRoomId;
-      }
-
-      if (isTikTokRoomLive(roomInfo)) {
-        tiktokOfflineChecks = 0;
-        tiktokLastError = null;
-
-        if (!wasLive) {
-          await announceTikTokLiveStarted(tiktokUsername, tiktokChannelId, liveRoomId, roomInfo);
-        }
-
-        if (!tiktokConnection && !reconnectTimeout) {
-          startTikTokLive(roomInfo).catch(error => {
-            console.error("TikTok room-info reconnect error:", error.message);
-          });
-        }
-
-        return roomInfo;
-      }
-
-      tiktokOfflineChecks += 1;
-
-      if (wasLive && tiktokOfflineChecks >= TIKTOK_OFFLINE_CONFIRMATION_ATTEMPTS) {
-        await sendTikTokEndedMessage(
-          tiktokUsername,
-          tiktokChannelId,
-          `room info check marked the stream offline (${trigger})`
-        );
-        cleanupTikTokConnection();
-      }
-
-      return roomInfo;
-    } catch (error) {
-      tiktokLastError = error?.message || "failed to poll room info";
-      tiktokLastRoomCheckAt = new Date().toISOString();
-      console.error("TikTok room info poll error:", tiktokLastError);
-      return null;
-    } finally {
-      tiktokRoomInfoSyncPromise = null;
-    }
-  })();
-
-  return tiktokRoomInfoSyncPromise;
-}
-
-async function resetTikTokConnection() {
-  clearTikTokReconnect();
-  wasLive = false;
-  tiktokOfflineChecks = 0;
-  tiktokLastDisconnectAt = null;
-  tiktokLastError = null;
-  tiktokCurrentUsername = null;
-  tiktokLastRoomCheckAt = null;
-  tiktokLastRoomStatus = null;
-  tiktokLastRoomId = null;
-  tiktokAnnouncedRoomId = null;
-  cleanupTikTokConnection();
-
-  const roomInfo = await syncTikTokRoomInfo("reset");
-  await startTikTokLive(roomInfo);
-}
-
-async function startTikTokLive(preloadedRoomInfo = null) {
-  const tiktokUsername = getTikTokUsername();
-  const tiktokChannelId = getTikTokChannelId();
-
-  if (!tiktokUsername || !tiktokChannelId) {
-    console.log("TikTok LIVE not configured.");
-    tiktokCurrentUsername = null;
-    cleanupTikTokConnection();
-    clearTikTokReconnect();
-    return;
-  }
-
-  const roomInfo = preloadedRoomInfo || await syncTikTokRoomInfo("connect");
-  if (roomInfo) {
-    tiktokLastRoomStatus = roomInfo?.status ?? null;
-    const roomId = getTikTokRoomIdentifier(roomInfo);
-    if (roomId) {
-      tiktokLastRoomId = roomId;
-    }
-  }
-
-  if (roomInfo && !isTikTokRoomLive(roomInfo)) {
-    scheduleTikTokReconnect(TIKTOK_OFFLINE_RECHECK_MS, "room info offline");
-    return;
-  }
-
-  clearTikTokReconnect();
-  cleanupTikTokConnection();
-  const connectionVersion = ++tiktokConnectionVersion;
-  tiktokCurrentUsername = tiktokUsername;
-
-  try {
-    console.log(`Trying TikTok LIVE connection for @${tiktokUsername}...`);
-    tiktokConnection = new WebcastPushConnection(tiktokUsername);
-    await tiktokConnection.connect();
-
-    if (connectionVersion !== tiktokConnectionVersion) {
-      cleanupTikTokConnection();
-      return;
-    }
-
-    console.log(`Connected to TikTok LIVE for @${tiktokUsername}`);
-    tiktokLastConnectAt = new Date().toISOString();
-    tiktokLastDisconnectAt = null;
-    tiktokLastError = null;
-    tiktokOfflineChecks = 0;
-
-    await announceTikTokLiveStarted(
-      tiktokUsername,
-      tiktokChannelId,
-      getTikTokRoomIdentifier(roomInfo),
-      roomInfo
-    );
-
-    tiktokConnection.on("connected", () => {
-      if (connectionVersion !== tiktokConnectionVersion) return;
-      tiktokLastConnectAt = new Date().toISOString();
-      tiktokLastError = null;
-      tiktokOfflineChecks = 0;
-    });
-
-    tiktokConnection.on("streamEnd", async () => {
-      if (connectionVersion !== tiktokConnectionVersion) return;
-      tiktokLastDisconnectAt = new Date().toISOString();
-      tiktokOfflineChecks = TIKTOK_OFFLINE_CONFIRMATION_ATTEMPTS;
-      await sendTikTokEndedMessage(tiktokUsername, tiktokChannelId);
-      cleanupTikTokConnection();
-      scheduleTikTokReconnect(TIKTOK_OFFLINE_RECHECK_MS, "stream end");
-    });
-
-    tiktokConnection.on("disconnected", () => {
-      if (connectionVersion !== tiktokConnectionVersion) return;
-      tiktokLastDisconnectAt = new Date().toISOString();
-      tiktokLastError = "socket disconnected";
-      cleanupTikTokConnection();
-      scheduleTikTokReconnect(wasLive ? TIKTOK_LIVE_RECONNECT_MS : TIKTOK_OFFLINE_RECHECK_MS, "socket disconnect");
-    });
-
-    tiktokConnection.on("error", error => {
-      if (connectionVersion !== tiktokConnectionVersion) return;
-      tiktokLastError = error?.message || "unknown TikTok socket error";
-      console.error("TikTok socket error:", tiktokLastError);
-      cleanupTikTokConnection();
-      scheduleTikTokReconnect(wasLive ? TIKTOK_LIVE_RECONNECT_MS : TIKTOK_OFFLINE_RECHECK_MS, "socket error");
-    });
-  } catch (error) {
-    tiktokConnection = null;
-    tiktokLastError = error?.message || "unknown TikTok connect error";
-    tiktokLastDisconnectAt = new Date().toISOString();
-
-    if (isLikelyTikTokOfflineError(error)) {
-      tiktokOfflineChecks += 1;
-      console.log(`TikTok user offline or unavailable: ${error.message}`);
-
-      if (wasLive && tiktokOfflineChecks >= TIKTOK_OFFLINE_CONFIRMATION_ATTEMPTS) {
-        await sendTikTokEndedMessage(
-          tiktokUsername,
-          tiktokChannelId,
-          "the watcher confirmed the account is offline"
-        );
-      }
-
-      scheduleTikTokReconnect(TIKTOK_OFFLINE_RECHECK_MS, "offline check");
-      return;
-    }
-
-    console.log(`TikTok connection error: ${error.message}`);
-    scheduleTikTokReconnect(wasLive ? TIKTOK_LIVE_RECONNECT_MS : TIKTOK_OFFLINE_RECHECK_MS, "connect error");
-  }
-}
-
 function buildAutoModSummary() {
   return [
     `Invites: ${config.automod.invites ? "on" : "off"}`,
@@ -2991,67 +2138,44 @@ function buildSettingsSummary() {
     `Log channel: ${getLogChannelId() ? `<#${getLogChannelId()}>` : "Not set"}`,
     `Verify channel: ${getVerifyChannelId() ? `<#${getVerifyChannelId()}>` : "Not set"}`,
     `Rules channel: ${getRulesChannelId() ? `<#${getRulesChannelId()}>` : "Not set"}`,
-    `Muted role: ${getMutedRoleId() ? `<@&${getMutedRoleId()}>` : "Not set"}`,
-    `TikTok username: ${getTikTokUsername() ? `@${getTikTokUsername()}` : "Not set"}`,
-    `TikTok alerts channel: ${getTikTokChannelId() ? `<#${getTikTokChannelId()}>` : "Not set"}`
+    `Muted role: ${getMutedRoleId() ? `<@&${getMutedRoleId()}>` : "Not set"}`
   ].join("\n");
 }
 
 function buildHelpEmbed() {
-  const fields = [];
-
-  if (ENABLE_CORE_BOT) {
-    fields.push(
-      {
-        name: "Moderation",
-        value:
-          "`/adminpanel`, `/warn`, `/warnings`, `/clearwarnings`, `/timeout`, `/untimeout`, `/mute`, `/unmute`, `/kick`, `/ban`, `/tempban`, `/unban`, `/slowmode`",
-        inline: false
-      },
-      {
-        name: "Staff Records",
-        value:
-          "`/note`, `/notes`, `/case`, `/cases`, `/editcase`, `/automod`, `/automodlinks`, `/automodguard`, `/bannedwords`, `/settings`, `/staffroles`, `/exportmod`, `/backup`",
-        inline: false
-      },
-      {
-        name: "Runtime",
-        value: "`/status`, `/reload`",
-        inline: false
-      },
-      {
-        name: "Server Tools",
-        value: "`/setupverify`, `/setuprules`, `/announce`, `/purge`, `/lockdown`, `/unlockdown`",
-        inline: false
-      }
-    );
-  }
-
-  if (ENABLE_MUSIC) {
-    fields.push({
-      name: "Music",
-      value: "`/musicpanel`, `/play`, `/skip`, `/stop`, `/pause`, `/resume`, `/queue`, `/nowplaying`, `/leave`",
+  const fields = [
+    {
+      name: "Moderation",
+      value:
+        "`/adminpanel`, `/warn`, `/warnings`, `/clearwarnings`, `/timeout`, `/untimeout`, `/mute`, `/unmute`, `/kick`, `/ban`, `/tempban`, `/unban`, `/slowmode`",
       inline: false
-    });
-  }
-
-  if (ENABLE_CORE_BOT) {
-    fields.push({
+    },
+    {
+      name: "Staff Records",
+      value:
+        "`/note`, `/notes`, `/case`, `/cases`, `/editcase`, `/automod`, `/automodlinks`, `/automodguard`, `/bannedwords`, `/settings`, `/staffroles`, `/exportmod`, `/backup`",
+      inline: false
+    },
+    {
+      name: "Runtime",
+      value: "`/status`, `/reload`",
+      inline: false
+    },
+    {
+      name: "Server Tools",
+      value: "`/setupverify`, `/setuprules`, `/announce`, `/purge`, `/lockdown`, `/unlockdown`",
+      inline: false
+    },
+    {
       name: "Info",
       value: "`/userinfo`, `/serverstats`, `/help`",
       inline: false
-    });
-  } else {
-    fields.push({
-      name: "Info",
-      value: "`/help`",
-      inline: false
-    });
-  }
+    }
+  ];
 
   return makeEmbed({
     title: "Mochi Bot Help",
-    description: "Main commands for the currently enabled bot features.",
+    description: "Main commands for Mochi Bot.",
     color: COLORS.blue,
     fields
   });
@@ -3062,8 +2186,6 @@ function buildStatusEmbed() {
   const verifyChannelId = getVerifyChannelId();
   const rulesChannelId = getRulesChannelId();
   const logChannelId = getLogChannelId();
-  const tiktokUsername = getTikTokUsername();
-  const tiktokChannelId = getTikTokChannelId();
 
   return makeEmbed({
     title: "Bot status",
@@ -3078,25 +2200,6 @@ function buildStatusEmbed() {
       { name: "Log Channel", value: logChannelId ? `<#${logChannelId}>` : "Not set", inline: true },
       { name: "AutoMod Log Channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
       { name: "Core Features", value: ENABLE_CORE_BOT ? "Enabled" : "Disabled", inline: true },
-      { name: "Music Features", value: ENABLE_MUSIC ? "Enabled" : "Disabled", inline: true },
-      { name: "TikTok User", value: tiktokUsername ? `@${tiktokUsername}` : "Not set", inline: true },
-      { name: "TikTok Alerts", value: tiktokChannelId ? `<#${tiktokChannelId}>` : "Not set", inline: true },
-      {
-        name: "TikTok Watcher",
-        value: tiktokConnection ? "Connected" : reconnectTimeout ? "Retrying" : wasLive ? "Watching live state" : "Idle",
-        inline: true
-      },
-      {
-        name: "TikTok Health",
-        value:
-          `Offline checks: ${tiktokOfflineChecks}\n` +
-          `Last connect: ${tiktokLastConnectAt ? `<t:${Math.floor(new Date(tiktokLastConnectAt).getTime() / 1000)}:R>` : "Never"}\n` +
-          `Last room check: ${tiktokLastRoomCheckAt ? `<t:${Math.floor(new Date(tiktokLastRoomCheckAt).getTime() / 1000)}:R>` : "Never"}\n` +
-          `Last room status: ${tiktokLastRoomStatus ?? "Unknown"}\n` +
-          `Last room id: ${tiktokLastRoomId || "Unknown"}\n` +
-          `Last issue: ${tiktokLastError ? tiktokLastError.slice(0, 120) : "None"}`,
-        inline: false
-      },
       { name: "Verify Message", value: config.verifyMessageId || "Not cached", inline: false },
       { name: "Cases Logged", value: `${config.cases.length}`, inline: true },
       { name: "Banned Words", value: `${getBannedWords().length}`, inline: true }
@@ -3655,8 +2758,7 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
         { name: "AutoMod Log", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
         { name: "Verify Channel", value: getVerifyChannelId() ? `<#${getVerifyChannelId()}>` : "Not set", inline: true },
         { name: "Rules Channel", value: getRulesChannelId() ? `<#${getRulesChannelId()}>` : "Not set", inline: true },
-        { name: "Muted Role", value: getMutedRoleId() ? `<@&${getMutedRoleId()}>` : "Not set", inline: true },
-        { name: "TikTok Alerts", value: getTikTokChannelId() ? `<#${getTikTokChannelId()}>` : "Not set", inline: true }
+        { name: "Muted Role", value: getMutedRoleId() ? `<@&${getMutedRoleId()}>` : "Not set", inline: true }
       ]
     });
   }
@@ -3692,7 +2794,7 @@ function buildJsonExportAttachment(prefix, payload) {
 client.once("clientReady", async () => {
   try {
     console.log(`Logged in as ${client.user.tag}`);
-    console.log(`Feature flags -> core: ${ENABLE_CORE_BOT ? "on" : "off"}, music: ${ENABLE_MUSIC ? "on" : "off"}`);
+    console.log(`Feature flags -> core: ${ENABLE_CORE_BOT ? "on" : "off"}`);
     const rest = new REST({ version: "10" }).setToken(TOKEN);
 
     await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
@@ -3703,8 +2805,6 @@ client.once("clientReady", async () => {
 
     if (ENABLE_CORE_BOT) {
       await resolveVerifyMessageId();
-      ensureTikTokHealthcheck();
-      await startTikTokLive();
       await processExpiredTempBans();
 
       if (tempBanInterval) {
@@ -3804,122 +2904,6 @@ client.on("channelCreate", async channel => {
 client.on("interactionCreate", async interaction => {
   try {
     if (interaction.isButton()) {
-      if (interaction.customId.startsWith("musicpanel:")) {
-        if (!ENABLE_MUSIC) {
-          return interaction.reply({ content: "Music controls are disabled on this deployment.", ephemeral: true });
-        }
-
-        const [, kind, action] = interaction.customId.split(":");
-        const queue = musicQueues.get(interaction.guild.id);
-
-        if (kind === "modal" && action === "play") {
-          const modal = new ModalBuilder()
-            .setCustomId(buildMusicPanelCustomId("submit", "play"))
-            .setTitle("Request a Song")
-            .addComponents(
-              new ActionRowBuilder().addComponents(
-                new TextInputBuilder()
-                  .setCustomId("query")
-                  .setLabel("YouTube URL or search")
-                  .setPlaceholder("lofi hip hop, artist - song name, or a YouTube link")
-                  .setStyle(TextInputStyle.Paragraph)
-                  .setRequired(true)
-                  .setMaxLength(500)
-              )
-            );
-          return interaction.showModal(modal);
-        }
-
-        if (kind === "action" && action === "refresh") {
-          return interaction.update({
-            embeds: [buildMusicPanelEmbed(interaction.guild.id)],
-            components: buildMusicPanelButtons(interaction.guild.id)
-          });
-        }
-
-        if (!queue) {
-          return interaction.reply({ content: "There isn't an active music session right now.", ephemeral: true });
-        }
-
-        if (!ensureSameVoiceChannel(interaction, queue)) return;
-
-        if (kind === "action" && action === "pause") {
-          if (!queue.current || !queue.player.pause()) {
-            return interaction.reply({ content: "Playback isn't active or couldn't be paused.", ephemeral: true });
-          }
-          return interaction.update({
-            embeds: [buildMusicPanelEmbed(interaction.guild.id)],
-            components: buildMusicPanelButtons(interaction.guild.id)
-          });
-        }
-
-        if (kind === "action" && action === "resume") {
-          if (!queue.current || !queue.player.unpause()) {
-            return interaction.reply({ content: "Playback wasn't paused.", ephemeral: true });
-          }
-          return interaction.update({
-            embeds: [buildMusicPanelEmbed(interaction.guild.id)],
-            components: buildMusicPanelButtons(interaction.guild.id)
-          });
-        }
-
-        if (kind === "action" && action === "skip") {
-          queue.player.stop();
-          return interaction.update({
-            embeds: [buildMusicPanelEmbed(interaction.guild.id)],
-            components: buildMusicPanelButtons(interaction.guild.id)
-          });
-        }
-
-        if (kind === "action" && action === "stop") {
-          await stopMusicQueue(interaction.guild.id, `${interaction.user.tag} stopped the queue from the music panel.`);
-          return interaction.update({
-            embeds: [buildMusicPanelEmbed(interaction.guild.id)],
-            components: buildMusicPanelButtons(interaction.guild.id)
-          });
-        }
-
-        if (kind === "action" && action === "leave") {
-          await stopMusicQueue(interaction.guild.id, `${interaction.user.tag} disconnected the music bot from the panel.`);
-          return interaction.update({
-            embeds: [buildMusicPanelEmbed(interaction.guild.id)],
-            components: buildMusicPanelButtons(interaction.guild.id)
-          });
-        }
-
-        if (kind === "action" && action === "queue") {
-          const upcoming = queue.tracks.length
-            ? queue.tracks.slice(0, 10).map((track, index) => `${index + 1}. [${track.title}](${track.url}) • ${track.durationText}`).join("\n")
-            : "No upcoming songs.";
-
-          return interaction.reply({
-            embeds: [
-              makeEmbed({
-                title: "Music queue",
-                description: queue.current ? `Now playing: [${queue.current.title}](${queue.current.url})` : "Nothing is actively playing.",
-                color: COLORS.blue,
-                fields: [
-                  { name: "Voice Channel", value: `<#${queue.voiceChannelId}>`, inline: true },
-                  { name: "Queued Songs", value: `${queue.tracks.length}`, inline: true },
-                  { name: "Up Next", value: upcoming.slice(0, 1024), inline: false }
-                ],
-                thumbnail: queue.current?.thumbnail || null
-              })
-            ],
-            ephemeral: true
-          });
-        }
-
-        if (kind === "action" && action === "nowplaying") {
-          if (!queue.current) {
-            return interaction.reply({ content: "There isn't anything playing right now.", ephemeral: true });
-          }
-          return interaction.reply({ embeds: [buildMusicSummary(queue.current)], ephemeral: true });
-        }
-
-        return;
-      }
-
       if (!interaction.customId.startsWith("adminpanel:")) return;
       if (!ENABLE_CORE_BOT) {
         return interaction.reply({ content: "Admin controls are disabled on this deployment.", ephemeral: true });
@@ -4997,59 +3981,6 @@ client.on("interactionCreate", async interaction => {
     }
 
     if (interaction.isModalSubmit()) {
-      if (interaction.customId.startsWith("musicpanel:")) {
-        if (!ENABLE_MUSIC) {
-          return interaction.reply({ content: "Music controls are disabled on this deployment.", ephemeral: true });
-        }
-
-        const [, kind, action] = interaction.customId.split(":");
-        if (kind !== "submit" || action !== "play") return;
-
-        const voiceChannel = await ensureVoiceChannel(interaction);
-        if (!voiceChannel) return;
-
-        await interaction.deferReply({ ephemeral: true });
-
-        let queue = musicQueues.get(interaction.guild.id);
-        if (queue && queue.voiceChannelId !== voiceChannel.id) {
-          return interaction.editReply("You need to be in the same voice channel as the bot to add music.");
-        }
-
-        if (!queue) {
-          queue = createMusicQueue(interaction.guild, voiceChannel, interaction.channel);
-          try {
-            await entersState(queue.connection, VoiceConnectionStatus.Ready, 20_000);
-          } catch (error) {
-            destroyMusicQueue(interaction.guild.id);
-            return interaction.editReply(await describeVoiceJoinFailure(interaction, voiceChannel, error));
-          }
-        }
-
-        const track = await resolveMusicTrack(interaction.fields.getTextInputValue("query"), interaction.user.tag).catch(() => null);
-        if (!track) {
-          if (!queue.current && !queue.tracks.length) {
-            destroyMusicQueue(interaction.guild.id);
-          }
-          return interaction.editReply("I couldn't find a playable YouTube result for that request.");
-        }
-
-        queue.textChannelId = interaction.channel.id;
-        queue.voiceChannelId = voiceChannel.id;
-
-        const shouldStart = !queue.current && queue.player.state.status !== AudioPlayerStatus.Playing;
-        queue.tracks.push(track);
-
-        if (shouldStart) {
-          await playNextTrack(interaction.guild.id);
-        }
-
-        await interaction.editReply(`Added **${track.title}** to the queue.`);
-        return interaction.message?.edit?.({
-          embeds: [buildMusicPanelEmbed(interaction.guild.id)],
-          components: buildMusicPanelButtons(interaction.guild.id)
-        }).catch(() => {});
-      }
-
       if (!interaction.customId.startsWith("adminpanel:")) return;
       if (!ENABLE_CORE_BOT) {
         return interaction.reply({ content: "Admin controls are disabled on this deployment.", ephemeral: true });
@@ -5519,155 +4450,6 @@ client.on("interactionCreate", async interaction => {
       return interaction.reply({ embeds: [buildHelpEmbed()], ephemeral: true });
     }
 
-    if (interaction.commandName === "musicpanel") {
-      return interaction.reply({
-        embeds: [buildMusicPanelEmbed(guild.id)],
-        components: buildMusicPanelButtons(guild.id),
-        ephemeral: true
-      });
-    }
-
-    if (interaction.commandName === "play") {
-      const voiceChannel = await ensureVoiceChannel(interaction);
-      if (!voiceChannel) return;
-
-      await interaction.deferReply();
-
-      let queue = musicQueues.get(guild.id);
-      if (queue && queue.voiceChannelId !== voiceChannel.id) {
-        return interaction.editReply("You need to be in the same voice channel as the bot to add music.");
-      }
-
-      if (!queue) {
-        queue = createMusicQueue(guild, voiceChannel, channel);
-        try {
-          await entersState(queue.connection, VoiceConnectionStatus.Ready, 20_000);
-        } catch (error) {
-          destroyMusicQueue(guild.id);
-          return interaction.editReply(await describeVoiceJoinFailure(interaction, voiceChannel, error));
-        }
-      }
-
-      const track = await resolveMusicTrack(interaction.options.getString("query"), interaction.user.tag).catch(() => null);
-      if (!track) {
-        if (!queue.current && !queue.tracks.length) {
-          destroyMusicQueue(guild.id);
-        }
-        return interaction.editReply("I couldn't find a playable YouTube result for that query.");
-      }
-
-      queue.textChannelId = channel.id;
-      queue.voiceChannelId = voiceChannel.id;
-
-      const shouldStart = !queue.current && queue.player.state.status !== AudioPlayerStatus.Playing;
-      queue.tracks.push(track);
-
-      if (shouldStart) {
-        await playNextTrack(guild.id);
-        return interaction.editReply(`Queued and started **${track.title}**.`);
-      }
-
-      return interaction.editReply(`Added **${track.title}** to the queue at position ${queue.tracks.length}.`);
-    }
-
-    if (interaction.commandName === "skip") {
-      const queue = musicQueues.get(guild.id);
-      if (!queue || !queue.current) {
-        return interaction.reply({ content: "There isn't anything playing right now.", ephemeral: true });
-      }
-
-      if (!ensureSameVoiceChannel(interaction, queue)) return;
-      const skippedTitle = queue.current.title;
-      queue.player.stop();
-      return interaction.reply({ content: `Skipped **${skippedTitle}**.` });
-    }
-
-    if (interaction.commandName === "stop") {
-      const queue = musicQueues.get(guild.id);
-      if (!queue) {
-        return interaction.reply({ content: "There isn't an active music queue right now.", ephemeral: true });
-      }
-
-      if (!ensureSameVoiceChannel(interaction, queue)) return;
-      await stopMusicQueue(guild.id, `${interaction.user.tag} stopped the queue.`);
-      return interaction.reply({ content: "Stopped playback and cleared the queue." });
-    }
-
-    if (interaction.commandName === "pause") {
-      const queue = musicQueues.get(guild.id);
-      if (!queue || !queue.current) {
-        return interaction.reply({ content: "There isn't anything playing right now.", ephemeral: true });
-      }
-
-      if (!ensureSameVoiceChannel(interaction, queue)) return;
-      if (!queue.player.pause()) {
-        return interaction.reply({ content: "Playback is already paused or couldn't be paused.", ephemeral: true });
-      }
-
-      return interaction.reply({ content: `Paused **${queue.current.title}**.` });
-    }
-
-    if (interaction.commandName === "resume") {
-      const queue = musicQueues.get(guild.id);
-      if (!queue || !queue.current) {
-        return interaction.reply({ content: "There isn't anything to resume right now.", ephemeral: true });
-      }
-
-      if (!ensureSameVoiceChannel(interaction, queue)) return;
-      if (!queue.player.unpause()) {
-        return interaction.reply({ content: "Playback wasn't paused.", ephemeral: true });
-      }
-
-      return interaction.reply({ content: `Resumed **${queue.current.title}**.` });
-    }
-
-    if (interaction.commandName === "queue") {
-      const queue = musicQueues.get(guild.id);
-      if (!queue || (!queue.current && !queue.tracks.length)) {
-        return interaction.reply({ content: "The music queue is empty right now.", ephemeral: true });
-      }
-
-      const upcoming = queue.tracks.length
-        ? queue.tracks.slice(0, 10).map((track, index) => `${index + 1}. [${track.title}](${track.url}) • ${track.durationText}`).join("\n")
-        : "No upcoming songs.";
-
-      return interaction.reply({
-        embeds: [
-          makeEmbed({
-            title: "Music queue",
-            description: queue.current ? `Now playing: [${queue.current.title}](${queue.current.url})` : "Nothing is actively playing.",
-            color: COLORS.blue,
-            fields: [
-              { name: "Voice Channel", value: `<#${queue.voiceChannelId}>`, inline: true },
-              { name: "Queued Songs", value: `${queue.tracks.length}`, inline: true },
-              { name: "Up Next", value: upcoming.slice(0, 1024), inline: false }
-            ],
-            thumbnail: queue.current?.thumbnail || null
-          })
-        ]
-      });
-    }
-
-    if (interaction.commandName === "nowplaying") {
-      const queue = musicQueues.get(guild.id);
-      if (!queue || !queue.current) {
-        return interaction.reply({ content: "There isn't anything playing right now.", ephemeral: true });
-      }
-
-      return interaction.reply({ embeds: [buildMusicSummary(queue.current)] });
-    }
-
-    if (interaction.commandName === "leave") {
-      const queue = musicQueues.get(guild.id);
-      if (!queue) {
-        return interaction.reply({ content: "I'm not in a voice channel right now.", ephemeral: true });
-      }
-
-      if (!ensureSameVoiceChannel(interaction, queue)) return;
-      await stopMusicQueue(guild.id, `${interaction.user.tag} disconnected the music bot.`);
-      return interaction.reply({ content: "Left the voice channel and cleared the queue." });
-    }
-
     if (interaction.commandName === "adminpanel") {
       return interaction.reply({
         embeds: [await buildAdminPanelEmbed("overview", interaction)],
@@ -5751,7 +4533,7 @@ client.on("interactionCreate", async interaction => {
     if (interaction.commandName === "reload") {
       const target = interaction.options.getString("target");
 
-      if (target === "config" || target === "all") {
+      if (target === "config") {
         const previousVerifyMessageId = config.verifyMessageId;
         config = loadConfig();
         if (!config.verifyMessageId && previousVerifyMessageId) {
@@ -5759,17 +4541,8 @@ client.on("interactionCreate", async interaction => {
         }
       }
 
-      if (target === "tiktok" || target === "all") {
-        await resetTikTokConnection();
-      }
-
       return interaction.reply({
-        content:
-          target === "all"
-            ? "Reloaded config and TikTok connection."
-            : target === "config"
-              ? "Reloaded config from disk."
-              : "Reloaded TikTok connection.",
+        content: "Reloaded config from disk.",
         ephemeral: true
       });
     }
@@ -6957,14 +5730,6 @@ client.on("interactionCreate", async interaction => {
         config.settings.rulesChannelId = interaction.options.getChannel("channel").id;
       }
 
-      if (subcommand === "tiktokuser") {
-        config.settings.tiktokUsername = interaction.options.getString("username").replace(/^@/, "").trim();
-      }
-
-      if (subcommand === "tiktokchannel") {
-        config.settings.tiktokChannelId = interaction.options.getChannel("channel").id;
-      }
-
       if (subcommand === "reset") {
         const target = interaction.options.getString("target");
 
@@ -6988,14 +5753,6 @@ client.on("interactionCreate", async interaction => {
         if (target === "ruleschannel") {
           config.settings.rulesChannelId = null;
         }
-
-        if (target === "tiktokuser") {
-          config.settings.tiktokUsername = null;
-        }
-
-        if (target === "tiktokchannel") {
-          config.settings.tiktokChannelId = null;
-        }
       }
 
       saveConfig();
@@ -7004,17 +5761,6 @@ client.on("interactionCreate", async interaction => {
         const mutedRole = await guild.roles.fetch(config.settings.mutedRoleId).catch(() => null);
         if (mutedRole) {
           await applyMutedRoleToChannels(guild, mutedRole);
-        }
-      }
-
-      if (subcommand === "tiktokuser" || subcommand === "tiktokchannel") {
-        await resetTikTokConnection();
-      }
-
-      if (subcommand === "reset") {
-        const target = interaction.options.getString("target");
-        if (target === "tiktokuser" || target === "tiktokchannel") {
-          await resetTikTokConnection();
         }
       }
 
