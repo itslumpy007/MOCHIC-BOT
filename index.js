@@ -3382,29 +3382,24 @@ function buildAdminPanelButtons(view, targetUserId = null) {
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "warn", targetUserId)).setLabel("Warn").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "timeout", targetUserId)).setLabel("Timeout").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "untimeout", targetUserId)).setLabel("Untimeout").setStyle(ButtonStyle.Success).setDisabled(!targetUserId),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "mute", targetUserId)).setLabel("Mute").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "unmute", targetUserId)).setLabel("Unmute").setStyle(ButtonStyle.Success).setDisabled(!targetUserId),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "tempban", targetUserId)).setLabel("Temp Ban").setStyle(ButtonStyle.Danger).setDisabled(!targetUserId)
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "unmute", targetUserId)).setLabel("Unmute").setStyle(ButtonStyle.Success).setDisabled(!targetUserId)
       ),
       new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "tempban", targetUserId)).setLabel("Temp Ban").setStyle(ButtonStyle.Danger).setDisabled(!targetUserId),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "kick", targetUserId)).setLabel("Kick").setStyle(ButtonStyle.Danger).setDisabled(!targetUserId),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "ban", targetUserId)).setLabel("Ban").setStyle(ButtonStyle.Danger).setDisabled(!targetUserId),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "clearwarnings", targetUserId)).setLabel("Clear Warnings").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "note", targetUserId)).setLabel("Add Note").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "history", targetUserId)).setLabel("Cases").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId)
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "note", targetUserId)).setLabel("Add Note").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId)
       ),
       new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "history", targetUserId)).setLabel("Cases").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "warnings-view", targetUserId)).setLabel("Warnings").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "notes-view", targetUserId)).setLabel("Notes").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "untimeout", targetUserId)).setLabel("Untimeout").setStyle(ButtonStyle.Success).setDisabled(!targetUserId),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "lockdown", targetUserId)).setLabel("Lock Current Channel").setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "unlockdown", targetUserId)).setLabel("Unlock Current Channel").setStyle(ButtonStyle.Success)
-      ),
-      new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "profile", targetUserId)).setLabel("Profile").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "recent-messages", targetUserId)).setLabel("Recent Messages").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "dmuser", targetUserId)).setLabel("DM User").setStyle(ButtonStyle.Primary).setDisabled(!targetUserId),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "clearnotes", targetUserId)).setLabel("Clear Notes").setStyle(ButtonStyle.Secondary).setDisabled(!targetUserId)
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("modal", "dmuser", targetUserId)).setLabel("DM User").setStyle(ButtonStyle.Primary).setDisabled(!targetUserId)
       )
     );
   }
@@ -3430,15 +3425,13 @@ function buildAdminPanelButtons(view, targetUserId = null) {
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "allowonly", targetUserId)).setLabel(`Allow-Only ${config.automod.allowedDomainsOnly ? "On" : "Off"}`).setStyle(config.automod.allowedDomainsOnly ? ButtonStyle.Success : ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "antiraid", targetUserId)).setLabel(`Anti-Raid ${config.automod.antiRaidEnabled ? "On" : "Off"}`).setStyle(config.automod.antiRaidEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("toggle", "escalation", targetUserId)).setLabel(`Escalation ${config.automod.escalationEnabled ? "On" : "Off"}`).setStyle(config.automod.escalationEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "automod-analytics", targetUserId)).setLabel("Analytics").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "automod-exemptions", targetUserId)).setLabel("Exemptions").setStyle(ButtonStyle.Secondary)
       ),
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "limits", targetUserId)).setLabel("Limits").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "guard", targetUserId)).setLabel("Guard Settings").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "lists", targetUserId)).setLabel("Lists").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "rule-actions", targetUserId)).setLabel("Rule Actions").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "domains", targetUserId)).setLabel("Domains").setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "rule-actions", targetUserId)).setLabel("Rule Actions").setStyle(ButtonStyle.Secondary)
       )
     );
   }
