@@ -17,6 +17,14 @@ const titles = {
   records: "Records"
 };
 
+const storageKeys = {
+  activeView: "mochiActiveView",
+  caseFilters: "mochiCaseFilters",
+  lastMemberSearch: "mochiLastMemberSearch",
+  memberAction: "mochiMemberAction",
+  memberDuration: "mochiMemberDuration"
+};
+
 const automodSwitchLabels = {
   invites: "Invite links",
   spam: "Spam",
@@ -91,6 +99,49 @@ function setAlert(message, kind = "info") {
   alert.style.borderColor = kind === "error" ? "#ffc7c7" : "#f0cf90";
   alert.style.background = kind === "error" ? "#fff0f0" : "#fff7e8";
   alert.style.color = kind === "error" ? "#8a1f1f" : "#704800";
+}
+
+function readStoredJson(key, fallback) {
+  try {
+    return JSON.parse(localStorage.getItem(key) || "") || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredJson(key, value) {
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+function setActiveView(view) {
+  const nextView = titles[view] ? view : "overview";
+  document.querySelectorAll(".tab").forEach(tab => {
+    tab.classList.toggle("is-active", tab.dataset.view === nextView);
+  });
+  document.querySelectorAll(".view").forEach(section => {
+    section.classList.toggle("is-active", section.id === `${nextView}View`);
+  });
+  $("#viewTitle").textContent = titles[nextView];
+  localStorage.setItem(storageKeys.activeView, nextView);
+}
+
+function restorePanelMemory() {
+  const filters = readStoredJson(storageKeys.caseFilters, {});
+  $("#caseFilterUser").value = filters.user || "";
+  $("#caseFilterAction").value = filters.action || "";
+  $("#caseFilterModerator").value = filters.moderator || "";
+  $("#memberSearchInput").value = localStorage.getItem(storageKeys.lastMemberSearch) || "";
+  $("#memberAction").value = localStorage.getItem(storageKeys.memberAction) || "warn";
+  $("#memberActionDuration").value = localStorage.getItem(storageKeys.memberDuration) || "";
+  setActiveView(localStorage.getItem(storageKeys.activeView) || "overview");
+}
+
+function persistCaseFilters() {
+  writeStoredJson(storageKeys.caseFilters, {
+    user: $("#caseFilterUser").value,
+    action: $("#caseFilterAction").value,
+    moderator: $("#caseFilterModerator").value
+  });
 }
 
 function updateApiState(label, kind = "") {
@@ -413,6 +464,7 @@ async function searchMember() {
     return;
   }
 
+  localStorage.setItem(storageKeys.lastMemberSearch, query);
   const payload = await api(`/api/member?query=${encodeURIComponent(query)}`);
   state.selectedMember = payload.member;
   renderMemberProfile();
@@ -593,6 +645,7 @@ async function saveRuleActions() {
 function bindEvents() {
   $("#tokenInput").value = state.token;
   updateAuthPanel();
+  restorePanelMemory();
 
   $("#saveToken").addEventListener("click", () => {
     state.token = $("#tokenInput").value.trim();
@@ -607,6 +660,12 @@ function bindEvents() {
   $("#saveRuleActions").addEventListener("click", () => saveRuleActions().catch(error => setAlert(error.message, "error")));
   $("#memberSearchButton").addEventListener("click", () => searchMember().catch(error => setAlert(error.message, "error")));
   $("#memberActionButton").addEventListener("click", () => applyMemberAction().catch(error => setAlert(error.message, "error")));
+  $("#memberAction").addEventListener("change", () => {
+    localStorage.setItem(storageKeys.memberAction, $("#memberAction").value);
+  });
+  $("#memberActionDuration").addEventListener("input", () => {
+    localStorage.setItem(storageKeys.memberDuration, $("#memberActionDuration").value);
+  });
   $("#memberSearchInput").addEventListener("keydown", event => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -614,23 +673,21 @@ function bindEvents() {
     }
   });
   ["#caseFilterUser", "#caseFilterAction", "#caseFilterModerator"].forEach(selector => {
-    $(selector).addEventListener("input", renderRecords);
+    $(selector).addEventListener("input", () => {
+      persistCaseFilters();
+      renderRecords();
+    });
   });
   $("#resetCaseFilters").addEventListener("click", () => {
     $("#caseFilterUser").value = "";
     $("#caseFilterAction").value = "";
     $("#caseFilterModerator").value = "";
+    localStorage.removeItem(storageKeys.caseFilters);
     renderRecords();
   });
 
   document.querySelectorAll(".tab").forEach(button => {
-    button.addEventListener("click", () => {
-      document.querySelectorAll(".tab").forEach(tab => tab.classList.remove("is-active"));
-      document.querySelectorAll(".view").forEach(view => view.classList.remove("is-active"));
-      button.classList.add("is-active");
-      $(`#${button.dataset.view}View`).classList.add("is-active");
-      $("#viewTitle").textContent = titles[button.dataset.view];
-    });
+    button.addEventListener("click", () => setActiveView(button.dataset.view));
   });
 }
 
