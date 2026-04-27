@@ -3314,6 +3314,10 @@ function updateWebAutomod(payload) {
   if (Object.prototype.hasOwnProperty.call(payload, "exemptUserIds")) {
     config.automod.exemptUserIds = toWebList(payload.exemptUserIds, value => String(value || "").trim().replace(/[<@>]/g, ""));
   }
+  if (Object.prototype.hasOwnProperty.call(payload, "raidAction")) {
+    const raidAction = String(payload.raidAction || "").trim().toLowerCase();
+    config.automod.raidAction = ["log", "timeout"].includes(raidAction) ? raidAction : "log";
+  }
 
   saveConfig();
   return buildWebConfigPayload().automod;
@@ -3324,6 +3328,7 @@ function updateWebRuleActions(payload) {
   const alertRules = parseRuleKeyList(payload.alertRules || "");
   const warnRules = parseRuleKeyList(payload.warnRules || "");
   const timeoutRules = parseRuleKeyList(payload.timeoutRules || "");
+  const raidAction = String(payload.raidAction || "").trim().toLowerCase();
 
   for (const rule of alertRules) ruleActions[rule] = "alert";
   for (const rule of warnRules) ruleActions[rule] = "warn";
@@ -3331,12 +3336,23 @@ function updateWebRuleActions(payload) {
 
   config.automod.alertOnlyRules = alertRules;
   config.automod.ruleActions = ruleActions;
+  if (["log", "timeout"].includes(raidAction)) {
+    config.automod.raidAction = raidAction;
+  }
   saveConfig();
 
   return {
     alertOnlyRules: config.automod.alertOnlyRules,
-    ruleActions: config.automod.ruleActions
+    ruleActions: config.automod.ruleActions,
+    raidAction: config.automod.raidAction
   };
+}
+
+function updateWebPermissions(payload) {
+  config.permissions.modRoleIds = parseIdList(payload.modRoleIds || "");
+  config.permissions.adminRoleIds = parseIdList(payload.adminRoleIds || "");
+  saveConfig();
+  return buildWebConfigPayload().permissions;
 }
 
 function serializeWebMember(member, user = null) {
@@ -3699,6 +3715,14 @@ async function handleWebApi(req, res, pathname) {
     }
     const body = await readWebJsonBody(req);
     return sendWebJson(res, 200, { settings: updateWebSettings(body) });
+  }
+
+  if (req.method === "POST" && pathname === "/api/permissions") {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
+    const body = await readWebJsonBody(req);
+    return sendWebJson(res, 200, { permissions: updateWebPermissions(body) });
   }
 
   if (req.method === "POST" && pathname === "/api/automod") {

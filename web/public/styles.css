@@ -14,7 +14,7 @@
   --blue: #286da8;
   --yellow: #b77a00;
   --red: #c94444;
-  --shadow: 0 18px 50px rgba(26, 36, 51, 0.08);
+  --shadow: 0 12px 34px rgba(26, 36, 51, 0.07);
 }
 
 * {
@@ -251,7 +251,8 @@ textarea {
 .token-row button,
 .save-button,
 .icon-button,
-.discord-login {
+.discord-login,
+.ghost-button {
   border: 0;
   border-radius: 8px;
   color: #fff;
@@ -267,6 +268,17 @@ textarea {
 .discord-login:hover {
   background: var(--accent-dark);
   box-shadow: 0 10px 24px rgba(232, 93, 117, 0.2);
+}
+
+.ghost-button {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+}
+
+.ghost-button:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-soft);
 }
 
 button:active,
@@ -329,6 +341,12 @@ button:active,
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .pill {
@@ -422,6 +440,38 @@ button:active,
   color: var(--muted-soft);
   font-size: 12px;
   font-weight: 700;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  gap: 10px;
+  padding: 16px;
+}
+
+.summary-item {
+  min-height: 76px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.summary-item span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.summary-item strong {
+  display: block;
+  margin-top: 8px;
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .split {
@@ -543,7 +593,7 @@ button:active,
 
 .switch-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(170px, 1fr));
+  grid-template-columns: repeat(3, minmax(170px, 1fr));
   gap: 10px;
 }
 
@@ -688,7 +738,7 @@ tbody tr:hover td {
   }
 
   .tabs {
-    grid-template-columns: repeat(5, minmax(88px, 1fr));
+    grid-template-columns: repeat(6, minmax(88px, 1fr));
     overflow-x: auto;
     padding-bottom: 4px;
   }
@@ -723,7 +773,8 @@ tbody tr:hover td {
   }
 
   .topbar-actions .pill,
-  .topbar-actions .icon-button {
+  .topbar-actions .icon-button,
+  .button-row .ghost-button {
     flex: 1 1 130px;
     justify-content: center;
   }
@@ -731,6 +782,11 @@ tbody tr:hover td {
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
+  }
+
+  .summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: 12px;
   }
 
   .metric {
@@ -772,6 +828,7 @@ tbody tr:hover td {
 
   .save-button,
   .icon-button,
+  .ghost-button,
   .discord-login,
   .token-row button {
     min-height: 44px;
@@ -806,10 +863,11 @@ tbody tr:hover td {
   }
 
   .tabs {
-    grid-template-columns: repeat(5, minmax(96px, 1fr));
+    grid-template-columns: repeat(6, minmax(96px, 1fr));
   }
 
-  .metric-grid {
+  .metric-grid,
+  .summary-grid {
     grid-template-columns: 1fr;
   }
 
@@ -818,6 +876,7 @@ tbody tr:hover td {
   .event-list,
   .form-grid,
   .switch-grid,
+  .summary-grid,
   .stacked-fields,
   .search-row,
   .profile-empty,

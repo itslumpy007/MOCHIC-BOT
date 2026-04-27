@@ -22,6 +22,7 @@
           <button class="tab" data-view="members" type="button">Members</button>
           <button class="tab" data-view="automod" type="button">AutoMod</button>
           <button class="tab" data-view="settings" type="button">Settings</button>
+          <button class="tab" data-view="staff" type="button">Staff</button>
           <button class="tab" data-view="records" type="button">Records</button>
         </nav>
 
@@ -134,6 +135,18 @@
         </section>
 
         <section id="automodView" class="view">
+          <section class="panel">
+            <div class="panel-header">
+              <h3>AutoMod Mode</h3>
+              <div class="button-row">
+                <button class="ghost-button" type="button" data-automod-preset="light">Light</button>
+                <button class="ghost-button" type="button" data-automod-preset="standard">Standard</button>
+                <button class="ghost-button" type="button" data-automod-preset="strict">Strict</button>
+              </div>
+            </div>
+            <div id="automodSummary" class="summary-grid"></div>
+          </section>
+
           <div class="panel">
             <div class="panel-header">
               <h3>Rule Switches</h3>
@@ -170,6 +183,12 @@
               <button class="save-button" id="saveRuleActions" type="button">Save Actions</button>
             </div>
             <div class="form-grid three">
+              <label>Anti-raid action
+                <select id="raidAction" data-automod-string="raidAction">
+                  <option value="log">Log only</option>
+                  <option value="timeout">Timeout</option>
+                </select>
+              </label>
               <label>Alert rules<textarea id="alertRules" rows="4"></textarea></label>
               <label>Warn rules<textarea id="warnRules" rows="4"></textarea></label>
               <label>Timeout rules<textarea id="timeoutRules" rows="4"></textarea></label>
@@ -196,6 +215,26 @@
               <label>Roles<textarea id="exemptRoleIds" rows="4"></textarea></label>
               <label>Users<textarea id="exemptUserIds" rows="4"></textarea></label>
             </div>
+          </section>
+        </section>
+
+        <section id="staffView" class="view">
+          <section class="panel">
+            <div class="panel-header">
+              <h3>Staff Access</h3>
+              <button class="save-button" id="saveStaff" type="button">Save</button>
+            </div>
+            <div class="form-grid">
+              <label>Moderator role IDs<textarea id="modRoleIds" rows="5" placeholder="Role IDs or @role mentions"></textarea></label>
+              <label>Admin role IDs<textarea id="adminRoleIds" rows="5" placeholder="Role IDs or @role mentions"></textarea></label>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>Access Summary</h3>
+            </div>
+            <div id="staffSummary" class="summary-grid"></div>
           </section>
         </section>
 

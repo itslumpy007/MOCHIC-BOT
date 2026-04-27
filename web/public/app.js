@@ -14,6 +14,7 @@ const titles = {
   members: "Members",
   automod: "AutoMod",
   settings: "Settings",
+  staff: "Staff",
   records: "Records"
 };
 
@@ -78,6 +79,91 @@ const settingLabels = {
   logChannelId: "Log channel ID",
   automodLogChannelId: "AutoMod log channel ID",
   mutedRoleId: "Muted role ID"
+};
+
+const automodPresets = {
+  light: {
+    invites: true,
+    spam: true,
+    caps: false,
+    bannedWords: false,
+    linksEnabled: false,
+    allowedDomainsOnly: false,
+    attachmentsEnabled: false,
+    ageProtectionEnabled: false,
+    antiRaidEnabled: true,
+    nicknameFilterEnabled: false,
+    scamFilterEnabled: true,
+    evasionFilterEnabled: true,
+    emojiSpamEnabled: false,
+    escalationEnabled: true,
+    maxMentions: 8,
+    raidJoinThreshold: 8,
+    warnThreshold: 3,
+    timeoutThreshold: 5,
+    timeoutDurationMs: "10m",
+    offenseWindowMs: "24h",
+    raidWindowMs: "1m",
+    raidAction: "log"
+  },
+  standard: {
+    invites: true,
+    spam: true,
+    caps: true,
+    bannedWords: true,
+    linksEnabled: true,
+    allowedDomainsOnly: false,
+    attachmentsEnabled: true,
+    ageProtectionEnabled: true,
+    antiRaidEnabled: true,
+    nicknameFilterEnabled: false,
+    scamFilterEnabled: true,
+    evasionFilterEnabled: true,
+    emojiSpamEnabled: true,
+    escalationEnabled: true,
+    maxMentions: 5,
+    maxEmojiCount: 12,
+    maxAttachmentSizeMb: 10,
+    raidJoinThreshold: 5,
+    warnThreshold: 2,
+    timeoutThreshold: 4,
+    timeoutDurationMs: "10m",
+    offenseWindowMs: "24h",
+    raidWindowMs: "1m",
+    raidAccountAgeLimitMs: "1d",
+    raidAction: "log"
+  },
+  strict: {
+    invites: true,
+    spam: true,
+    caps: true,
+    bannedWords: true,
+    linksEnabled: true,
+    allowedDomainsOnly: true,
+    attachmentsEnabled: true,
+    ageProtectionEnabled: true,
+    antiRaidEnabled: true,
+    nicknameFilterEnabled: true,
+    scamFilterEnabled: true,
+    evasionFilterEnabled: true,
+    emojiSpamEnabled: true,
+    escalationEnabled: true,
+    maxMentions: 4,
+    maxEmojiCount: 8,
+    maxAttachmentSizeMb: 8,
+    raidJoinThreshold: 4,
+    warnThreshold: 2,
+    timeoutThreshold: 3,
+    timeoutDurationMs: "30m",
+    offenseWindowMs: "48h",
+    raidWindowMs: "1m",
+    raidAccountAgeLimitMs: "7d",
+    minAccountAgeForLinksMs: "1d",
+    minMemberAgeForLinksMs: "10m",
+    minAccountAgeForAttachmentsMs: "1d",
+    minMemberAgeForAttachmentsMs: "10m",
+    raidAction: "timeout"
+  }
 };
 
 function $(selector) {
@@ -281,6 +367,9 @@ function renderAutomod() {
       </label>
     `).join("");
 
+  $("#raidAction").value = automod.raidAction || "log";
+  renderAutomodSummary(automod);
+
   const ruleActions = automod.ruleActions || {};
   const grouped = Object.entries(ruleActions).reduce((acc, [rule, mode]) => {
     acc[mode] = [...(acc[mode] || []), rule];
@@ -290,6 +379,23 @@ function renderAutomod() {
   $("#alertRules").value = (automod.alertOnlyRules || grouped.alert || []).join(", ");
   $("#warnRules").value = (grouped.warn || []).join(", ");
   $("#timeoutRules").value = (grouped.timeout || []).join(", ");
+}
+
+function renderAutomodSummary(automod) {
+  const enabledRules = Object.keys(automodSwitchLabels).filter(key => automod[key]).length;
+  const totalRules = Object.keys(automodSwitchLabels).length;
+  const analytics = state.dashboard?.analytics || {};
+  const topRule = Object.entries(analytics.ruleCounts || {}).sort((a, b) => b[1] - a[1])[0];
+  const summary = [
+    ["Enabled", `${enabledRules}/${totalRules}`],
+    ["Detections", analytics.totalDetections || 0],
+    ["Top Rule", topRule ? `${topRule[0]} (${topRule[1]})` : "None"],
+    ["Raid Action", automod.raidAction || "log"]
+  ];
+
+  $("#automodSummary").innerHTML = summary
+    .map(([label, value]) => `<article class="summary-item"><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`)
+    .join("");
 }
 
 function renderSettings() {
@@ -306,6 +412,25 @@ function renderSettings() {
   $("#exemptChannelIds").value = (automod.exemptChannelIds || []).join(", ");
   $("#exemptRoleIds").value = (automod.exemptRoleIds || []).join(", ");
   $("#exemptUserIds").value = (automod.exemptUserIds || []).join(", ");
+}
+
+function renderStaff() {
+  const permissions = state.config?.permissions || {};
+  const modRoleIds = permissions.modRoleIds || [];
+  const adminRoleIds = permissions.adminRoleIds || [];
+  $("#modRoleIds").value = modRoleIds.join(", ");
+  $("#adminRoleIds").value = adminRoleIds.join(", ");
+
+  const items = [
+    ["Moderator Roles", modRoleIds.length ? modRoleIds.length : "Default permissions"],
+    ["Admin Roles", adminRoleIds.length ? adminRoleIds.length : "Administrator"],
+    ["Signed In", state.me?.accessLevel || "Locked"],
+    ["Token Fallback", state.me?.tokenFallbackEnabled ? "Enabled" : "Off"]
+  ];
+
+  $("#staffSummary").innerHTML = items
+    .map(([label, value]) => `<article class="summary-item"><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`)
+    .join("");
 }
 
 function renderRecords() {
@@ -543,6 +668,7 @@ function renderAll() {
   renderRecentViolations();
   renderAutomod();
   renderSettings();
+  renderStaff();
   renderRecords();
 }
 
@@ -594,6 +720,9 @@ async function saveAutomod() {
   document.querySelectorAll("[data-automod-duration]").forEach(input => {
     payload[input.dataset.automodDuration] = input.value;
   });
+  document.querySelectorAll("[data-automod-string]").forEach(input => {
+    payload[input.dataset.automodString] = input.value;
+  });
 
   const result = await api("/api/automod", {
     method: "POST",
@@ -601,6 +730,37 @@ async function saveAutomod() {
   });
   state.config.automod = result.automod;
   await loadAll();
+}
+
+async function saveStaff() {
+  const result = await api("/api/permissions", {
+    method: "POST",
+    body: JSON.stringify({
+      modRoleIds: $("#modRoleIds").value,
+      adminRoleIds: $("#adminRoleIds").value
+    })
+  });
+  state.config.permissions = result.permissions;
+  await loadAll();
+}
+
+function applyAutomodPreset(name) {
+  const preset = automodPresets[name];
+  if (!preset) return;
+
+  Object.entries(preset).forEach(([key, value]) => {
+    const checkbox = document.querySelector(`[data-automod-bool="${key}"]`);
+    const number = document.querySelector(`[data-automod-number="${key}"]`);
+    const duration = document.querySelector(`[data-automod-duration="${key}"]`);
+    const string = document.querySelector(`[data-automod-string="${key}"]`);
+
+    if (checkbox) checkbox.checked = Boolean(value);
+    if (number) number.value = value;
+    if (duration) duration.value = value;
+    if (string) string.value = value;
+  });
+
+  setAlert(`${name[0].toUpperCase()}${name.slice(1)} AutoMod mode is ready. Save to apply it.`);
 }
 
 async function saveSettings() {
@@ -636,7 +796,8 @@ async function saveRuleActions() {
     body: JSON.stringify({
       alertRules: $("#alertRules").value,
       warnRules: $("#warnRules").value,
-      timeoutRules: $("#timeoutRules").value
+      timeoutRules: $("#timeoutRules").value,
+      raidAction: $("#raidAction").value
     })
   });
   await loadAll();
@@ -656,8 +817,12 @@ function bindEvents() {
   $("#refreshButton").addEventListener("click", loadAll);
   $("#saveAutomod").addEventListener("click", () => saveAutomod().catch(error => setAlert(error.message, "error")));
   $("#saveSettings").addEventListener("click", () => saveSettings().catch(error => setAlert(error.message, "error")));
+  $("#saveStaff").addEventListener("click", () => saveStaff().catch(error => setAlert(error.message, "error")));
   $("#saveExemptions").addEventListener("click", () => saveExemptions().catch(error => setAlert(error.message, "error")));
   $("#saveRuleActions").addEventListener("click", () => saveRuleActions().catch(error => setAlert(error.message, "error")));
+  document.querySelectorAll("[data-automod-preset]").forEach(button => {
+    button.addEventListener("click", () => applyAutomodPreset(button.dataset.automodPreset));
+  });
   $("#memberSearchButton").addEventListener("click", () => searchMember().catch(error => setAlert(error.message, "error")));
   $("#memberActionButton").addEventListener("click", () => applyMemberAction().catch(error => setAlert(error.message, "error")));
   $("#memberAction").addEventListener("change", () => {
