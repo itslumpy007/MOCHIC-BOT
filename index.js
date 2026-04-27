@@ -3,6 +3,7 @@
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
+const crypto = require("crypto");
 const { URL } = require("url");
 
 const {
@@ -48,6 +49,9 @@ function envFlag(value, fallback = false) {
 const ENABLE_CORE_BOT = envFlag(process.env.ENABLE_CORE_BOT, true);
 const WEB_PORT = Number(process.env.WEB_PORT || process.env.PORT || 3000);
 const WEB_ADMIN_TOKEN = process.env.WEB_ADMIN_TOKEN || "";
+const WEB_BASE_URL = (process.env.WEB_BASE_URL || "").replace(/\/$/, "");
+const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || "";
+const SESSION_SECRET = process.env.SESSION_SECRET || WEB_ADMIN_TOKEN || "";
 const webPublicDir = path.join(__dirname, "web", "public");
 
 const client = new Client({
@@ -131,6 +135,8 @@ const SUSPICIOUS_SCAM_DOMAINS = [
 const spamTracker = new Map();
 const joinTracker = new Map();
 const pendingPanelActions = new Map();
+const webSessions = new Map();
+const webOauthStates = new Map();
 let tempBanInterval = null;
 
 const dataDir = path.join(__dirname, "data");
@@ -2813,12 +2819,256 @@ function sendWebText(res, statusCode, message) {
   res.end(message);
 }
 
-function isWebApiAuthorized(req) {
+function getWebBaseUrl(req) {
+  if (WEB_BASE_URL) return WEB_BASE_URL;
+  const proto = req.headers["x-forwarded-proto"] || "http";
+  const host = req.headers["x-forwarded-host"] || req.headers.host || `localhost:${WEB_PORT}`;
+  return `${proto}://${host}`;
+}
+
+function parseCookies(req) {
+  return Object.fromEntries(
+    String(req.headers.cookie || "")
+      .split(";")
+      .map(part => part.trim())
+      .filter(Boolean)
+      .map(part => {
+        const index = part.indexOf("=");
+        if (index === -1) return [part, ""];
+        return [part.slice(0, index), decodeURIComponent(part.slice(index + 1))];
+      })
+  );
+}
+
+function getCookieOptions(req, maxAgeSeconds) {
+  const isHttps = String(req.headers["x-forwarded-proto"] || "").includes("https");
+  return [
+    "HttpOnly",
+    "Path=/",
+    "SameSite=Lax",
+    `Max-Age=${maxAgeSeconds}`,
+    ...(isHttps ? ["Secure"] : [])
+  ].join("; ");
+}
+
+function setWebCookie(req, res, name, value, maxAgeSeconds) {
+  res.setHeader("Set-Cookie", `${name}=${encodeURIComponent(value)}; ${getCookieOptions(req, maxAgeSeconds)}`);
+}
+
+function clearWebCookie(req, res, name) {
+  setWebCookie(req, res, name, "", 0);
+}
+
+function cleanupWebAuthState() {
+  const now = Date.now();
+
+  for (const [state, entry] of webOauthStates.entries()) {
+    if (entry.expiresAt <= now) {
+      webOauthStates.delete(state);
+    }
+  }
+
+  for (const [sessionId, session] of webSessions.entries()) {
+    if (session.expiresAt <= now) {
+      webSessions.delete(sessionId);
+    }
+  }
+}
+
+function signWebValue(value) {
+  return crypto.createHmac("sha256", SESSION_SECRET).update(value).digest("hex");
+}
+
+function createSignedWebValue(value) {
+  return `${value}.${signWebValue(value)}`;
+}
+
+function verifySignedWebValue(signedValue) {
+  const [value, signature] = String(signedValue || "").split(".");
+  if (!value || !signature) return null;
+  const expected = signWebValue(value);
+  const expectedBuffer = Buffer.from(expected, "hex");
+  const signatureBuffer = Buffer.from(signature, "hex");
+  if (expectedBuffer.length !== signatureBuffer.length) return null;
+  return crypto.timingSafeEqual(expectedBuffer, signatureBuffer) ? value : null;
+}
+
+function createWebSession(user, accessLevel) {
+  const sessionId = crypto.randomBytes(32).toString("hex");
+  const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+  webSessions.set(sessionId, {
+    user,
+    accessLevel,
+    expiresAt
+  });
+  return sessionId;
+}
+
+function getWebSession(req) {
+  cleanupWebAuthState();
+  const sessionId = verifySignedWebValue(parseCookies(req).mochi_session);
+  if (!sessionId) return null;
+  const session = webSessions.get(sessionId);
+  if (!session || session.expiresAt <= Date.now()) {
+    if (sessionId) webSessions.delete(sessionId);
+    return null;
+  }
+  return { sessionId, ...session };
+}
+
+function buildWebUserPayload(session = null) {
+  return {
+    authenticated: Boolean(session),
+    authMode: session ? "discord" : null,
+    accessLevel: session?.accessLevel || null,
+    user: session?.user || null,
+    oauthConfigured: Boolean(DISCORD_CLIENT_SECRET && SESSION_SECRET),
+    tokenFallbackEnabled: Boolean(WEB_ADMIN_TOKEN)
+  };
+}
+
+function isWebTokenAuthorized(req) {
   if (!WEB_ADMIN_TOKEN) return false;
   const authHeader = req.headers.authorization || "";
   const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
   const headerToken = req.headers["x-admin-token"] || "";
   return bearerToken === WEB_ADMIN_TOKEN || headerToken === WEB_ADMIN_TOKEN;
+}
+
+function getWebAuth(req) {
+  const session = getWebSession(req);
+  if (session) {
+    return session;
+  }
+
+  if (isWebTokenAuthorized(req)) {
+    return {
+      sessionId: null,
+      accessLevel: "admin",
+      user: {
+        id: "token",
+        username: "Admin Token",
+        tag: "Admin Token"
+      },
+      expiresAt: null
+    };
+  }
+
+  return null;
+}
+
+function hasWebAccess(auth, level = "mod") {
+  if (!auth) return false;
+  if (auth.accessLevel === "admin") return true;
+  return level === "mod" && auth.accessLevel === "mod";
+}
+
+async function fetchDiscordJson(url, options = {}) {
+  const response = await fetch(url, options);
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.error_description || payload.message || `Discord request failed with ${response.status}`);
+  }
+  return payload;
+}
+
+async function getWebDiscordAccessLevel(userId) {
+  const guild = client.guilds.cache.get(GUILD_ID) || await client.guilds.fetch(GUILD_ID).catch(() => null);
+  if (!guild) return null;
+
+  const member = await guild.members.fetch(userId).catch(() => null);
+  if (!member) return null;
+  if (hasStaffAccess(member, "admin")) return "admin";
+  if (hasStaffAccess(member, "mod")) return "mod";
+  return null;
+}
+
+function redirectWeb(res, location) {
+  res.writeHead(302, { Location: location });
+  res.end();
+}
+
+function handleWebLogin(req, res) {
+  if (!DISCORD_CLIENT_SECRET || !SESSION_SECRET) {
+    return sendWebText(res, 503, "Discord OAuth is not configured. Set DISCORD_CLIENT_SECRET and SESSION_SECRET.");
+  }
+
+  const state = crypto.randomBytes(24).toString("hex");
+  webOauthStates.set(state, {
+    expiresAt: Date.now() + 10 * 60 * 1000
+  });
+
+  const redirectUri = `${getWebBaseUrl(req)}/auth/callback`;
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: "identify",
+    state
+  });
+
+  redirectWeb(res, `https://discord.com/oauth2/authorize?${params.toString()}`);
+}
+
+async function handleWebCallback(req, res, requestUrl) {
+  if (!DISCORD_CLIENT_SECRET || !SESSION_SECRET) {
+    return sendWebText(res, 503, "Discord OAuth is not configured.");
+  }
+
+  cleanupWebAuthState();
+  const code = requestUrl.searchParams.get("code");
+  const state = requestUrl.searchParams.get("state");
+  const savedState = state ? webOauthStates.get(state) : null;
+
+  if (!code || !savedState) {
+    return sendWebText(res, 400, "OAuth login expired or was cancelled. Try logging in again.");
+  }
+
+  webOauthStates.delete(state);
+
+  const redirectUri = `${getWebBaseUrl(req)}/auth/callback`;
+  const tokenPayload = await fetchDiscordJson("https://discord.com/api/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: CLIENT_ID,
+      client_secret: DISCORD_CLIENT_SECRET,
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri
+    })
+  });
+
+  const user = await fetchDiscordJson("https://discord.com/api/users/@me", {
+    headers: { Authorization: `Bearer ${tokenPayload.access_token}` }
+  });
+
+  const accessLevel = await getWebDiscordAccessLevel(user.id);
+  if (!accessLevel) {
+    return sendWebText(res, 403, "You are not allowed to access this moderation panel.");
+  }
+
+  const sessionId = createWebSession({
+    id: user.id,
+    username: user.username,
+    globalName: user.global_name || null,
+    tag: user.discriminator && user.discriminator !== "0"
+      ? `${user.username}#${user.discriminator}`
+      : user.username,
+    avatar: user.avatar || null
+  }, accessLevel);
+
+  setWebCookie(req, res, "mochi_session", createSignedWebValue(sessionId), 7 * 24 * 60 * 60);
+  redirectWeb(res, "/");
+}
+
+function handleWebLogout(req, res) {
+  const session = getWebSession(req);
+  if (session?.sessionId) {
+    webSessions.delete(session.sessionId);
+  }
+  clearWebCookie(req, res, "mochi_session");
+  redirectWeb(res, "/");
 }
 
 function readWebJsonBody(req) {
@@ -3102,11 +3352,17 @@ function serveWebStatic(req, res, pathname) {
 }
 
 async function handleWebApi(req, res, pathname) {
-  if (!isWebApiAuthorized(req)) {
+  const auth = getWebAuth(req);
+
+  if (req.method === "GET" && pathname === "/api/me") {
+    return sendWebJson(res, 200, buildWebUserPayload(auth));
+  }
+
+  if (!auth) {
     return sendWebJson(res, 401, {
-      error: WEB_ADMIN_TOKEN
-        ? "Enter the dashboard token to continue."
-        : "WEB_ADMIN_TOKEN is not configured on this deployment."
+      error: DISCORD_CLIENT_SECRET
+        ? "Login with Discord to continue."
+        : "Discord OAuth is not configured. Use the admin token fallback or set DISCORD_CLIENT_SECRET."
     });
   }
 
@@ -3132,21 +3388,33 @@ async function handleWebApi(req, res, pathname) {
   }
 
   if (req.method === "POST" && pathname === "/api/settings") {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
     const body = await readWebJsonBody(req);
     return sendWebJson(res, 200, { settings: updateWebSettings(body) });
   }
 
   if (req.method === "POST" && pathname === "/api/automod") {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
     const body = await readWebJsonBody(req);
     return sendWebJson(res, 200, { automod: updateWebAutomod(body) });
   }
 
   if (req.method === "POST" && pathname === "/api/rule-actions") {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
     const body = await readWebJsonBody(req);
     return sendWebJson(res, 200, updateWebRuleActions(body));
   }
 
   if (req.method === "POST" && pathname === "/api/reload-config") {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
     const previousVerifyMessageId = config.verifyMessageId;
     config = loadConfig();
     if (!config.verifyMessageId && previousVerifyMessageId) {
@@ -3163,6 +3431,23 @@ function startWebServer() {
     const requestUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     const pathname = requestUrl.pathname;
 
+    if (pathname === "/auth/login") {
+      handleWebLogin(req, res);
+      return;
+    }
+
+    if (pathname === "/auth/callback") {
+      handleWebCallback(req, res, requestUrl).catch(error => {
+        sendWebText(res, 400, error.message || "Discord OAuth login failed.");
+      });
+      return;
+    }
+
+    if (pathname === "/auth/logout") {
+      handleWebLogout(req, res);
+      return;
+    }
+
     if (pathname.startsWith("/api/")) {
       handleWebApi(req, res, pathname).catch(error => {
         sendWebJson(res, 400, { error: error.message || "Dashboard request failed." });
@@ -3174,8 +3459,14 @@ function startWebServer() {
   });
 
   server.listen(WEB_PORT, () => {
+    if (!DISCORD_CLIENT_SECRET) {
+      console.warn("Discord OAuth is not configured. Set DISCORD_CLIENT_SECRET to enable Discord login.");
+    }
+    if (!SESSION_SECRET) {
+      console.warn("Web sessions are not configured. Set SESSION_SECRET or WEB_ADMIN_TOKEN.");
+    }
     if (!WEB_ADMIN_TOKEN) {
-      console.warn("Web moderation panel is running without API access. Set WEB_ADMIN_TOKEN to enable the dashboard APIs.");
+      console.warn("Admin token fallback is disabled. Set WEB_ADMIN_TOKEN if you want backup token access.");
     }
     console.log(`Web moderation panel available on port ${WEB_PORT}.`);
   });

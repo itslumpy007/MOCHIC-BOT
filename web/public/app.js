@@ -1,5 +1,6 @@
 const state = {
   token: localStorage.getItem("mochiAdminToken") || "",
+  me: null,
   dashboard: null,
   config: null,
   cases: [],
@@ -83,6 +84,24 @@ function updateApiState(label, kind = "") {
   const apiState = $("#apiState");
   apiState.textContent = label;
   apiState.className = `pill ${kind}`.trim();
+}
+
+function updateAuthPanel() {
+  const me = state.me || {};
+  const user = me.user;
+  const signedInUser = $("#signedInUser");
+  const logoutLink = $("#logoutLink");
+
+  if (me.authenticated && user) {
+    signedInUser.textContent = `${user.tag || user.username} - ${me.accessLevel} access`;
+    logoutLink.classList.remove("hidden");
+  } else if (me.oauthConfigured) {
+    signedInUser.textContent = "Use Discord login for staff access.";
+    logoutLink.classList.add("hidden");
+  } else {
+    signedInUser.textContent = "Discord login is not configured yet.";
+    logoutLink.classList.add("hidden");
+  }
 }
 
 async function api(path, options = {}) {
@@ -245,14 +264,17 @@ function renderAll() {
 }
 
 async function loadAll() {
-  if (!state.token) {
-    updateApiState("Locked");
-    setAlert("Enter the admin token to load the dashboard.");
-    return;
-  }
-
   try {
     updateApiState("Loading");
+    state.me = await api("/api/me");
+    updateAuthPanel();
+
+    if (!state.me.authenticated && !state.token) {
+      updateApiState("Login required");
+      setAlert(state.me.oauthConfigured ? "Login with Discord to load the dashboard." : "Enter the backup admin token to load the dashboard.");
+      return;
+    }
+
     const [dashboard, config, casesPayload, warningsPayload, notesPayload] = await Promise.all([
       api("/api/dashboard"),
       api("/api/config"),
@@ -336,6 +358,7 @@ async function saveRuleActions() {
 
 function bindEvents() {
   $("#tokenInput").value = state.token;
+  updateAuthPanel();
 
   $("#saveToken").addEventListener("click", () => {
     state.token = $("#tokenInput").value.trim();

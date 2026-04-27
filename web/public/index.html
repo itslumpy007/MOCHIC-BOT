@@ -25,7 +25,10 @@
         </nav>
 
         <div class="auth-panel" id="authPanel">
-          <label for="tokenInput">Admin token</label>
+          <a class="discord-login" href="/auth/login">Login with Discord</a>
+          <p class="auth-copy" id="signedInUser">Not signed in</p>
+          <a class="logout-link hidden" id="logoutLink" href="/auth/logout">Sign out</a>
+          <label for="tokenInput">Backup admin token</label>
           <div class="token-row">
             <input id="tokenInput" type="password" autocomplete="current-password">
             <button id="saveToken" type="button">Unlock</button>

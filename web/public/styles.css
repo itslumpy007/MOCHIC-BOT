@@ -158,13 +158,36 @@ textarea {
 
 .token-row button,
 .save-button,
-.icon-button {
+.icon-button,
+.discord-login {
   border: 0;
   border-radius: 8px;
   color: #fff;
   background: var(--accent);
   padding: 10px 13px;
   font-weight: 800;
+}
+
+.discord-login {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+  margin-bottom: 12px;
+}
+
+.auth-copy {
+  margin: 0 0 12px;
+  color: #c8d1dc;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.logout-link {
+  display: inline-block;
+  color: #f6b2c0;
+  font-size: 13px;
+  font-weight: 800;
+  margin-bottom: 12px;
 }
 
 .icon-button {
