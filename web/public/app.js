@@ -43,6 +43,17 @@ const limitLabels = {
   timeoutThreshold: "Timeout threshold"
 };
 
+const durationLabels = {
+  timeoutDurationMs: "Escalation timeout",
+  offenseWindowMs: "Offense window",
+  raidWindowMs: "Raid window",
+  raidAccountAgeLimitMs: "Raid account age",
+  minAccountAgeForLinksMs: "Link account age",
+  minMemberAgeForLinksMs: "Link member age",
+  minAccountAgeForAttachmentsMs: "Attachment account age",
+  minMemberAgeForAttachmentsMs: "Attachment member age"
+};
+
 const listLabels = {
   bannedWordList: "Banned words",
   nicknameBlockedTerms: "Nickname terms",
@@ -137,8 +148,21 @@ function renderMetrics() {
   ];
 
   $("#metricGrid").innerHTML = metrics
-    .map(([label, value]) => `<article class="metric"><span>${label}</span><strong>${value}</strong></article>`)
+    .map(([label, value]) => `<article class="metric"><span>${label}</span><strong>${value}</strong><small>${getMetricHint(label)}</small></article>`)
     .join("");
+}
+
+function getMetricHint(label) {
+  return {
+    Cases: "all recorded actions",
+    "Warning Users": "members with warnings",
+    "Staff Notes": "members with notes",
+    "AutoMod Hits": "detected events",
+    "Banned Words": "filtered terms",
+    "Blocked Domains": "denied domains",
+    "Allowed Domains": "approved domains",
+    "Temp Bans": "scheduled unbans"
+  }[label] || "";
 }
 
 function renderRuntime() {
@@ -167,11 +191,11 @@ function renderRecentViolations() {
   $("#recentViolations").innerHTML = items.length
     ? items.slice(0, 8).map(item => `
       <article class="event">
-        <strong>${escapeHtml(item.action)} - ${escapeHtml(item.userTag)}</strong>
+        <strong><span class="status-dot red"></span>${escapeHtml(item.action)} - ${escapeHtml(item.userTag)}</strong>
         <p>${escapeHtml(item.reason)}</p>
       </article>
     `).join("")
-    : `<article class="event"><strong>No detections</strong><p>AutoMod has not recorded recent violations.</p></article>`;
+    : renderEmptyState("No detections", "AutoMod has not recorded recent violations.");
 }
 
 function renderAutomod() {
@@ -196,6 +220,13 @@ function renderAutomod() {
     .map(([key, label]) => `
       <label>${label}
         <textarea data-automod-list="${key}" rows="4">${escapeHtml((automod[key] || []).join(", "))}</textarea>
+      </label>
+    `).join("");
+
+  $("#durationFields").innerHTML = Object.entries(durationLabels)
+    .map(([key, label]) => `
+      <label>${label}
+        <input data-automod-duration="${key}" value="${escapeHtml(formatDurationInput(automod[key] || 0))}" placeholder="0, 10m, 1h, 7d">
       </label>
     `).join("");
 
@@ -227,7 +258,8 @@ function renderSettings() {
 }
 
 function renderRecords() {
-  $("#casesTable").innerHTML = (state.cases || []).slice(0, 80).map(entry => `
+  const filteredCases = getFilteredCases();
+  $("#casesTable").innerHTML = filteredCases.slice(0, 120).map(entry => `
     <tr>
       <td>${escapeHtml(entry.id || "")}</td>
       <td>${escapeHtml(entry.action || "")}</td>
@@ -238,12 +270,80 @@ function renderRecords() {
   `).join("") || `<tr><td colspan="5">No cases saved.</td></tr>`;
 
   $("#warningsList").innerHTML = renderRecordMap(state.warnings, "warning");
-  $("#notesList").innerHTML = renderRecordMap(state.notes, "note");
+  $("#timelineList").innerHTML = renderTimeline(filteredCases);
 }
 
 function formatDate(value) {
   if (!value) return "Unknown";
   return new Date(value).toLocaleString();
+}
+
+function formatDurationInput(milliseconds) {
+  const value = Number(milliseconds || 0);
+  if (!value) return "0";
+  const day = 24 * 60 * 60 * 1000;
+  const hour = 60 * 60 * 1000;
+  const minute = 60 * 1000;
+  if (value % day === 0) return `${value / day}d`;
+  if (value % hour === 0) return `${value / hour}h`;
+  if (value % minute === 0) return `${value / minute}m`;
+  return `${Math.floor(value / 1000)}s`;
+}
+
+function getFilteredCases() {
+  const userFilter = ($("#caseFilterUser")?.value || "").trim().toLowerCase();
+  const actionFilter = ($("#caseFilterAction")?.value || "").trim().toLowerCase();
+  const moderatorFilter = ($("#caseFilterModerator")?.value || "").trim().toLowerCase();
+
+  return (state.cases || []).filter(entry => {
+    const targetText = `${entry.targetTag || ""} ${entry.targetId || ""}`.toLowerCase();
+    const actionText = String(entry.action || "").toLowerCase();
+    const moderatorText = String(entry.moderatorTag || "").toLowerCase();
+    return (!userFilter || targetText.includes(userFilter)) &&
+      (!actionFilter || actionText.includes(actionFilter)) &&
+      (!moderatorFilter || moderatorText.includes(moderatorFilter));
+  });
+}
+
+function renderTimeline(filteredCases) {
+  const warningEvents = Object.entries(state.warnings || {}).flatMap(([userId, entries]) =>
+    (entries || []).map(entry => ({
+      type: "warning",
+      createdAt: entry.createdAt,
+      title: `Warning - ${userId}`,
+      text: entry.reason,
+      moderatorTag: entry.moderatorTag
+    }))
+  );
+  const noteEvents = Object.entries(state.notes || {}).flatMap(([userId, entries]) =>
+    (entries || []).map(entry => ({
+      type: "note",
+      createdAt: entry.createdAt,
+      title: `Note - ${userId}`,
+      text: entry.content,
+      moderatorTag: entry.moderatorTag
+    }))
+  );
+  const caseEvents = filteredCases.map(entry => ({
+    type: "case",
+    createdAt: entry.createdAt,
+    title: `#${entry.id} ${entry.action} - ${entry.targetTag || entry.targetId}`,
+    text: entry.reason,
+    moderatorTag: entry.moderatorTag
+  }));
+
+  const events = [...caseEvents, ...warningEvents, ...noteEvents]
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
+    .slice(0, 80);
+
+  return events.length
+    ? events.map(entry => `
+      <article class="event timeline-${escapeHtml(entry.type)}">
+        <strong>${escapeHtml(entry.title)}</strong>
+        <p>${escapeHtml(formatDate(entry.createdAt))}<br>${escapeHtml(entry.text || "No details")}<br>${escapeHtml(entry.moderatorTag || "")}</p>
+      </article>
+    `).join("")
+    : renderEmptyState("No timeline events", "No matching records found.");
 }
 
 function renderMemberProfile() {
@@ -289,7 +389,7 @@ function renderMemberProfile() {
         <p>${escapeHtml(entry.reason || "No reason")}<br>${escapeHtml(entry.moderatorTag || "")}</p>
       </article>
     `).join("")
-    : `<article class="event"><strong>No cases</strong><p>No moderation cases for this member.</p></article>`;
+    : renderEmptyState("No cases", "No moderation cases for this member.");
 
   const signals = [
     ...(member.warnings || []).map(entry => ({ type: "Warning", text: entry.reason, moderatorTag: entry.moderatorTag })),
@@ -303,7 +403,7 @@ function renderMemberProfile() {
         <p>${escapeHtml(entry.text || "No details")}<br>${escapeHtml(entry.moderatorTag || "")}</p>
       </article>
     `).join("")
-    : `<article class="event"><strong>No warnings or notes</strong><p>This member has no saved signals.</p></article>`;
+    : renderEmptyState("No warnings or notes", "This member has no saved signals.");
 }
 
 async function searchMember() {
@@ -373,7 +473,16 @@ function renderRecordMap(records, label) {
         <p>${escapeHtml(entry.reason || entry.content || "No details")}<br>${escapeHtml(entry.moderatorTag || "")}</p>
       </article>
     `).join("")
-    : `<article class="event"><strong>No ${label}s</strong><p>No saved ${label} records.</p></article>`;
+    : renderEmptyState(`No ${label}s`, `No saved ${label} records.`);
+}
+
+function renderEmptyState(title, description) {
+  return `
+    <article class="empty-state">
+      <strong>${escapeHtml(title)}</strong>
+      <p>${escapeHtml(description)}</p>
+    </article>
+  `;
 }
 
 function renderAll() {
@@ -429,6 +538,9 @@ async function saveAutomod() {
   });
   document.querySelectorAll("[data-automod-list]").forEach(input => {
     payload[input.dataset.automodList] = input.value;
+  });
+  document.querySelectorAll("[data-automod-duration]").forEach(input => {
+    payload[input.dataset.automodDuration] = input.value;
   });
 
   const result = await api("/api/automod", {
@@ -500,6 +612,15 @@ function bindEvents() {
       event.preventDefault();
       searchMember().catch(error => setAlert(error.message, "error"));
     }
+  });
+  ["#caseFilterUser", "#caseFilterAction", "#caseFilterModerator"].forEach(selector => {
+    $(selector).addEventListener("input", renderRecords);
+  });
+  $("#resetCaseFilters").addEventListener("click", () => {
+    $("#caseFilterUser").value = "";
+    $("#caseFilterAction").value = "";
+    $("#caseFilterModerator").value = "";
+    renderRecords();
   });
 
   document.querySelectorAll(".tab").forEach(button => {

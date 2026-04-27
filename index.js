@@ -3127,6 +3127,13 @@ function setWebInteger(target, key, value, min, max) {
   return true;
 }
 
+function setWebDuration(target, key, value, allowZero = false) {
+  const parsed = allowZero ? parseDurationInputOrZero(value) : parseDuration(value);
+  if (parsed === null || (!allowZero && !parsed)) return false;
+  target[key] = parsed;
+  return true;
+}
+
 function buildWebDashboardPayload() {
   const analytics = getAutoModAnalytics();
   const recentCases = [...(Array.isArray(config.cases) ? config.cases : [])]
@@ -3248,6 +3255,17 @@ function updateWebAutomod(payload) {
     timeoutThreshold: [1, 20]
   };
 
+  const durationRules = [
+    "timeoutDurationMs",
+    "offenseWindowMs",
+    "raidWindowMs",
+    "raidAccountAgeLimitMs",
+    "minAccountAgeForLinksMs",
+    "minMemberAgeForLinksMs",
+    "minAccountAgeForAttachmentsMs",
+    "minMemberAgeForAttachmentsMs"
+  ];
+
   for (const key of booleanKeys) {
     if (Object.prototype.hasOwnProperty.call(payload, key)) {
       setWebBoolean(config.automod, key, payload[key]);
@@ -3257,6 +3275,12 @@ function updateWebAutomod(payload) {
   for (const [key, [min, max]] of Object.entries(integerRules)) {
     if (Object.prototype.hasOwnProperty.call(payload, key)) {
       setWebInteger(config.automod, key, payload[key], min, max);
+    }
+  }
+
+  for (const key of durationRules) {
+    if (Object.prototype.hasOwnProperty.call(payload, key)) {
+      setWebDuration(config.automod, key, payload[key], key.startsWith("min") || key === "raidAccountAgeLimitMs");
     }
   }
 

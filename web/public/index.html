@@ -159,6 +159,13 @@
 
           <section class="panel">
             <div class="panel-header">
+              <h3>Durations & Gates</h3>
+            </div>
+            <div class="form-grid" id="durationFields"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
               <h3>Rule Actions</h3>
               <button class="save-button" id="saveRuleActions" type="button">Save Actions</button>
             </div>
@@ -193,6 +200,17 @@
         </section>
 
         <section id="recordsView" class="view">
+          <section class="panel">
+            <div class="panel-header">
+              <h3>Case Filters</h3>
+              <button class="save-button" id="resetCaseFilters" type="button">Reset</button>
+            </div>
+            <div class="form-grid three filters">
+              <label>User or ID<input id="caseFilterUser" placeholder="username, tag, or ID"></label>
+              <label>Action<input id="caseFilterAction" placeholder="warn, ban, automod"></label>
+              <label>Moderator<input id="caseFilterModerator" placeholder="moderator tag"></label>
+            </div>
+          </section>
           <div class="split">
             <section class="panel">
               <div class="panel-header">
@@ -222,9 +240,9 @@
           </div>
           <section class="panel">
             <div class="panel-header">
-              <h3>Notes</h3>
+              <h3>Unified Timeline</h3>
             </div>
-            <div id="notesList" class="event-list"></div>
+            <div id="timelineList" class="event-list"></div>
           </section>
         </section>
       </main>
