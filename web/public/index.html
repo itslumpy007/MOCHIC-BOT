@@ -19,6 +19,7 @@
 
         <nav class="tabs" aria-label="Dashboard sections">
           <button class="tab is-active" data-view="overview" type="button">Overview</button>
+          <button class="tab" data-view="members" type="button">Members</button>
           <button class="tab" data-view="automod" type="button">AutoMod</button>
           <button class="tab" data-view="settings" type="button">Settings</button>
           <button class="tab" data-view="records" type="button">Records</button>
@@ -64,6 +65,70 @@
                 <h3>Recent AutoMod</h3>
               </div>
               <div id="recentViolations" class="event-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="membersView" class="view">
+          <section class="panel">
+            <div class="panel-header">
+              <h3>Member Search</h3>
+            </div>
+            <div class="search-row">
+              <input id="memberSearchInput" placeholder="Discord ID, mention, or username">
+              <button id="memberSearchButton" class="save-button" type="button">Search</button>
+            </div>
+          </section>
+
+          <div class="split">
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Profile</h3>
+              </div>
+              <div id="memberProfile" class="profile-empty">Search for a member to load their moderation profile.</div>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Moderation Actions</h3>
+              </div>
+              <div class="action-form">
+                <label>Action
+                  <select id="memberAction">
+                    <option value="warn">Warn</option>
+                    <option value="note">Add note</option>
+                    <option value="timeout">Timeout</option>
+                    <option value="untimeout">Remove timeout</option>
+                    <option value="mute">Mute</option>
+                    <option value="unmute">Unmute</option>
+                    <option value="clearwarnings">Clear warnings</option>
+                    <option value="kick">Kick</option>
+                    <option value="ban">Ban</option>
+                    <option value="tempban">Tempban</option>
+                  </select>
+                </label>
+                <label>Duration
+                  <input id="memberActionDuration" placeholder="10m, 2h, 1d">
+                </label>
+                <label>Reason
+                  <textarea id="memberActionReason" rows="5" placeholder="Reason or note content"></textarea>
+                </label>
+                <button id="memberActionButton" class="save-button" type="button">Apply Action</button>
+              </div>
+            </section>
+          </div>
+
+          <div class="split">
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Member Cases</h3>
+              </div>
+              <div id="memberCases" class="event-list"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Warnings & Notes</h3>
+              </div>
+              <div id="memberSignals" class="event-list"></div>
             </section>
           </div>
         </section>

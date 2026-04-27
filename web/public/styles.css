@@ -135,7 +135,8 @@ button {
 }
 
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -154,6 +155,79 @@ textarea {
 textarea {
   min-height: 92px;
   resize: vertical;
+}
+
+.search-row {
+  padding: 16px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.profile-empty,
+.profile-card,
+.action-form {
+  padding: 16px;
+}
+
+.profile-empty {
+  color: var(--muted);
+}
+
+.profile-card {
+  display: grid;
+  gap: 14px;
+}
+
+.profile-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.profile-title img {
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.profile-title strong {
+  display: block;
+  font-size: 18px;
+}
+
+.profile-title span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.badge {
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--muted);
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.action-form {
+  display: grid;
+  gap: 14px;
+}
+
+.action-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .token-row button,

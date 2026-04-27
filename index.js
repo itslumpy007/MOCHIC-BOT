@@ -3315,6 +3315,271 @@ function updateWebRuleActions(payload) {
   };
 }
 
+function serializeWebMember(member, user = null) {
+  const resolvedUser = user || member?.user || null;
+  if (!resolvedUser) return null;
+
+  const cases = getCasesForUser(resolvedUser.id).slice(-20).reverse();
+  const warnings = getWarnings(resolvedUser.id).slice().reverse();
+  const notes = getNotes(resolvedUser.id).slice().reverse();
+
+  return {
+    id: resolvedUser.id,
+    tag: resolvedUser.tag || resolvedUser.username,
+    username: resolvedUser.username,
+    avatarUrl: resolvedUser.displayAvatarURL?.({ dynamic: true }) || null,
+    bot: Boolean(resolvedUser.bot),
+    inGuild: Boolean(member),
+    joinedAt: member?.joinedAt?.toISOString?.() || null,
+    createdAt: resolvedUser.createdAt?.toISOString?.() || null,
+    topRole: member?.roles?.highest && member.roles.highest.id !== member.guild.id
+      ? { id: member.roles.highest.id, name: member.roles.highest.name }
+      : null,
+    roles: member?.roles?.cache
+      ? member.roles.cache
+          .filter(role => role.id !== member.guild.id)
+          .sort((a, b) => b.position - a.position)
+          .map(role => ({ id: role.id, name: role.name }))
+          .slice(0, 20)
+      : [],
+    timeoutUntil: member?.communicationDisabledUntil?.toISOString?.() || null,
+    warnings,
+    notes,
+    cases,
+    counts: {
+      warnings: warnings.length,
+      notes: notes.length,
+      cases: getCasesForUser(resolvedUser.id).length
+    }
+  };
+}
+
+async function getWebGuild() {
+  return client.guilds.cache.get(GUILD_ID) || await client.guilds.fetch(GUILD_ID);
+}
+
+async function resolveWebMember(query) {
+  const guild = await getWebGuild();
+  const normalized = String(query || "").trim();
+  if (!normalized) {
+    throw new Error("Enter a member ID, mention, or username.");
+  }
+
+  const id = normalized.replace(/[<@!>]/g, "");
+  if (/^\d{15,25}$/.test(id)) {
+    const member = await guild.members.fetch(id).catch(() => null);
+    const user = member?.user || await client.users.fetch(id).catch(() => null);
+    if (!member && !user) throw new Error("No Discord user found for that ID.");
+    return { guild, member, user };
+  }
+
+  const matches = await guild.members.search({ query: normalized, limit: 1 }).catch(() => null);
+  const member = matches?.first?.() || null;
+  if (!member) {
+    throw new Error("No server member matched that search.");
+  }
+
+  return { guild, member, user: member.user };
+}
+
+async function ensureWebModeratable(auth, guild, targetMember, actionLabel) {
+  if (!targetMember) {
+    if (["ban", "tempban"].includes(actionLabel)) return;
+    throw new Error("That member could not be found in the server.");
+  }
+
+  if (auth.user?.id && targetMember.id === auth.user.id) {
+    throw new Error(`You cannot ${actionLabel} yourself.`);
+  }
+
+  if (targetMember.id === guild.ownerId) {
+    throw new Error(`You cannot ${actionLabel} the server owner.`);
+  }
+
+  const botMember = guild.members.me || await guild.members.fetchMe().catch(() => null);
+  if (botMember && botMember.roles.highest.comparePositionTo(targetMember.roles.highest) <= 0) {
+    throw new Error(`My role needs to be higher than that member to ${actionLabel} them.`);
+  }
+
+  if (auth.user?.id && auth.user.id !== "token") {
+    const moderatorMember = await guild.members.fetch(auth.user.id).catch(() => null);
+    if (!moderatorMember || moderatorMember.roles.highest.comparePositionTo(targetMember.roles.highest) <= 0) {
+      throw new Error(`You need a higher role than that member to ${actionLabel} them.`);
+    }
+  }
+}
+
+function getWebModeratorTag(auth) {
+  return auth.user?.tag || auth.user?.username || "Web Panel";
+}
+
+async function handleWebMemberAction(auth, payload) {
+  if (!hasWebAccess(auth, "mod")) {
+    throw new Error("Moderator web access is required.");
+  }
+
+  const action = String(payload.action || "").trim().toLowerCase();
+  const targetId = String(payload.userId || "").trim();
+  const reason = String(payload.reason || "No reason provided.").trim().slice(0, 1000);
+  if (!/^\d{15,25}$/.test(targetId)) {
+    throw new Error("A valid target user ID is required.");
+  }
+
+  const guild = await getWebGuild();
+  const member = await guild.members.fetch(targetId).catch(() => null);
+  const user = member?.user || await client.users.fetch(targetId).catch(() => null);
+  if (!user) throw new Error("That Discord user could not be found.");
+
+  const moderatorTag = getWebModeratorTag(auth);
+
+  if (action === "warn") {
+    const warnings = addWarning(user.id, moderatorTag, reason);
+    const entry = addCase({
+      action: "warn",
+      targetId: user.id,
+      targetTag: user.tag,
+      moderatorTag,
+      reason,
+      details: [{ name: "Total warnings", value: `${warnings.length}`, inline: true }]
+    });
+    await notifyUser(user, makeEmbed({
+      title: "Warning received",
+      description: `You were warned in **${guild.name}**.`,
+      color: COLORS.yellow,
+      fields: buildCaseFields(entry)
+    }));
+    await logEmbed(makeEmbed({ title: `Case #${entry.id}: warning`, description: `${user.tag} received a warning.`, color: COLORS.yellow, fields: buildCaseFields(entry) }));
+    return { entry };
+  }
+
+  if (action === "note") {
+    const notes = addNote(user.id, moderatorTag, reason);
+    const entry = addCase({
+      action: "note",
+      targetId: user.id,
+      targetTag: user.tag,
+      moderatorTag,
+      reason,
+      details: [{ name: "Total notes", value: `${notes.length}`, inline: true }]
+    });
+    await logEmbed(makeEmbed({ title: `Case #${entry.id}: staff note`, description: `A staff note was saved for ${user.tag}.`, color: COLORS.gray, fields: buildCaseFields(entry) }));
+    return { entry };
+  }
+
+  if (action === "timeout") {
+    await ensureWebModeratable(auth, guild, member, "timeout");
+    const durationMs = parseDuration(payload.duration);
+    if (!durationMs) throw new Error("Use a valid duration like 10m, 2h, or 1d.");
+    if (!member?.moderatable) throw new Error("I cannot timeout that member.");
+    await member.timeout(durationMs, `${moderatorTag}: ${reason}`);
+    const entry = addCase({
+      action: "timeout",
+      targetId: user.id,
+      targetTag: user.tag,
+      moderatorTag,
+      reason,
+      details: [{ name: "Duration", value: formatDuration(durationMs), inline: true }]
+    });
+    await logEmbed(makeEmbed({ title: `Case #${entry.id}: timeout`, description: `${user.tag} was timed out.`, color: COLORS.red, fields: buildCaseFields(entry) }));
+    return { entry };
+  }
+
+  if (action === "untimeout") {
+    await ensureWebModeratable(auth, guild, member, "untimeout");
+    if (!member?.communicationDisabledUntilTimestamp || member.communicationDisabledUntilTimestamp <= Date.now()) {
+      throw new Error("That member is not currently timed out.");
+    }
+    await member.timeout(null, `${moderatorTag}: Timeout removed from web panel.`);
+    const entry = addCase({ action: "untimeout", targetId: user.id, targetTag: user.tag, moderatorTag, reason: "Timeout removed from web panel." });
+    await logEmbed(makeEmbed({ title: `Case #${entry.id}: timeout removed`, description: `${user.tag}'s timeout was removed.`, color: COLORS.mint, fields: buildCaseFields(entry) }));
+    return { entry };
+  }
+
+  if (action === "mute") {
+    await ensureWebModeratable(auth, guild, member, "mute");
+    if (!member?.manageable) throw new Error("I cannot manage that member's roles.");
+    const mutedRole = await ensureMutedRole(guild);
+    await member.roles.add(mutedRole, `${moderatorTag}: ${reason}`);
+    const entry = addCase({
+      action: "mute",
+      targetId: user.id,
+      targetTag: user.tag,
+      moderatorTag,
+      reason,
+      details: [{ name: "Muted role", value: `<@&${mutedRole.id}>`, inline: true }]
+    });
+    await logEmbed(makeEmbed({ title: `Case #${entry.id}: mute`, description: `${user.tag} was muted.`, color: COLORS.red, fields: buildCaseFields(entry) }));
+    return { entry };
+  }
+
+  if (action === "unmute") {
+    await ensureWebModeratable(auth, guild, member, "unmute");
+    const mutedRoleId = getMutedRoleId();
+    if (!mutedRoleId || !member.roles.cache.has(mutedRoleId)) throw new Error("That member is not muted.");
+    await member.roles.remove(mutedRoleId, `${moderatorTag}: Unmuted from web panel.`);
+    const entry = addCase({ action: "unmute", targetId: user.id, targetTag: user.tag, moderatorTag, reason: "Unmuted from web panel." });
+    await logEmbed(makeEmbed({ title: `Case #${entry.id}: unmute`, description: `${user.tag} was unmuted.`, color: COLORS.mint, fields: buildCaseFields(entry) }));
+    return { entry };
+  }
+
+  if (action === "clearwarnings") {
+    const count = clearWarnings(user.id);
+    const entry = addCase({
+      action: "clearwarnings",
+      targetId: user.id,
+      targetTag: user.tag,
+      moderatorTag,
+      reason,
+      details: [{ name: "Warnings cleared", value: `${count}`, inline: true }]
+    });
+    await logEmbed(makeEmbed({ title: `Case #${entry.id}: warnings cleared`, description: `${user.tag}'s warnings were cleared.`, color: COLORS.mint, fields: buildCaseFields(entry) }));
+    return { entry };
+  }
+
+  if (action === "kick") {
+    await ensureWebModeratable(auth, guild, member, "kick");
+    if (!member?.kickable) throw new Error("I cannot kick that member.");
+    const entry = addCase({ action: "kick", targetId: user.id, targetTag: user.tag, moderatorTag, reason });
+    await member.kick(`${moderatorTag}: ${reason}`);
+    await logEmbed(makeEmbed({ title: `Case #${entry.id}: kick`, description: `${user.tag} was kicked.`, color: COLORS.red, fields: buildCaseFields(entry) }));
+    return { entry };
+  }
+
+  if (action === "ban") {
+    await ensureWebModeratable(auth, guild, member, "ban");
+    if (member && !member.bannable) throw new Error("I cannot ban that member.");
+    const entry = addCase({ action: "ban", targetId: user.id, targetTag: user.tag, moderatorTag, reason });
+    await guild.members.ban(user.id, { reason: `${moderatorTag}: ${reason}` });
+    await logEmbed(makeEmbed({ title: `Case #${entry.id}: ban`, description: `${user.tag} was banned.`, color: COLORS.red, fields: buildCaseFields(entry) }));
+    return { entry };
+  }
+
+  if (action === "tempban") {
+    await ensureWebModeratable(auth, guild, member, "tempban");
+    if (member && !member.bannable) throw new Error("I cannot ban that member.");
+    const durationMs = parseDuration(payload.duration);
+    if (!durationMs) throw new Error("Use a valid duration like 1h, 1d, or 7d.");
+    const expiresAt = new Date(Date.now() + durationMs).toISOString();
+    addTempBan({ userId: user.id, targetTag: user.tag, moderatorTag, reason, expiresAt });
+    await guild.members.ban(user.id, { reason: `${moderatorTag}: ${reason}` });
+    const entry = addCase({
+      action: "tempban",
+      targetId: user.id,
+      targetTag: user.tag,
+      moderatorTag,
+      reason,
+      details: [
+        { name: "Duration", value: formatDuration(durationMs), inline: true },
+        { name: "Expires", value: `<t:${Math.floor(new Date(expiresAt).getTime() / 1000)}:F>`, inline: false }
+      ]
+    });
+    await logEmbed(makeEmbed({ title: `Case #${entry.id}: tempban`, description: `${user.tag} was temporarily banned.`, color: COLORS.red, fields: buildCaseFields(entry) }));
+    return { entry };
+  }
+
+  throw new Error("Unknown moderation action.");
+}
+
 function getWebMimeType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   return {
@@ -3385,6 +3650,23 @@ async function handleWebApi(req, res, pathname) {
 
   if (req.method === "GET" && pathname === "/api/notes") {
     return sendWebJson(res, 200, { notes: config.notes || {} });
+  }
+
+  if (req.method === "GET" && pathname === "/api/member") {
+    const requestUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    const { member, user } = await resolveWebMember(requestUrl.searchParams.get("query"));
+    return sendWebJson(res, 200, { member: serializeWebMember(member, user) });
+  }
+
+  if (req.method === "POST" && pathname === "/api/member-action") {
+    const body = await readWebJsonBody(req);
+    const result = await handleWebMemberAction(auth, body);
+    const { member, user } = await resolveWebMember(body.userId);
+    return sendWebJson(res, 200, {
+      ok: true,
+      ...result,
+      member: serializeWebMember(member, user)
+    });
   }
 
   if (req.method === "POST" && pathname === "/api/settings") {

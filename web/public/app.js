@@ -3,6 +3,7 @@ const state = {
   me: null,
   dashboard: null,
   config: null,
+  selectedMember: null,
   cases: [],
   warnings: {},
   notes: {}
@@ -10,6 +11,7 @@ const state = {
 
 const titles = {
   overview: "Overview",
+  members: "Members",
   automod: "AutoMod",
   settings: "Settings",
   records: "Records"
@@ -239,6 +241,126 @@ function renderRecords() {
   $("#notesList").innerHTML = renderRecordMap(state.notes, "note");
 }
 
+function formatDate(value) {
+  if (!value) return "Unknown";
+  return new Date(value).toLocaleString();
+}
+
+function renderMemberProfile() {
+  const member = state.selectedMember;
+  if (!member) {
+    $("#memberProfile").innerHTML = "Search for a member to load their moderation profile.";
+    $("#memberCases").innerHTML = "";
+    $("#memberSignals").innerHTML = "";
+    return;
+  }
+
+  $("#memberProfile").innerHTML = `
+    <article class="profile-card">
+      <div class="profile-title">
+        ${member.avatarUrl ? `<img src="${member.avatarUrl}" alt="">` : ""}
+        <div>
+          <strong>${escapeHtml(member.tag)}</strong>
+          <span>${escapeHtml(member.id)}</span>
+        </div>
+      </div>
+      <dl class="detail-list">
+        <dt>In Server</dt><dd>${member.inGuild ? "Yes" : "No"}</dd>
+        <dt>Joined</dt><dd>${escapeHtml(formatDate(member.joinedAt))}</dd>
+        <dt>Created</dt><dd>${escapeHtml(formatDate(member.createdAt))}</dd>
+        <dt>Top Role</dt><dd>${escapeHtml(member.topRole?.name || "None")}</dd>
+        <dt>Timeout</dt><dd>${escapeHtml(member.timeoutUntil ? formatDate(member.timeoutUntil) : "No active timeout")}</dd>
+      </dl>
+      <div class="badge-row">
+        <span class="badge">${member.counts.warnings} warnings</span>
+        <span class="badge">${member.counts.notes} notes</span>
+        <span class="badge">${member.counts.cases} cases</span>
+      </div>
+      <div class="badge-row">
+        ${(member.roles || []).slice(0, 10).map(role => `<span class="badge">${escapeHtml(role.name)}</span>`).join("") || `<span class="badge">No roles</span>`}
+      </div>
+    </article>
+  `;
+
+  $("#memberCases").innerHTML = member.cases.length
+    ? member.cases.map(entry => `
+      <article class="event">
+        <strong>#${escapeHtml(entry.id)} ${escapeHtml(entry.action)}</strong>
+        <p>${escapeHtml(entry.reason || "No reason")}<br>${escapeHtml(entry.moderatorTag || "")}</p>
+      </article>
+    `).join("")
+    : `<article class="event"><strong>No cases</strong><p>No moderation cases for this member.</p></article>`;
+
+  const signals = [
+    ...(member.warnings || []).map(entry => ({ type: "Warning", text: entry.reason, moderatorTag: entry.moderatorTag })),
+    ...(member.notes || []).map(entry => ({ type: "Note", text: entry.content, moderatorTag: entry.moderatorTag }))
+  ];
+
+  $("#memberSignals").innerHTML = signals.length
+    ? signals.slice(0, 20).map(entry => `
+      <article class="event">
+        <strong>${escapeHtml(entry.type)}</strong>
+        <p>${escapeHtml(entry.text || "No details")}<br>${escapeHtml(entry.moderatorTag || "")}</p>
+      </article>
+    `).join("")
+    : `<article class="event"><strong>No warnings or notes</strong><p>This member has no saved signals.</p></article>`;
+}
+
+async function searchMember() {
+  const query = $("#memberSearchInput").value.trim();
+  if (!query) {
+    setAlert("Enter a Discord ID, mention, or username.", "error");
+    return;
+  }
+
+  const payload = await api(`/api/member?query=${encodeURIComponent(query)}`);
+  state.selectedMember = payload.member;
+  renderMemberProfile();
+  setAlert("");
+}
+
+async function applyMemberAction() {
+  if (!state.selectedMember) {
+    setAlert("Search for a member first.", "error");
+    return;
+  }
+
+  const action = $("#memberAction").value;
+  const reason = $("#memberActionReason").value.trim();
+  const duration = $("#memberActionDuration").value.trim();
+  const risky = ["clearwarnings", "kick", "ban", "tempban"].includes(action);
+
+  if (["warn", "note", "timeout", "mute", "kick", "ban", "tempban"].includes(action) && !reason) {
+    setAlert("Enter a reason before applying that action.", "error");
+    return;
+  }
+
+  if (["timeout", "tempban"].includes(action) && !duration) {
+    setAlert("Enter a duration like 10m, 2h, or 1d.", "error");
+    return;
+  }
+
+  if (risky && !window.confirm(`Apply ${action} to ${state.selectedMember.tag}?`)) {
+    return;
+  }
+
+  const payload = await api("/api/member-action", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: state.selectedMember.id,
+      action,
+      reason,
+      duration
+    })
+  });
+
+  state.selectedMember = payload.member;
+  renderMemberProfile();
+  $("#memberActionReason").value = "";
+  await loadAll();
+  setAlert(`Applied ${action} to ${state.selectedMember.tag}.`);
+}
+
 function renderRecordMap(records, label) {
   const entries = Object.entries(records || {}).flatMap(([userId, items]) =>
     (items || []).slice(-5).reverse().map(item => ({ userId, ...item }))
@@ -371,6 +493,14 @@ function bindEvents() {
   $("#saveSettings").addEventListener("click", () => saveSettings().catch(error => setAlert(error.message, "error")));
   $("#saveExemptions").addEventListener("click", () => saveExemptions().catch(error => setAlert(error.message, "error")));
   $("#saveRuleActions").addEventListener("click", () => saveRuleActions().catch(error => setAlert(error.message, "error")));
+  $("#memberSearchButton").addEventListener("click", () => searchMember().catch(error => setAlert(error.message, "error")));
+  $("#memberActionButton").addEventListener("click", () => applyMemberAction().catch(error => setAlert(error.message, "error")));
+  $("#memberSearchInput").addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      searchMember().catch(error => setAlert(error.message, "error"));
+    }
+  });
 
   document.querySelectorAll(".tab").forEach(button => {
     button.addEventListener("click", () => {

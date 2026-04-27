@@ -52,8 +52,8 @@ The bot serves a web dashboard from the same Node process.
 - Set `WEB_ADMIN_TOKEN` to a long private token if you want backup token access.
 - Set `WEB_PORT` if your host does not use `PORT`.
 - Open `http://localhost:3000` locally, or your deployed service URL online.
-- The website can view runtime status, cases, warnings, notes, settings, AutoMod toggles, rule limits, lists, exemptions, and rule actions.
-- Direct kick, ban, timeout, and DM actions stay in Discord until web confirmations are added.
+- The website can view runtime status, cases, warnings, notes, settings, AutoMod toggles, rule limits, lists, exemptions, rule actions, and member profiles.
+- Staff can search members and run web moderation actions including warn, note, timeout, mute, unmute, clear warnings, kick, ban, and tempban. Risky actions ask for browser confirmation.
 
 ### Railway
 
