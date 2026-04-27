@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mochi Moderation</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">M</div>
+          <div>
+            <h1>Mochi Moderation</h1>
+            <p id="clientStatus">Connecting</p>
+          </div>
+        </div>
+
+        <nav class="tabs" aria-label="Dashboard sections">
+          <button class="tab is-active" data-view="overview" type="button">Overview</button>
+          <button class="tab" data-view="automod" type="button">AutoMod</button>
+          <button class="tab" data-view="settings" type="button">Settings</button>
+          <button class="tab" data-view="records" type="button">Records</button>
+        </nav>
+
+        <div class="auth-panel" id="authPanel">
+          <label for="tokenInput">Admin token</label>
+          <div class="token-row">
+            <input id="tokenInput" type="password" autocomplete="current-password">
+            <button id="saveToken" type="button">Unlock</button>
+          </div>
+        </div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Live control panel</p>
+            <h2 id="viewTitle">Overview</h2>
+          </div>
+          <div class="topbar-actions">
+            <span class="pill" id="apiState">Locked</span>
+            <button id="refreshButton" class="icon-button" type="button" title="Refresh">Refresh</button>
+          </div>
+        </header>
+
+        <section id="alert" class="alert hidden" role="status"></section>
+
+        <section id="overviewView" class="view is-active">
+          <div class="metric-grid" id="metricGrid"></div>
+          <div class="split">
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Runtime</h3>
+              </div>
+              <dl class="detail-list" id="runtimeList"></dl>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Recent AutoMod</h3>
+              </div>
+              <div id="recentViolations" class="event-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="automodView" class="view">
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Rule Switches</h3>
+              <button class="save-button" id="saveAutomod" type="button">Save</button>
+            </div>
+            <div class="switch-grid" id="automodSwitches"></div>
+          </div>
+
+          <div class="split">
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Limits</h3>
+              </div>
+              <div class="form-grid" id="limitFields"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Lists</h3>
+              </div>
+              <div class="stacked-fields" id="listFields"></div>
+            </section>
+          </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>Rule Actions</h3>
+              <button class="save-button" id="saveRuleActions" type="button">Save Actions</button>
+            </div>
+            <div class="form-grid three">
+              <label>Alert rules<textarea id="alertRules" rows="4"></textarea></label>
+              <label>Warn rules<textarea id="warnRules" rows="4"></textarea></label>
+              <label>Timeout rules<textarea id="timeoutRules" rows="4"></textarea></label>
+            </div>
+          </section>
+        </section>
+
+        <section id="settingsView" class="view">
+          <section class="panel">
+            <div class="panel-header">
+              <h3>Server Settings</h3>
+              <button class="save-button" id="saveSettings" type="button">Save</button>
+            </div>
+            <div class="form-grid" id="settingsFields"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>Exemptions</h3>
+              <button class="save-button" id="saveExemptions" type="button">Save</button>
+            </div>
+            <div class="form-grid three">
+              <label>Channels<textarea id="exemptChannelIds" rows="4"></textarea></label>
+              <label>Roles<textarea id="exemptRoleIds" rows="4"></textarea></label>
+              <label>Users<textarea id="exemptUserIds" rows="4"></textarea></label>
+            </div>
+          </section>
+        </section>
+
+        <section id="recordsView" class="view">
+          <div class="split">
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Cases</h3>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Action</th>
+                      <th>Target</th>
+                      <th>Moderator</th>
+                      <th>Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody id="casesTable"></tbody>
+                </table>
+              </div>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Warnings</h3>
+              </div>
+              <div id="warningsList" class="event-list"></div>
+            </section>
+          </div>
+          <section class="panel">
+            <div class="panel-header">
+              <h3>Notes</h3>
+            </div>
+            <div id="notesList" class="event-list"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

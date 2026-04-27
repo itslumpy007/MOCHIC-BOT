@@ -1,7 +1,9 @@
 ﻿require("dotenv").config();
 
 const fs = require("fs");
+const http = require("http");
 const path = require("path");
+const { URL } = require("url");
 
 const {
   ActionRowBuilder,
@@ -44,6 +46,9 @@ function envFlag(value, fallback = false) {
 }
 
 const ENABLE_CORE_BOT = envFlag(process.env.ENABLE_CORE_BOT, true);
+const WEB_PORT = Number(process.env.WEB_PORT || process.env.PORT || 3000);
+const WEB_ADMIN_TOKEN = process.env.WEB_ADMIN_TOKEN || "";
+const webPublicDir = path.join(__dirname, "web", "public");
 
 const client = new Client({
   intents: [
@@ -2789,6 +2794,395 @@ function buildJsonExportAttachment(prefix, payload) {
     attachment: Buffer.from(`${JSON.stringify(payload, null, 2)}\n`, "utf8"),
     name: `${prefix}-${stamp}.json`
   };
+}
+
+function sendWebJson(res, statusCode, payload) {
+  const body = `${JSON.stringify(payload)}\n`;
+  res.writeHead(statusCode, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store"
+  });
+  res.end(body);
+}
+
+function sendWebText(res, statusCode, message) {
+  res.writeHead(statusCode, {
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cache-Control": "no-store"
+  });
+  res.end(message);
+}
+
+function isWebApiAuthorized(req) {
+  if (!WEB_ADMIN_TOKEN) return false;
+  const authHeader = req.headers.authorization || "";
+  const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7).trim() : "";
+  const headerToken = req.headers["x-admin-token"] || "";
+  return bearerToken === WEB_ADMIN_TOKEN || headerToken === WEB_ADMIN_TOKEN;
+}
+
+function readWebJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", chunk => {
+      body += chunk;
+      if (body.length > 1024 * 1024) {
+        reject(new Error("Request body too large."));
+        req.destroy();
+      }
+    });
+    req.on("end", () => {
+      if (!body.trim()) return resolve({});
+      try {
+        resolve(JSON.parse(body));
+      } catch (error) {
+        reject(new Error("Invalid JSON body."));
+      }
+    });
+    req.on("error", reject);
+  });
+}
+
+function toWebList(value, normalizer = item => String(item || "").trim()) {
+  if (Array.isArray(value)) {
+    return [...new Set(value.map(normalizer).filter(Boolean))];
+  }
+
+  return [...new Set(
+    String(value || "")
+      .split(/[\n,]/)
+      .map(normalizer)
+      .filter(Boolean)
+  )];
+}
+
+function setWebBoolean(target, key, value) {
+  if (typeof value === "boolean") {
+    target[key] = value;
+    return true;
+  }
+
+  if (["true", "false"].includes(String(value).toLowerCase())) {
+    target[key] = String(value).toLowerCase() === "true";
+    return true;
+  }
+
+  return false;
+}
+
+function setWebInteger(target, key, value, min, max) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < min || number > max) return false;
+  target[key] = number;
+  return true;
+}
+
+function buildWebDashboardPayload() {
+  const analytics = getAutoModAnalytics();
+  const recentCases = [...(Array.isArray(config.cases) ? config.cases : [])]
+    .slice(-25)
+    .reverse();
+
+  return {
+    client: {
+      tag: client.user ? client.user.tag : "Not ready",
+      ready: Boolean(client.user),
+      ping: Math.round(client.ws.ping || 0),
+      uptimeSeconds: Math.max(0, Math.floor((Date.now() - startedAt) / 1000))
+    },
+    counts: {
+      cases: config.cases.length,
+      warningUsers: Object.keys(config.warnings || {}).length,
+      noteUsers: Object.keys(config.notes || {}).length,
+      tempBans: config.tempBans.length,
+      bannedWords: getBannedWords().length,
+      nicknameTerms: getNicknameBlockedTerms().length,
+      allowedDomains: config.automod.allowedDomains.length,
+      blockedDomains: config.automod.blockedDomains.length
+    },
+    channels: {
+      verify: getVerifyChannelId(),
+      rules: getRulesChannelId(),
+      log: getLogChannelId(),
+      automodLog: getAutoModLogChannelId()
+    },
+    automod: {
+      invites: config.automod.invites,
+      spam: config.automod.spam,
+      caps: config.automod.caps,
+      bannedWords: config.automod.bannedWords,
+      linksEnabled: config.automod.linksEnabled,
+      allowedDomainsOnly: config.automod.allowedDomainsOnly,
+      attachmentsEnabled: config.automod.attachmentsEnabled,
+      ageProtectionEnabled: config.automod.ageProtectionEnabled,
+      antiRaidEnabled: config.automod.antiRaidEnabled,
+      nicknameFilterEnabled: config.automod.nicknameFilterEnabled,
+      scamFilterEnabled: config.automod.scamFilterEnabled,
+      evasionFilterEnabled: config.automod.evasionFilterEnabled,
+      escalationEnabled: config.automod.escalationEnabled,
+      emojiSpamEnabled: config.automod.emojiSpamEnabled
+    },
+    analytics: {
+      totalDetections: analytics.totalDetections || 0,
+      ruleCounts: analytics.ruleCounts || {},
+      recentViolations: analytics.recentViolations || []
+    },
+    recentCases
+  };
+}
+
+function buildWebConfigPayload() {
+  return {
+    settings: {
+      verifyChannelId: config.settings.verifyChannelId || "",
+      rulesChannelId: config.settings.rulesChannelId || "",
+      logChannelId: config.settings.logChannelId || "",
+      automodLogChannelId: config.settings.automodLogChannelId || "",
+      mutedRoleId: config.settings.mutedRoleId || ""
+    },
+    automod: {
+      ...config.automod,
+      offenses: undefined,
+      analytics: undefined
+    },
+    permissions: config.permissions
+  };
+}
+
+function updateWebSettings(payload) {
+  const allowed = [
+    "verifyChannelId",
+    "rulesChannelId",
+    "logChannelId",
+    "automodLogChannelId",
+    "mutedRoleId"
+  ];
+
+  for (const key of allowed) {
+    if (Object.prototype.hasOwnProperty.call(payload, key)) {
+      config.settings[key] = String(payload[key] || "").trim() || null;
+      if (key === "verifyChannelId") {
+        config.verifyMessageId = null;
+      }
+    }
+  }
+
+  saveConfig();
+  return buildWebConfigPayload().settings;
+}
+
+function updateWebAutomod(payload) {
+  const booleanKeys = [
+    "invites",
+    "spam",
+    "caps",
+    "bannedWords",
+    "linksEnabled",
+    "allowedDomainsOnly",
+    "attachmentsEnabled",
+    "ageProtectionEnabled",
+    "antiRaidEnabled",
+    "nicknameFilterEnabled",
+    "scamFilterEnabled",
+    "evasionFilterEnabled",
+    "escalationEnabled",
+    "emojiSpamEnabled"
+  ];
+
+  const integerRules = {
+    maxMentions: [1, 25],
+    maxEmojiCount: [3, 100],
+    maxAttachmentSizeMb: [1, 100],
+    raidJoinThreshold: [2, 100],
+    warnThreshold: [1, 20],
+    timeoutThreshold: [1, 20]
+  };
+
+  for (const key of booleanKeys) {
+    if (Object.prototype.hasOwnProperty.call(payload, key)) {
+      setWebBoolean(config.automod, key, payload[key]);
+    }
+  }
+
+  for (const [key, [min, max]] of Object.entries(integerRules)) {
+    if (Object.prototype.hasOwnProperty.call(payload, key)) {
+      setWebInteger(config.automod, key, payload[key], min, max);
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(payload, "bannedWordList")) {
+    config.automod.bannedWordList = toWebList(payload.bannedWordList, value => normalizeComparisonText(value));
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "nicknameBlockedTerms")) {
+    config.automod.nicknameBlockedTerms = toWebList(payload.nicknameBlockedTerms, value => normalizeComparisonText(value));
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "scamPhraseList")) {
+    config.automod.scamPhraseList = toWebList(payload.scamPhraseList, value => normalizeComparisonText(value));
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "allowedDomains")) {
+    config.automod.allowedDomains = toWebList(payload.allowedDomains, normalizeDomain);
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "blockedDomains")) {
+    config.automod.blockedDomains = toWebList(payload.blockedDomains, normalizeDomain);
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "allowedAttachmentExtensions")) {
+    config.automod.allowedAttachmentExtensions = toWebList(payload.allowedAttachmentExtensions, normalizeExtension);
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "blockedAttachmentExtensions")) {
+    config.automod.blockedAttachmentExtensions = toWebList(payload.blockedAttachmentExtensions, normalizeExtension);
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "exemptChannelIds")) {
+    config.automod.exemptChannelIds = toWebList(payload.exemptChannelIds, value => String(value || "").trim().replace(/[<#>]/g, ""));
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "exemptRoleIds")) {
+    config.automod.exemptRoleIds = toWebList(payload.exemptRoleIds, value => String(value || "").trim().replace(/[<@&>]/g, ""));
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "exemptUserIds")) {
+    config.automod.exemptUserIds = toWebList(payload.exemptUserIds, value => String(value || "").trim().replace(/[<@>]/g, ""));
+  }
+
+  saveConfig();
+  return buildWebConfigPayload().automod;
+}
+
+function updateWebRuleActions(payload) {
+  const ruleActions = {};
+  const alertRules = parseRuleKeyList(payload.alertRules || "");
+  const warnRules = parseRuleKeyList(payload.warnRules || "");
+  const timeoutRules = parseRuleKeyList(payload.timeoutRules || "");
+
+  for (const rule of alertRules) ruleActions[rule] = "alert";
+  for (const rule of warnRules) ruleActions[rule] = "warn";
+  for (const rule of timeoutRules) ruleActions[rule] = "timeout";
+
+  config.automod.alertOnlyRules = alertRules;
+  config.automod.ruleActions = ruleActions;
+  saveConfig();
+
+  return {
+    alertOnlyRules: config.automod.alertOnlyRules,
+    ruleActions: config.automod.ruleActions
+  };
+}
+
+function getWebMimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  return {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".svg": "image/svg+xml"
+  }[ext] || "application/octet-stream";
+}
+
+function serveWebStatic(req, res, pathname) {
+  const requested = pathname === "/" ? "/index.html" : pathname;
+  const decodedPath = decodeURIComponent(requested);
+  const filePath = path.normalize(path.join(webPublicDir, decodedPath));
+
+  if (!filePath.startsWith(webPublicDir)) {
+    return sendWebText(res, 403, "Forbidden");
+  }
+
+  fs.readFile(filePath, (error, data) => {
+    if (error) {
+      return sendWebText(res, 404, "Not found");
+    }
+
+    res.writeHead(200, {
+      "Content-Type": getWebMimeType(filePath),
+      "Cache-Control": "no-store"
+    });
+    res.end(data);
+  });
+}
+
+async function handleWebApi(req, res, pathname) {
+  if (!isWebApiAuthorized(req)) {
+    return sendWebJson(res, 401, {
+      error: WEB_ADMIN_TOKEN
+        ? "Enter the dashboard token to continue."
+        : "WEB_ADMIN_TOKEN is not configured on this deployment."
+    });
+  }
+
+  if (req.method === "GET" && pathname === "/api/dashboard") {
+    return sendWebJson(res, 200, buildWebDashboardPayload());
+  }
+
+  if (req.method === "GET" && pathname === "/api/config") {
+    return sendWebJson(res, 200, buildWebConfigPayload());
+  }
+
+  if (req.method === "GET" && pathname === "/api/cases") {
+    const cases = [...(config.cases || [])].reverse().slice(0, 200);
+    return sendWebJson(res, 200, { cases });
+  }
+
+  if (req.method === "GET" && pathname === "/api/warnings") {
+    return sendWebJson(res, 200, { warnings: config.warnings || {} });
+  }
+
+  if (req.method === "GET" && pathname === "/api/notes") {
+    return sendWebJson(res, 200, { notes: config.notes || {} });
+  }
+
+  if (req.method === "POST" && pathname === "/api/settings") {
+    const body = await readWebJsonBody(req);
+    return sendWebJson(res, 200, { settings: updateWebSettings(body) });
+  }
+
+  if (req.method === "POST" && pathname === "/api/automod") {
+    const body = await readWebJsonBody(req);
+    return sendWebJson(res, 200, { automod: updateWebAutomod(body) });
+  }
+
+  if (req.method === "POST" && pathname === "/api/rule-actions") {
+    const body = await readWebJsonBody(req);
+    return sendWebJson(res, 200, updateWebRuleActions(body));
+  }
+
+  if (req.method === "POST" && pathname === "/api/reload-config") {
+    const previousVerifyMessageId = config.verifyMessageId;
+    config = loadConfig();
+    if (!config.verifyMessageId && previousVerifyMessageId) {
+      config.verifyMessageId = previousVerifyMessageId;
+    }
+    return sendWebJson(res, 200, { ok: true, config: buildWebConfigPayload() });
+  }
+
+  return sendWebJson(res, 404, { error: "Unknown API route." });
+}
+
+function startWebServer() {
+  const server = http.createServer((req, res) => {
+    const requestUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    const pathname = requestUrl.pathname;
+
+    if (pathname.startsWith("/api/")) {
+      handleWebApi(req, res, pathname).catch(error => {
+        sendWebJson(res, 400, { error: error.message || "Dashboard request failed." });
+      });
+      return;
+    }
+
+    serveWebStatic(req, res, pathname);
+  });
+
+  server.listen(WEB_PORT, () => {
+    if (!WEB_ADMIN_TOKEN) {
+      console.warn("Web moderation panel is running without API access. Set WEB_ADMIN_TOKEN to enable the dashboard APIs.");
+    }
+    console.log(`Web moderation panel available on port ${WEB_PORT}.`);
+  });
+
+  server.on("error", error => {
+    console.error("Web moderation panel error:", error.message);
+  });
 }
 
 client.once("clientReady", async () => {
@@ -6192,6 +6586,7 @@ process.on("uncaughtException", error => {
 
 try {
   validateEnv();
+  startWebServer();
   client.login(TOKEN);
 } catch (error) {
   console.error("Startup error:", error.message);

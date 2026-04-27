@@ -17,6 +17,8 @@ TOKEN=
 CLIENT_ID=
 GUILD_ID=
 ENABLE_CORE_BOT=true
+WEB_PORT=3000
+WEB_ADMIN_TOKEN=
 VERIFY_CHANNEL_ID=
 RULES_CHANNEL_ID=
 LOG_CHANNEL_ID=
@@ -37,6 +39,16 @@ npm start
 
 This project is ready for simple Node hosting on Railway, Render, or a VPS.
 
+## Web moderation panel
+
+The bot serves a web dashboard from the same Node process.
+
+- Set `WEB_ADMIN_TOKEN` to a long private token before using the panel.
+- Set `WEB_PORT` if your host does not use `PORT`.
+- Open `http://localhost:3000` locally, or your deployed service URL online.
+- The website can view runtime status, cases, warnings, notes, settings, AutoMod toggles, rule limits, lists, exemptions, and rule actions.
+- Direct kick, ban, timeout, and DM actions stay in Discord until the website has Discord OAuth and role checks.
+
 ### Railway
 
 1. Push this folder to GitHub.
@@ -47,7 +59,7 @@ This project is ready for simple Node hosting on Railway, Render, or a VPS.
 ### Render
 
 1. Push this folder to GitHub.
-2. Create a new `Background Worker` in Render from the repo.
+2. Create a new `Web Service` in Render from the repo.
 3. Set:
    - Build command: `npm install`
    - Start command: `npm start`
