@@ -699,10 +699,21 @@ function buildBoundaryPattern(term) {
   const normalized = normalizeComparisonText(term).trim().replace(/\s+/g, " ");
   if (!normalized) return null;
 
-  const escaped = escapeRegExp(normalized).replace(/\\ /g, "\\s+");
+  const parts = normalized.split(" ").filter(Boolean).map(escapeRegExp);
+  const escaped = parts.length > 1
+    ? parts.join("[\\s\\p{P}\\p{S}_]+")
+    : escapeRegExp(normalized);
   const start = hasAlphaNumeric(normalized[0]) ? "(^|[^\\p{L}\\p{N}_])" : "(^|\\s)";
   const end = hasAlphaNumeric(normalized[normalized.length - 1]) ? "($|[^\\p{L}\\p{N}_])" : "($|\\s)";
   return new RegExp(`${start}${escaped}${end}`, "iu");
+}
+
+function buildBypassPattern(term) {
+  const normalized = normalizeBypassText(term);
+  if (!normalized || normalized.length < 4) return null;
+
+  const escaped = escapeRegExp(normalized);
+  return new RegExp(`(^|[^\\p{L}\\p{N}_])${escaped}($|[^\\p{L}\\p{N}_])`, "iu");
 }
 
 function findBannedWordMatch(content, automod = config.automod) {
@@ -723,9 +734,9 @@ function findBypassBannedWordMatch(content, automod = config.automod) {
 
   const bannedWords = Array.isArray(automod.bannedWordList) ? automod.bannedWordList : getBannedWords();
   return bannedWords.find(term => {
-    const normalizedTerm = normalizeBypassText(term);
-    if (!normalizedTerm || normalizedTerm.length < 4) return false;
-    return normalized.includes(normalizedTerm);
+    const pattern = buildBypassPattern(term);
+    if (!pattern) return false;
+    return pattern.test(normalized);
   }) || null;
 }
 
