@@ -185,6 +185,10 @@ function createDefaultConfig() {
       aiModerationEnabled: false,
       aiModerationModel: "omni-moderation-latest",
       aiModerationThreshold: 70,
+      aiCustomRulesEnabled: false,
+      aiCustomRulesModel: "gpt-4o-mini",
+      aiCustomRulesThreshold: 75,
+      aiCustomRules: "",
       scamPhraseList: [],
       alertOnlyRules: ["ai-review"],
       ruleActions: {},
@@ -522,6 +526,16 @@ function getAiModerationModel() {
   return String(config.automod.aiModerationModel || "omni-moderation-latest").trim() || "omni-moderation-latest";
 }
 
+function getAiCustomRulesThreshold() {
+  const threshold = Number(config.automod.aiCustomRulesThreshold);
+  if (!Number.isFinite(threshold)) return 0.75;
+  return Math.max(0, Math.min(1, threshold > 1 ? threshold / 100 : threshold));
+}
+
+function getAiCustomRulesModel() {
+  return String(config.automod.aiCustomRulesModel || "gpt-4o-mini").trim() || "gpt-4o-mini";
+}
+
 function getTopModerationCategory(result) {
   const scores = result?.category_scores || {};
   return Object.entries(scores)
@@ -580,6 +594,95 @@ async function detectAiModerationIssue(message) {
   } catch (error) {
     if (error.name !== "AbortError") {
       console.error("AI moderation error:", error.message);
+    }
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function detectAiCustomRuleIssue(message) {
+  if (!OPENAI_API_KEY || !config.automod.aiModerationEnabled || !config.automod.aiCustomRulesEnabled) return null;
+
+  const rules = String(config.automod.aiCustomRules || "").trim();
+  const content = String(message.content || "").trim();
+  if (!rules || !content || content.length < 4) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 9000);
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: getAiCustomRulesModel(),
+        input: [
+          {
+            role: "system",
+            content:
+              "You classify Discord messages against server-specific rules. " +
+              "Use only the supplied rules and message. Do not flag ambiguous jokes or harmless chat."
+          },
+          {
+            role: "user",
+            content:
+              `Server rules:\n${rules.slice(0, 4000)}\n\n` +
+              `Message from ${message.author.tag} in #${message.channel?.name || "unknown"}:\n${content.slice(0, 2000)}`
+          }
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "custom_rule_check",
+            strict: true,
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                violated: { type: "boolean" },
+                ruleName: { type: "string" },
+                confidence: { type: "integer" },
+                explanation: { type: "string" }
+              },
+              required: ["violated", "ruleName", "confidence", "explanation"]
+            }
+          }
+        }
+      }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      console.error("AI custom rules request failed:", response.status, errorText.slice(0, 300));
+      return null;
+    }
+
+    const payload = await response.json();
+    const text = getResponseOutputText(payload);
+    if (!text) return null;
+
+    const result = JSON.parse(text);
+    const confidence = Number(result.confidence || 0);
+    if (!result.violated || confidence / 100 < getAiCustomRulesThreshold()) return null;
+
+    return {
+      actionLabel: "ai-review",
+      reason: `AI custom rule review flagged this message for ${result.ruleName || "server rule"} (${confidence}% confidence).`,
+      details: [
+        { name: "AI Category", value: result.ruleName || "server-rule", inline: true },
+        { name: "AI Confidence", value: `${confidence}%`, inline: true },
+        { name: "AI Model", value: getAiCustomRulesModel().slice(0, 100), inline: true },
+        { name: "AI Explanation", value: String(result.explanation || "No explanation.").slice(0, 1024), inline: false }
+      ]
+    };
+  } catch (error) {
+    if (error.name !== "AbortError") {
+      console.error("AI custom rules error:", error.message);
     }
     return null;
   } finally {
@@ -3283,6 +3386,7 @@ function buildWebDashboardPayload() {
       scamFilterEnabled: config.automod.scamFilterEnabled,
       evasionFilterEnabled: config.automod.evasionFilterEnabled,
       aiModerationEnabled: config.automod.aiModerationEnabled,
+      aiCustomRulesEnabled: config.automod.aiCustomRulesEnabled,
       escalationEnabled: config.automod.escalationEnabled,
       emojiSpamEnabled: config.automod.emojiSpamEnabled
     },
@@ -3351,6 +3455,7 @@ function updateWebAutomod(payload) {
     "scamFilterEnabled",
     "evasionFilterEnabled",
     "aiModerationEnabled",
+    "aiCustomRulesEnabled",
     "escalationEnabled",
     "emojiSpamEnabled"
   ];
@@ -3362,7 +3467,8 @@ function updateWebAutomod(payload) {
     raidJoinThreshold: [2, 100],
     warnThreshold: [1, 20],
     timeoutThreshold: [1, 20],
-    aiModerationThreshold: [1, 100]
+    aiModerationThreshold: [1, 100],
+    aiCustomRulesThreshold: [1, 100]
   };
 
   const durationRules = [
@@ -3431,6 +3537,13 @@ function updateWebAutomod(payload) {
   if (Object.prototype.hasOwnProperty.call(payload, "aiModerationModel")) {
     const model = String(payload.aiModerationModel || "").trim();
     config.automod.aiModerationModel = model.slice(0, 80) || "omni-moderation-latest";
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "aiCustomRulesModel")) {
+    const model = String(payload.aiCustomRulesModel || "").trim();
+    config.automod.aiCustomRulesModel = model.slice(0, 80) || "gpt-4o-mini";
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "aiCustomRules")) {
+    config.automod.aiCustomRules = String(payload.aiCustomRules || "").trim().slice(0, 4000);
   }
 
   saveConfig();
@@ -7320,6 +7433,12 @@ client.on("messageCreate", async message => {
     const aiMatch = await detectAiModerationIssue(message);
     if (aiMatch) {
       await handleAutoModViolation(message, aiMatch.reason, aiMatch.actionLabel, aiMatch.details);
+      return;
+    }
+
+    const customRuleMatch = await detectAiCustomRuleIssue(message);
+    if (customRuleMatch) {
+      await handleAutoModViolation(message, customRuleMatch.reason, customRuleMatch.actionLabel, customRuleMatch.details);
     }
   } catch (error) {
     console.error("messageCreate error:", error);

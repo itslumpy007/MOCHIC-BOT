@@ -43,6 +43,7 @@ const automodSwitchLabels = {
   scamFilterEnabled: "Scam filter",
   evasionFilterEnabled: "Evasion filter",
   aiModerationEnabled: "AI moderation",
+  aiCustomRulesEnabled: "AI custom rules",
   escalationEnabled: "Escalation",
   emojiSpamEnabled: "Emoji spam"
 };
@@ -54,11 +55,13 @@ const limitLabels = {
   raidJoinThreshold: "Raid threshold",
   warnThreshold: "Warn threshold",
   timeoutThreshold: "Timeout threshold",
-  aiModerationThreshold: "AI threshold %"
+  aiModerationThreshold: "AI threshold %",
+  aiCustomRulesThreshold: "Custom rules threshold %"
 };
 
 const aiModerationLabels = {
-  aiModerationModel: "AI moderation model"
+  aiModerationModel: "AI moderation model",
+  aiCustomRulesModel: "Custom rules model"
 };
 
 const durationLabels = {
@@ -79,7 +82,8 @@ const listLabels = {
   allowedDomains: "Allowed domains",
   blockedDomains: "Blocked domains",
   allowedAttachmentExtensions: "Allowed extensions",
-  blockedAttachmentExtensions: "Blocked extensions"
+  blockedAttachmentExtensions: "Blocked extensions",
+  aiCustomRules: "AI custom server rules"
 };
 
 const settingLabels = {
@@ -105,6 +109,7 @@ const automodPresets = {
     scamFilterEnabled: true,
     evasionFilterEnabled: true,
     aiModerationEnabled: false,
+    aiCustomRulesEnabled: false,
     emojiSpamEnabled: false,
     escalationEnabled: true,
     maxMentions: 8,
@@ -130,6 +135,7 @@ const automodPresets = {
     scamFilterEnabled: true,
     evasionFilterEnabled: true,
     aiModerationEnabled: false,
+    aiCustomRulesEnabled: false,
     emojiSpamEnabled: true,
     escalationEnabled: true,
     maxMentions: 5,
@@ -158,6 +164,7 @@ const automodPresets = {
     scamFilterEnabled: true,
     evasionFilterEnabled: true,
     aiModerationEnabled: true,
+    aiCustomRulesEnabled: true,
     emojiSpamEnabled: true,
     escalationEnabled: true,
     maxMentions: 4,
@@ -375,7 +382,7 @@ function renderAutomod() {
   $("#listFields").innerHTML = Object.entries(listLabels)
     .map(([key, label]) => `
       <label>${label}
-        <textarea data-automod-list="${key}" rows="4">${escapeHtml((automod[key] || []).join(", "))}</textarea>
+        <textarea data-automod-list="${key}" rows="${key === "aiCustomRules" ? "8" : "4"}">${escapeHtml(Array.isArray(automod[key]) ? automod[key].join(", ") : automod[key] || "")}</textarea>
       </label>
     `).join("");
 
