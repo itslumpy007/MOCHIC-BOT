@@ -14,8 +14,7 @@ const state = {
 const titles = {
   overview: "Overview",
   members: "Members",
-  automod: "AutoMod",
-  ai: "AI Review",
+  automod: "AutoMod + AI",
   settings: "Settings",
   staff: "Staff",
   records: "Records"
@@ -268,6 +267,12 @@ function updateApiState(label, kind = "") {
   apiState.className = `pill ${kind}`.trim();
 }
 
+function setLoginVisible(visible, message = "") {
+  $("#loginScreen").classList.toggle("hidden", !visible);
+  $("#appShell").classList.toggle("hidden", visible);
+  if (message) $("#loginStatus").textContent = message;
+}
+
 function updateAuthPanel() {
   const me = state.me || {};
   const user = me.user;
@@ -277,6 +282,9 @@ function updateAuthPanel() {
   if (me.authenticated && user) {
     signedInUser.textContent = `${user.tag || user.username} - ${me.accessLevel} access`;
     logoutLink.classList.remove("hidden");
+  } else if (state.token) {
+    signedInUser.textContent = "Token access active";
+    logoutLink.classList.add("hidden");
   } else if (me.oauthConfigured) {
     signedInUser.textContent = "Use Discord login for staff access.";
     logoutLink.classList.add("hidden");
@@ -847,7 +855,7 @@ async function loadAll() {
 
     if (!state.me.authenticated && !state.token) {
       updateApiState("Login required");
-      setAlert(state.me.oauthConfigured ? "Login with Discord to load the dashboard." : "Enter the backup admin token to load the dashboard.");
+      setLoginVisible(true, state.me.oauthConfigured ? "Login with Discord or use the backup admin token." : "Enter the backup admin token to load the dashboard.");
       return;
     }
 
@@ -866,10 +874,12 @@ async function loadAll() {
     state.warnings = warningsPayload.warnings || {};
     state.notes = notesPayload.notes || {};
     renderAll();
+    setLoginVisible(false);
     updateApiState("Live", "ok");
     setAlert("");
   } catch (error) {
     updateApiState("Locked", "error");
+    setLoginVisible(!state.me?.authenticated, error.message);
     setAlert(error.message, "error");
   }
 }
@@ -972,14 +982,20 @@ async function saveRuleActions() {
 }
 
 function bindEvents() {
-  $("#tokenInput").value = state.token;
+  $("#loginTokenInput").value = state.token;
   updateAuthPanel();
   restorePanelMemory();
 
-  $("#saveToken").addEventListener("click", () => {
-    state.token = $("#tokenInput").value.trim();
+  $("#loginSaveToken").addEventListener("click", () => {
+    state.token = $("#loginTokenInput").value.trim();
     localStorage.setItem("mochiAdminToken", state.token);
     loadAll();
+  });
+  $("#loginTokenInput").addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      $("#loginSaveToken").click();
+    }
   });
 
   $("#refreshButton").addEventListener("click", loadAll);

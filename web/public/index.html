@@ -7,7 +7,31 @@
     <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
-    <div class="app-shell">
+    <section class="login-screen" id="loginScreen">
+      <div class="login-card">
+        <div class="brand login-brand">
+          <div class="brand-mark" aria-hidden="true">M</div>
+          <div>
+            <h1>Mochi Moderation</h1>
+            <p>Secure staff access</p>
+          </div>
+        </div>
+        <div class="login-copy">
+          <p class="eyebrow">Live control panel</p>
+          <h2>Sign in to continue</h2>
+        </div>
+        <a class="discord-login" href="/auth/login">Login with Discord</a>
+        <div class="login-divider"><span>Backup access</span></div>
+        <label for="loginTokenInput">Admin token</label>
+        <div class="token-row">
+          <input id="loginTokenInput" type="password" autocomplete="current-password">
+          <button id="loginSaveToken" type="button">Unlock</button>
+        </div>
+        <p class="auth-copy" id="loginStatus">Checking session</p>
+      </div>
+    </section>
+
+    <div class="app-shell hidden" id="appShell">
       <aside class="sidebar">
         <div class="brand">
           <div class="brand-mark" aria-hidden="true">M</div>
@@ -21,21 +45,14 @@
           <button class="tab is-active" data-view="overview" type="button">Overview</button>
           <button class="tab" data-view="members" type="button">Members</button>
           <button class="tab" data-view="automod" type="button">AutoMod</button>
-          <button class="tab" data-view="ai" type="button">AI Review</button>
           <button class="tab" data-view="settings" type="button">Settings</button>
           <button class="tab" data-view="staff" type="button">Staff</button>
           <button class="tab" data-view="records" type="button">Records</button>
         </nav>
 
         <div class="auth-panel" id="authPanel">
-          <a class="discord-login" href="/auth/login">Login with Discord</a>
           <p class="auth-copy" id="signedInUser">Not signed in</p>
           <a class="logout-link hidden" id="logoutLink" href="/auth/logout">Sign out</a>
-          <label for="tokenInput">Backup admin token</label>
-          <div class="token-row">
-            <input id="tokenInput" type="password" autocomplete="current-password">
-            <button id="saveToken" type="button">Unlock</button>
-          </div>
         </div>
       </aside>
 
@@ -208,9 +225,7 @@
               <label>Timeout rules<textarea id="timeoutRules" rows="4"></textarea></label>
             </div>
           </section>
-        </section>
 
-        <section id="aiView" class="view">
           <section class="panel">
             <div class="panel-header">
               <h3>AI Review Queue</h3>

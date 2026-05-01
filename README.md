@@ -55,11 +55,13 @@ The bot serves a web dashboard from the same Node process.
 - Set `WEB_PORT` if your host does not use `PORT`.
 - Open `http://localhost:3000` locally, or your deployed service URL online.
 - The website can view runtime status, cases, warnings, notes, settings, AutoMod toggles, rule limits, lists, exemptions, rule actions, and member profiles.
+- The web panel opens on a dedicated login screen before exposing moderation controls.
 - Staff can search members and run web moderation actions including warn, note, timeout, mute, unmute, clear warnings, kick, ban, and tempban. Risky actions ask for browser confirmation.
 - Records include case filters and a unified timeline. AutoMod includes duration and age-gate controls for escalation, raids, links, and attachments.
 - Optional AI moderation can be enabled from the AutoMod tab after setting `OPENAI_API_KEY`. AI review starts as alert-only via the `ai-review` rule and appears in the AI Review tab and AutoMod cases.
 - AI custom server rules can be added in the AutoMod lists section. When enabled, they flag server-specific rule issues into the same AI Review queue.
 - AI moderation settings include thresholds, minimum message length, optional recent-message context, and extra moderator guidance.
+- The AutoMod workspace includes the AI Review queue so rule tuning and AI decisions live together.
 - Member profiles include an optional AI risk summary after `OPENAI_API_KEY` is configured. The summary can fill the moderation form, but staff still apply actions manually.
 
 ### Railway
