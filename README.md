@@ -58,6 +58,8 @@ The bot serves a web dashboard from the same Node process.
 - The web panel opens on a dedicated login screen before exposing moderation controls.
 - Staff can search members and run web moderation actions including warn, note, timeout, mute, unmute, clear warnings, kick, ban, and tempban. Risky actions ask for browser confirmation.
 - Records include case filters and a unified timeline. AutoMod includes duration and age-gate controls for escalation, raids, links, and attachments.
+- AutoMod also supports dry-run mode, quiet hours, channel rule overrides, link reputation checks, language-aware filtering, and a preview tool for testing sample messages before applying changes.
+- Channel profiles can be entered in the Ops tab with lines like `#general: standard` or `#promo: dryrun=on, preset=strict`.
 - Optional AI moderation can be enabled from the AutoMod tab after setting `OPENAI_API_KEY`. AI review starts as alert-only via the `ai-review` rule and appears in the AI Review tab and AutoMod cases.
 - AI custom server rules can be added in the AutoMod lists section. When enabled, they flag server-specific rule issues into the same AI Review queue.
 - AI moderation settings include thresholds, minimum message length, optional recent-message context, and extra moderator guidance.

@@ -7,6 +7,9 @@ const state = {
   aiReviews: {},
   selectedMember: null,
   memberAiSummary: null,
+  automodPreview: null,
+  previewChannelId: "",
+  previewMessage: "",
   cases: [],
   warnings: {},
   notes: {}
@@ -46,6 +49,10 @@ const automodSwitchLabels = {
   aiModerationEnabled: "AI moderation",
   aiCustomRulesEnabled: "AI custom rules",
   aiIncludeRecentContext: "AI recent context",
+  dryRunEnabled: "Dry run",
+  linkReputationEnabled: "Link reputation",
+  languageAwareFiltersEnabled: "Language-aware",
+  quietHoursEnabled: "Quiet hours",
   escalationEnabled: "Escalation",
   emojiSpamEnabled: "Emoji spam"
 };
@@ -56,7 +63,11 @@ const limitLabels = {
   maxAttachmentSizeMb: "Attachment MB limit",
   raidJoinThreshold: "Raid threshold",
   warnThreshold: "Warn threshold",
-  timeoutThreshold: "Timeout threshold"
+  timeoutThreshold: "Timeout threshold",
+  contextMessageCount: "Context window",
+  spamWindowMs: "Spam window ms",
+  spamBurstThreshold: "Spam burst",
+  spamDuplicateThreshold: "Spam duplicates"
 };
 
 const aiNumberLabels = {
@@ -74,6 +85,16 @@ const aiModerationLabels = {
 const aiTextareaLabels = {
   aiCustomRules: "AI custom server rules",
   aiCustomInstructions: "Extra AI moderator guidance"
+};
+
+const modeLabels = {
+  quietHoursStart: "Quiet hours start",
+  quietHoursEnd: "Quiet hours end",
+  quietHoursMode: "Quiet hours mode"
+};
+
+const policyTextareaLabels = {
+  channelRuleOverrides: "Channel rule overrides"
 };
 
 const durationLabels = {
@@ -122,6 +143,14 @@ const automodPresets = {
     aiModerationEnabled: false,
     aiCustomRulesEnabled: false,
     aiIncludeRecentContext: false,
+    dryRunEnabled: false,
+    linkReputationEnabled: true,
+    languageAwareFiltersEnabled: true,
+    quietHoursEnabled: false,
+    contextMessageCount: 3,
+    spamWindowMs: 10000,
+    spamBurstThreshold: 6,
+    spamDuplicateThreshold: 4,
     emojiSpamEnabled: false,
     escalationEnabled: true,
     maxMentions: 8,
@@ -149,6 +178,14 @@ const automodPresets = {
     aiModerationEnabled: false,
     aiCustomRulesEnabled: false,
     aiIncludeRecentContext: false,
+    dryRunEnabled: false,
+    linkReputationEnabled: true,
+    languageAwareFiltersEnabled: true,
+    quietHoursEnabled: false,
+    contextMessageCount: 3,
+    spamWindowMs: 8000,
+    spamBurstThreshold: 5,
+    spamDuplicateThreshold: 3,
     emojiSpamEnabled: true,
     escalationEnabled: true,
     maxMentions: 5,
@@ -179,6 +216,14 @@ const automodPresets = {
     aiModerationEnabled: true,
     aiCustomRulesEnabled: true,
     aiIncludeRecentContext: true,
+    dryRunEnabled: false,
+    linkReputationEnabled: true,
+    languageAwareFiltersEnabled: true,
+    quietHoursEnabled: true,
+    contextMessageCount: 4,
+    spamWindowMs: 6000,
+    spamBurstThreshold: 4,
+    spamDuplicateThreshold: 2,
     emojiSpamEnabled: true,
     escalationEnabled: true,
     maxMentions: 4,
@@ -462,6 +507,33 @@ function renderAutomod() {
       </label>
     `).join("");
 
+  $("#modeFields").innerHTML = Object.entries(modeLabels)
+    .map(([key, label]) => {
+      if (key === "quietHoursMode") {
+        return `
+          <label>${label}
+            <select data-automod-string="${key}">
+              <option value="relaxed" ${String(automod[key] || "relaxed") === "relaxed" ? "selected" : ""}>Relaxed</option>
+              <option value="strict" ${String(automod[key] || "relaxed") === "strict" ? "selected" : ""}>Strict</option>
+            </select>
+          </label>
+        `;
+      }
+
+      return `
+        <label>${label}
+          <input data-automod-string="${key}" value="${escapeHtml(automod[key] || "")}" placeholder="22:00">
+        </label>
+      `;
+    }).join("");
+
+  $("#policyFields").innerHTML = Object.entries(policyTextareaLabels)
+    .map(([key, label]) => `
+      <label>${label}
+        <textarea data-automod-string="${key}" rows="6">${escapeHtml(key === "channelRuleOverrides" ? formatChannelRuleOverrides(automod[key]) : (automod[key] || ""))}</textarea>
+      </label>
+    `).join("");
+
   $("#listFields").innerHTML = Object.entries(listLabels)
     .map(([key, label]) => `
       <label>${label}
@@ -488,6 +560,10 @@ function renderAutomod() {
   $("#alertRules").value = (automod.alertOnlyRules || grouped.alert || []).join(", ");
   $("#warnRules").value = (grouped.warn || []).join(", ");
   $("#timeoutRules").value = (grouped.timeout || []).join(", ");
+
+  $("#previewChannelId").value = state.previewChannelId || "";
+  $("#previewMessage").value = state.previewMessage || "";
+  renderAutomodPreview();
 }
 
 function renderAutomodSummary(automod) {
@@ -495,18 +571,60 @@ function renderAutomodSummary(automod) {
   const totalRules = Object.keys(automodSwitchLabels).length;
   const analytics = state.dashboard?.analytics || {};
   const topRule = Object.entries(analytics.ruleCounts || {}).sort((a, b) => b[1] - a[1])[0];
+  const overrideCount = Object.values(automod.channelRuleOverrides || {}).reduce((sum, rules) => sum + (rules || []).length, 0);
   const summary = [
     ["Enabled", `${enabledRules}/${totalRules}`],
     ["Detections", analytics.totalDetections || 0],
     ["Top Rule", topRule ? `${topRule[0]} (${topRule[1]})` : "None"],
     ["Raid Action", automod.raidAction || "log"],
     ["AI", automod.aiModerationEnabled ? `${automod.aiModerationThreshold || 70}%` : "Off"],
-    ["Custom AI", automod.aiCustomRulesEnabled ? `${automod.aiCustomRulesThreshold || 75}%` : "Off"]
+    ["Custom AI", automod.aiCustomRulesEnabled ? `${automod.aiCustomRulesThreshold || 75}%` : "Off"],
+    ["Dry Run", automod.dryRunEnabled ? "On" : "Off"],
+    ["Profiles", (state.ops?.channelProfiles || "").split("\n").filter(Boolean).length || 0],
+    ["Overrides", overrideCount]
   ];
 
   $("#automodSummary").innerHTML = summary
     .map(([label, value]) => `<article class="summary-item"><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`)
     .join("");
+}
+
+function formatChannelRuleOverrides(overrides) {
+  if (!overrides || typeof overrides !== "object") return "";
+  return Object.entries(overrides)
+    .map(([channelId, rules]) => `${channelId}: ${(rules || []).join(", ")}`)
+    .join("\n");
+}
+
+function renderAutomodPreview() {
+  const preview = state.automodPreview;
+  if (!preview) {
+    $("#automodPreviewResult").innerHTML = renderEmptyState("No preview", "Enter a sample message and run a preview.");
+    return;
+  }
+
+  const match = preview.match || {};
+  const rule = match.actionLabel || "none";
+  const rules = (preview.allMatches || []).map(item => item.actionLabel).filter(Boolean);
+  $("#automodPreviewResult").innerHTML = `
+    <article class="event">
+      <strong>${escapeHtml(preview.profile?.selector || preview.channelName || preview.channelId || "Preview")}</strong>
+      <p>
+        Match: ${escapeHtml(rule)}<br>
+        Reason: ${escapeHtml(match.reason || "No trigger")}<br>
+        Quiet hours: ${preview.quietHoursActive ? "Yes" : "No"}<br>
+        Dry run: ${preview.dryRun ? "Yes" : "No"}<br>
+        Ignored rules: ${escapeHtml((preview.ignoredRules || []).join(", ") || "None")}<br>
+        All matches: ${escapeHtml(rules.join(", ") || "None")}
+      </p>
+      ${match.actionLabel ? `
+        <div class="button-row">
+          <button class="ghost-button" type="button" data-preview-override="rule" data-rule-key="${escapeHtml(match.actionLabel)}">Ignore rule in channel</button>
+          <button class="ghost-button" type="button" data-preview-override="channel">Allow channel</button>
+        </div>
+      ` : ""}
+    </article>
+  `;
 }
 
 function renderSettings() {
@@ -1012,7 +1130,58 @@ async function saveAutomod() {
     body: JSON.stringify(payload)
   });
   state.config.automod = result.automod;
+  state.automodPreview = null;
   await loadAll();
+}
+
+async function runAutomodPreview() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to preview AutoMod.", "error");
+    return;
+  }
+
+  const payload = await api("/api/automod-preview", {
+    method: "POST",
+    body: JSON.stringify({
+      channelId: $("#previewChannelId").value,
+      content: $("#previewMessage").value
+    })
+  });
+
+  state.automodPreview = payload.preview || null;
+  renderAutomodPreview();
+  setAlert("AutoMod preview updated.");
+}
+
+async function applyAutomodPreviewOverride(mode, ruleKey = "") {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to change AutoMod overrides.", "error");
+    return;
+  }
+
+  const channelId = ($("#previewChannelId").value || "").trim();
+  if (!channelId) {
+    setAlert("Enter a channel ID first.", "error");
+    return;
+  }
+
+  if (mode === "rule" && !ruleKey) {
+    setAlert("No rule was selected for that override.", "error");
+    return;
+  }
+
+  const result = await api("/api/automod-override", {
+    method: "POST",
+    body: JSON.stringify({
+      channelId,
+      ruleKey: mode === "rule" ? ruleKey : "",
+      mode: mode === "rule" ? "rule" : "channel"
+    })
+  });
+
+  state.config.automod.channelRuleOverrides = result.channelRuleOverrides || {};
+  await loadAll();
+  setAlert(mode === "rule" ? `Ignored ${ruleKey} in that channel.` : "Channel override saved.");
 }
 
 async function saveStaff() {
@@ -1118,6 +1287,7 @@ async function saveOps() {
       reportFrequency: $("#reportFrequency").value
     })
   });
+  state.automodPreview = null;
   renderOps();
   setAlert("Operations settings saved.");
 }
@@ -1135,6 +1305,7 @@ async function restoreBackup() {
     method: "POST",
     body: JSON.stringify({ config })
   });
+  state.automodPreview = null;
   await loadAll();
   setAlert("Backup restored.");
 }
@@ -1180,9 +1351,21 @@ function bindEvents() {
   $("#saveExemptions").addEventListener("click", () => saveExemptions().catch(error => setAlert(error.message, "error")));
   $("#saveRuleActions").addEventListener("click", () => saveRuleActions().catch(error => setAlert(error.message, "error")));
   $("#saveOps").addEventListener("click", () => saveOps().catch(error => setAlert(error.message, "error")));
+  $("#runPreview").addEventListener("click", () => runAutomodPreview().catch(error => setAlert(error.message, "error")));
   $("#downloadBackup").addEventListener("click", () => downloadBackup().catch(error => setAlert(error.message, "error")));
   $("#restoreBackup").addEventListener("click", () => restoreBackup().catch(error => setAlert(error.message, "error")));
   $("#createAppeal").addEventListener("click", () => createAppeal().catch(error => setAlert(error.message, "error")));
+  $("#previewChannelId").addEventListener("input", () => {
+    state.previewChannelId = $("#previewChannelId").value;
+  });
+  $("#previewMessage").addEventListener("input", () => {
+    state.previewMessage = $("#previewMessage").value;
+  });
+  $("#automodPreviewResult").addEventListener("click", event => {
+    const button = event.target.closest("[data-preview-override]");
+    if (!button) return;
+    applyAutomodPreviewOverride(button.dataset.previewOverride, button.dataset.ruleKey || "").catch(error => setAlert(error.message, "error"));
+  });
   document.querySelectorAll("[data-automod-preset]").forEach(button => {
     button.addEventListener("click", () => applyAutomodPreset(button.dataset.automodPreset));
   });

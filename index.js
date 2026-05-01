@@ -212,6 +212,18 @@ function createDefaultConfig() {
       aiMinMessageLength: 4,
       aiIncludeRecentContext: false,
       aiContextMessageCount: 3,
+      dryRunEnabled: false,
+      linkReputationEnabled: true,
+      languageAwareFiltersEnabled: true,
+      quietHoursEnabled: false,
+      quietHoursStart: "22:00",
+      quietHoursEnd: "08:00",
+      quietHoursMode: "relaxed",
+      contextMessageCount: 3,
+      spamWindowMs: 8000,
+      spamBurstThreshold: 5,
+      spamDuplicateThreshold: 3,
+      channelRuleOverrides: {},
       scamPhraseList: [],
       alertOnlyRules: ["ai-review"],
       ruleActions: {},
@@ -285,6 +297,9 @@ function loadConfig() {
         scamPhraseList: Array.isArray(parsed.automod?.scamPhraseList) ? parsed.automod.scamPhraseList : [],
         alertOnlyRules: Array.isArray(parsed.automod?.alertOnlyRules) ? parsed.automod.alertOnlyRules : defaults.automod.alertOnlyRules,
         ruleActions: parsed.automod?.ruleActions && typeof parsed.automod.ruleActions === "object" ? parsed.automod.ruleActions : {},
+        channelRuleOverrides: parsed.automod?.channelRuleOverrides && typeof parsed.automod.channelRuleOverrides === "object"
+          ? parsed.automod.channelRuleOverrides
+          : {},
         offenses: parsed.automod?.offenses && typeof parsed.automod.offenses === "object" ? parsed.automod.offenses : {},
         analytics: {
           ...defaults.automod.analytics,
@@ -395,10 +410,11 @@ function normalizeRuleAction(value) {
   return AUTOMOD_RULE_ACTIONS.has(normalized) ? normalized : null;
 }
 
-function getAutoModRuleAction(ruleKey) {
-  const configured = normalizeRuleAction(config.automod.ruleActions?.[ruleKey]);
+function getAutoModRuleAction(ruleKey, automod = config.automod) {
+  const configured = normalizeRuleAction(automod.ruleActions?.[ruleKey]);
   if (configured) return configured;
-  if (getAlertOnlyRules().includes(ruleKey)) return "alert";
+  const alertOnlyRules = Array.isArray(automod.alertOnlyRules) ? automod.alertOnlyRules : [];
+  if (alertOnlyRules.includes(ruleKey)) return "alert";
   return "delete";
 }
 
@@ -414,6 +430,223 @@ function parseRuleKeyList(input) {
       .map(value => normalizeRuleKey(value))
       .filter(Boolean)
   )];
+}
+
+function parseChannelProfileSelector(selector) {
+  const normalized = String(selector || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "*") return "*";
+  return normalized.replace(/^#/, "");
+}
+
+function parseChannelProfileDirective(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+
+  const [firstToken, ...rest] = text.split(",").map(part => part.trim()).filter(Boolean);
+  if (!firstToken) return null;
+
+  const directives = rest.length ? [firstToken, ...rest] : [firstToken];
+  const overrides = {};
+  let preset = null;
+
+  for (const directive of directives) {
+    const [rawKey, ...rawValueParts] = directive.split("=");
+    const key = String(rawKey || "").trim().toLowerCase();
+    const rawValue = rawValueParts.length ? rawValueParts.join("=").trim() : "";
+
+    if (!rawValueParts.length) {
+      if (["light", "standard", "strict"].includes(key)) {
+        preset = key;
+      } else if (key === "dryrun") {
+        overrides.dryRunEnabled = true;
+      } else if (key === "dryrun-off" || key === "nodryrun") {
+        overrides.dryRunEnabled = false;
+      }
+      continue;
+    }
+
+    if (key === "preset" && ["light", "standard", "strict"].includes(rawValue.toLowerCase())) {
+      preset = rawValue.toLowerCase();
+      continue;
+    }
+
+    if (key === "ignore") {
+      overrides.channelRuleOverrides = parseCommaSeparatedList(rawValue, value => normalizeRuleKey(value))
+        .filter(Boolean);
+      continue;
+    }
+
+    if (["dryrun", "linkreputationenabled", "languageawarefiltersenabled", "quiethoursenabled"].includes(key)) {
+      overrides[key] = envFlag(rawValue, false);
+      continue;
+    }
+
+    if (["quiethoursmode"].includes(key)) {
+      const mode = String(rawValue || "").trim().toLowerCase();
+      overrides[key] = ["relaxed", "strict"].includes(mode) ? mode : "relaxed";
+      continue;
+    }
+
+    if (["quiethoursstart", "quiethoursend"].includes(key)) {
+      overrides[key] = String(rawValue || "").trim().slice(0, 16);
+      continue;
+    }
+
+    if (["spamwindowms", "spamburstthreshold", "spamduplicatethreshold", "contextmessagecount", "maxmentions", "maxemojicount", "maxattachmentsizemb"].includes(key)) {
+      const numeric = Number(rawValue);
+      if (Number.isFinite(numeric)) overrides[key] = numeric;
+      continue;
+    }
+
+    if (["invites", "spam", "caps", "bannedwords", "linksenabled", "alloweddomainsonly", "attachmentsenabled", "ageprotectionenabled", "antiraidenabled", "nicknamefilterenabled", "scamfilterenabled", "evasionfilterenabled", "emojispamenabled", "escalationenabled"].includes(key)) {
+      overrides[key] = envFlag(rawValue, false);
+      continue;
+    }
+  }
+
+  return { preset, overrides };
+}
+
+function parseChannelProfiles(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map(line => {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("//") || trimmed.startsWith(";")) return null;
+
+      const separatorIndex = trimmed.indexOf(":");
+      if (separatorIndex === -1) return null;
+
+      const selector = parseChannelProfileSelector(trimmed.slice(0, separatorIndex));
+      const directive = parseChannelProfileDirective(trimmed.slice(separatorIndex + 1));
+      if (!selector || !directive) return null;
+
+      return {
+        selector,
+        preset: directive.preset,
+        overrides: directive.overrides
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 100);
+}
+
+const AUTO_MOD_PRESETS = {
+  light: {
+    invites: true,
+    spam: true,
+    caps: false,
+    bannedWords: false,
+    linksEnabled: false,
+    allowedDomainsOnly: false,
+    attachmentsEnabled: false,
+    ageProtectionEnabled: false,
+    antiRaidEnabled: true,
+    nicknameFilterEnabled: false,
+    scamFilterEnabled: true,
+    evasionFilterEnabled: true,
+    emojiSpamEnabled: false,
+    escalationEnabled: true,
+    maxMentions: 8,
+    spamWindowMs: 10000,
+    spamBurstThreshold: 6,
+    spamDuplicateThreshold: 4,
+    raidJoinThreshold: 8,
+    warnThreshold: 3,
+    timeoutThreshold: 5,
+    timeoutDurationMs: 10 * 60 * 1000,
+    offenseWindowMs: 24 * 60 * 60 * 1000,
+    raidWindowMs: 60 * 1000,
+    raidAction: "log"
+  },
+  standard: {
+    invites: true,
+    spam: true,
+    caps: true,
+    bannedWords: true,
+    linksEnabled: true,
+    allowedDomainsOnly: false,
+    attachmentsEnabled: true,
+    ageProtectionEnabled: true,
+    antiRaidEnabled: true,
+    nicknameFilterEnabled: false,
+    scamFilterEnabled: true,
+    evasionFilterEnabled: true,
+    emojiSpamEnabled: true,
+    escalationEnabled: true,
+    maxMentions: 5,
+    spamWindowMs: 8000,
+    spamBurstThreshold: 5,
+    spamDuplicateThreshold: 3,
+    maxEmojiCount: 12,
+    maxAttachmentSizeMb: 10,
+    raidJoinThreshold: 5,
+    warnThreshold: 2,
+    timeoutThreshold: 4,
+    timeoutDurationMs: 10 * 60 * 1000,
+    offenseWindowMs: 24 * 60 * 60 * 1000,
+    raidWindowMs: 60 * 1000,
+    raidAccountAgeLimitMs: 24 * 60 * 60 * 1000,
+    raidAction: "log"
+  },
+  strict: {
+    invites: true,
+    spam: true,
+    caps: true,
+    bannedWords: true,
+    linksEnabled: true,
+    allowedDomainsOnly: true,
+    attachmentsEnabled: true,
+    ageProtectionEnabled: true,
+    antiRaidEnabled: true,
+    nicknameFilterEnabled: true,
+    scamFilterEnabled: true,
+    evasionFilterEnabled: true,
+    emojiSpamEnabled: true,
+    escalationEnabled: true,
+    maxMentions: 4,
+    spamWindowMs: 6000,
+    spamBurstThreshold: 4,
+    spamDuplicateThreshold: 2,
+    maxEmojiCount: 8,
+    maxAttachmentSizeMb: 8,
+    raidJoinThreshold: 4,
+    warnThreshold: 2,
+    timeoutThreshold: 3,
+    timeoutDurationMs: 30 * 60 * 1000,
+    offenseWindowMs: 48 * 60 * 60 * 1000,
+    raidWindowMs: 60 * 1000,
+    raidAccountAgeLimitMs: 7 * 24 * 60 * 60 * 1000,
+    minAccountAgeForLinksMs: 24 * 60 * 60 * 1000,
+    minMemberAgeForLinksMs: 10 * 60 * 1000,
+    minAccountAgeForAttachmentsMs: 24 * 60 * 60 * 1000,
+    minMemberAgeForAttachmentsMs: 10 * 60 * 1000,
+    raidAction: "timeout"
+  }
+};
+
+function cloneAutoModSettings(source = {}) {
+  return {
+    ...source,
+    bannedWordList: [...(source.bannedWordList || [])],
+    allowedDomains: [...(source.allowedDomains || [])],
+    blockedDomains: [...(source.blockedDomains || [])],
+    allowedAttachmentExtensions: [...(source.allowedAttachmentExtensions || [])],
+    blockedAttachmentExtensions: [...(source.blockedAttachmentExtensions || [])],
+    exemptChannelIds: [...(source.exemptChannelIds || [])],
+    exemptRoleIds: [...(source.exemptRoleIds || [])],
+    exemptUserIds: [...(source.exemptUserIds || [])],
+    nicknameBlockedTerms: [...(source.nicknameBlockedTerms || [])],
+    scamPhraseList: [...(source.scamPhraseList || [])],
+    alertOnlyRules: [...(source.alertOnlyRules || [])],
+    channelRuleOverrides: { ...(source.channelRuleOverrides || {}) },
+    ruleActions: { ...(source.ruleActions || {}) }
+  };
+}
+
+function normalizeProfileRuleList(value) {
+  return parseCommaSeparatedList(value, entry => normalizeRuleKey(entry)).filter(Boolean);
 }
 
 function parseIdList(input) {
@@ -472,22 +705,24 @@ function buildBoundaryPattern(term) {
   return new RegExp(`${start}${escaped}${end}`, "iu");
 }
 
-function findBannedWordMatch(content) {
+function findBannedWordMatch(content, automod = config.automod) {
   const normalizedContent = normalizeComparisonText(content).replace(/\s+/g, " ");
-  return getBannedWords().find(term => {
+  const bannedWords = Array.isArray(automod.bannedWordList) ? automod.bannedWordList : getBannedWords();
+  return bannedWords.find(term => {
     const pattern = buildBoundaryPattern(term);
     return pattern ? pattern.test(normalizedContent) : false;
   }) || null;
 }
 
-function findBypassBannedWordMatch(content) {
-  if (!config.automod.bannedWords) return null;
-  if (findBannedWordMatch(content)) return null;
+function findBypassBannedWordMatch(content, automod = config.automod) {
+  if (!automod.bannedWords) return null;
+  if (findBannedWordMatch(content, automod)) return null;
 
   const normalized = normalizeBypassText(content);
   if (!normalized) return null;
 
-  return getBannedWords().find(term => {
+  const bannedWords = Array.isArray(automod.bannedWordList) ? automod.bannedWordList : getBannedWords();
+  return bannedWords.find(term => {
     const normalizedTerm = normalizeBypassText(term);
     if (!normalizedTerm || normalizedTerm.length < 4) return false;
     return normalized.includes(normalizedTerm);
@@ -538,7 +773,22 @@ function detectMaskedLink(content) {
   return null;
 }
 
-function detectScamAttempt(message) {
+function isSuspiciousDomain(domain) {
+  const normalized = normalizeDomain(domain);
+  if (!normalized) return false;
+
+  if (normalized.startsWith("xn--")) return true;
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(normalized)) return true;
+  if (normalized.endsWith(".zip") || normalized.endsWith(".mov")) return true;
+  if (SUSPICIOUS_SCAM_DOMAINS.some(entry => normalized === entry || normalized.endsWith(`.${entry}`))) return true;
+
+  const segments = normalized.split(".");
+  if (segments.some(segment => segment.length >= 18)) return true;
+  if (segments.some(segment => /[0-9]{5,}/.test(segment))) return true;
+  return false;
+}
+
+function detectScamAttempt(message, automod = config.automod) {
   const content = message.content || "";
   const normalizedText = normalizeComparisonText(content);
   const domains = extractMessageDomains(content);
@@ -551,10 +801,7 @@ function detectScamAttempt(message) {
     };
   }
 
-  const suspiciousDomain = domains.find(domain =>
-    domain.startsWith("xn--") ||
-    SUSPICIOUS_SCAM_DOMAINS.some(entry => domain === entry || domain.endsWith(`.${entry}`))
-  );
+  const suspiciousDomain = domains.find(domain => automod.linkReputationEnabled === false ? false : isSuspiciousDomain(domain));
 
   const matchedPhrase = getScamPhrases().find(phrase => normalizedText.includes(phrase));
   if (matchedPhrase && suspiciousDomain) {
@@ -574,7 +821,7 @@ function detectScamAttempt(message) {
   return null;
 }
 
-function detectBypassAttempt(content) {
+function detectBypassAttempt(content, automod = config.automod) {
   const normalized = normalizeBypassText(content);
   if (!normalized) return null;
 
@@ -585,7 +832,7 @@ function detectBypassAttempt(content) {
     };
   }
 
-  const blockedWord = findBypassBannedWordMatch(content);
+  const blockedWord = findBypassBannedWordMatch(content, automod);
 
   if (blockedWord) {
     return {
@@ -2209,7 +2456,15 @@ function isAutoModExempt(message) {
   return message.member.roles.cache.some(role => config.automod.exemptRoleIds.includes(role.id));
 }
 
-function hasExcessiveCaps(content) {
+function isLikelyLatinText(content) {
+  const letters = String(content || "").match(/\p{L}/gu) || [];
+  if (!letters.length) return true;
+  const latin = String(content || "").match(/[A-Za-z]/g) || [];
+  return latin.length / letters.length >= 0.5;
+}
+
+function hasExcessiveCaps(content, automod = config.automod) {
+  if (automod.languageAwareFiltersEnabled && !isLikelyLatinText(content)) return false;
   const letters = content.match(/[a-z]/gi) || [];
   if (letters.length < 12) return false;
 
@@ -2217,17 +2472,351 @@ function hasExcessiveCaps(content) {
   return uppercaseCount / letters.length >= 0.7;
 }
 
-function trackSpam(message) {
+function getSpamWindowMs(automod = config.automod) {
+  const value = Number(automod.spamWindowMs);
+  return Number.isFinite(value) ? Math.max(1000, Math.min(60 * 1000, value)) : 8000;
+}
+
+function getSpamBurstThreshold(automod = config.automod) {
+  const value = Number(automod.spamBurstThreshold);
+  return Number.isFinite(value) ? Math.max(2, Math.min(20, value)) : 5;
+}
+
+function getSpamDuplicateThreshold(automod = config.automod) {
+  const value = Number(automod.spamDuplicateThreshold);
+  return Number.isFinite(value) ? Math.max(2, Math.min(10, value)) : 3;
+}
+
+function getContextMessageCount(automod = config.automod) {
+  const value = Number(automod.contextMessageCount);
+  return Number.isInteger(value) ? Math.max(1, Math.min(10, value)) : 3;
+}
+
+async function trackSpam(message, automod = config.automod) {
+  if (automod.languageAwareFiltersEnabled && !isLikelyLatinText(message.content)) return false;
   const now = Date.now();
   const previous = spamTracker.get(message.author.id) || [];
-  const recent = previous.filter(entry => now - entry.timestamp <= 8000);
+  const recent = previous.filter(entry => now - entry.timestamp <= getSpamWindowMs(automod));
   const normalized = message.content.trim().toLowerCase();
 
   recent.push({ timestamp: now, content: normalized });
   spamTracker.set(message.author.id, recent);
 
   const duplicateCount = recent.filter(entry => entry.content && entry.content === normalized).length;
-  return recent.length >= 5 || duplicateCount >= 3;
+  const contextCount = getContextMessageCount(automod);
+  if (contextCount > 1 && message.channel?.messages?.fetch) {
+    const history = await getRecentMessagesForUser(message.channel, message.author.id, contextCount - 1).catch(() => []);
+    const repeated = history.filter(entry => normalizeComparisonText(entry.content || "").replace(/\s+/g, " ") === normalizeComparisonText(message.content || "").replace(/\s+/g, " ")).length;
+    if (repeated + 1 >= getSpamDuplicateThreshold(automod)) {
+      return true;
+    }
+  }
+
+  return recent.length >= getSpamBurstThreshold(automod) || duplicateCount >= getSpamDuplicateThreshold(automod);
+}
+
+function normalizeTimeOfDay(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (!match) return null;
+  return `${match[1].padStart(2, "0")}:${match[2]}`;
+}
+
+function isWithinQuietHours(automod = config.automod, date = new Date()) {
+  if (!automod.quietHoursEnabled) return false;
+
+  const start = normalizeTimeOfDay(automod.quietHoursStart || "22:00");
+  const end = normalizeTimeOfDay(automod.quietHoursEnd || "08:00");
+  if (!start || !end) return false;
+
+  const current = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  if (start === end) return true;
+  if (start < end) return current >= start && current < end;
+  return current >= start || current < end;
+}
+
+function resolveChannelProfile(message) {
+  const lines = parseChannelProfiles(config.channelProfiles || "");
+  if (!lines.length) return null;
+
+  const channelId = String(message.channel?.id || "");
+  const channelName = String(message.channel?.name || "").trim().toLowerCase();
+
+  const matchesSelector = selector => {
+    if (!selector) return false;
+    if (selector === "*") return true;
+    if (selector === channelId) return true;
+    if (selector === channelName) return true;
+    if (selector === `#${channelName}`) return true;
+    return false;
+  };
+
+  return lines.find(entry => matchesSelector(entry.selector)) || null;
+}
+
+function applyPresetToAutomod(base, presetName) {
+  const preset = AUTO_MOD_PRESETS[String(presetName || "").trim().toLowerCase()];
+  if (!preset) return base;
+  return {
+    ...base,
+    ...preset
+  };
+}
+
+function applyChannelProfileToAutomod(base, profile) {
+  if (!profile) return cloneAutoModSettings(base);
+
+  let next = cloneAutoModSettings(base);
+  if (profile.preset) {
+    next = applyPresetToAutomod(next, profile.preset);
+  }
+
+  const overrides = profile.overrides || {};
+  for (const [key, value] of Object.entries(overrides)) {
+    if (key === "channelRuleOverrides") continue;
+    if (key in next) {
+      next[key] = value;
+    }
+  }
+
+  return next;
+}
+
+function applyQuietHoursToAutomod(base, quietHoursActive) {
+  if (!quietHoursActive) return cloneAutoModSettings(base);
+
+  const next = cloneAutoModSettings(base);
+  if (String(base.quietHoursMode || "relaxed").toLowerCase() === "strict") {
+    next.spamWindowMs = Math.max(3000, Math.floor(getSpamWindowMs(base) * 0.75));
+    next.spamBurstThreshold = Math.max(2, getSpamBurstThreshold(base) - 1);
+    next.spamDuplicateThreshold = Math.max(2, getSpamDuplicateThreshold(base) - 1);
+    next.maxMentions = Math.max(1, Number(base.maxMentions || 0) - 1);
+    next.maxEmojiCount = Math.max(4, Number(base.maxEmojiCount || 0) - 2);
+  } else {
+    next.spamWindowMs = Math.min(60000, Math.floor(getSpamWindowMs(base) * 1.25));
+    next.spamBurstThreshold = Math.min(20, getSpamBurstThreshold(base) + 1);
+    next.spamDuplicateThreshold = Math.min(10, getSpamDuplicateThreshold(base) + 1);
+    next.maxMentions = Math.max(1, Number(base.maxMentions || 0) + 1);
+    next.maxEmojiCount = Math.max(4, Number(base.maxEmojiCount || 0) + 2);
+  }
+
+  return next;
+}
+
+function resolveAutoModPolicy(message) {
+  const profile = resolveChannelProfile(message);
+  const base = cloneAutoModSettings(config.automod);
+  const withProfile = applyChannelProfileToAutomod(base, profile);
+  const quietHoursActive = isWithinQuietHours(withProfile);
+  const automod = applyQuietHoursToAutomod(withProfile, quietHoursActive);
+  const ignoredRules = new Set([
+    ...(Array.isArray(automod.channelRuleOverrides?.[message.channel.id]) ? automod.channelRuleOverrides[message.channel.id] : []),
+    ...(Array.isArray(profile?.overrides?.channelRuleOverrides) ? profile.overrides.channelRuleOverrides : [])
+  ]);
+
+  return {
+    profile,
+    quietHoursActive,
+    automod,
+    ignoredRules
+  };
+}
+
+function isRuleIgnored(policy, ruleKey) {
+  return Boolean(policy?.ignoredRules?.has(ruleKey));
+}
+
+function buildAutoModCaseDetails(message, extraDetails = [], policy = null) {
+  const details = [
+    { name: "Channel", value: `${message.channel}`, inline: true },
+    { name: "Dry Run", value: policy?.automod?.dryRunEnabled ? "Yes" : "No", inline: true },
+    ...(policy?.profile
+      ? [{ name: "Channel Profile", value: policy.profile.selector, inline: true }]
+      : []),
+    ...(policy?.quietHoursActive
+      ? [{ name: "Quiet Hours", value: String(policy.automod?.quietHoursMode || "relaxed"), inline: true }]
+      : []),
+    {
+      name: "Message",
+      value: message.content?.slice(0, 1024) || "*No text content*",
+      inline: false
+    },
+    ...extraDetails
+  ];
+
+  return details;
+}
+
+function getMessageContextPreview(message, automod = config.automod) {
+  const count = Math.max(1, Math.min(10, Number(automod.contextMessageCount) || 3));
+  return getRecentMessagesForUser(message.channel, message.author.id, count).catch(() => []);
+}
+
+async function evaluateAutoModMessage(message, policy = resolveAutoModPolicy(message), previewOnly = false) {
+  const automod = policy.automod;
+  const accountAgeMs = getAccountAgeMs(message.author);
+  const memberAgeMs = getMemberAgeMs(message.member);
+  const messageDomains = extractMessageDomains(message.content);
+  const normalizedBlockedDomains = (automod.blockedDomains || []).map(normalizeDomain);
+  const normalizedAllowedDomains = (automod.allowedDomains || []).map(normalizeDomain);
+  const contextMessages = [];
+
+  const matches = [];
+  const addMatch = match => {
+    if (match && !isRuleIgnored(policy, match.actionLabel)) {
+      matches.push(match);
+    }
+  };
+
+  if (automod.scamFilterEnabled) {
+    addMatch(detectScamAttempt(message, automod));
+  }
+
+  if (automod.evasionFilterEnabled) {
+    addMatch(detectBypassAttempt(message.content, automod));
+  }
+
+  if (automod.ageProtectionEnabled && messageDomains.length) {
+    if (automod.minAccountAgeForLinksMs > 0 && accountAgeMs < automod.minAccountAgeForLinksMs) {
+      addMatch({
+        actionLabel: "account-age-links",
+        reason: `your Discord account must be at least ${formatDuration(automod.minAccountAgeForLinksMs)} old before posting links.`
+      });
+    }
+
+    if (automod.minMemberAgeForLinksMs > 0 && memberAgeMs < automod.minMemberAgeForLinksMs) {
+      addMatch({
+        actionLabel: "member-age-links",
+        reason: `you must be in the server for at least ${formatDuration(automod.minMemberAgeForLinksMs)} before posting links.`
+      });
+    }
+  }
+
+  if (automod.linksEnabled && messageDomains.length) {
+    const blockedDomain = messageDomains.find(domain =>
+      normalizedBlockedDomains.some(blocked => domain === blocked || domain.endsWith(`.${blocked}`))
+    );
+
+    if (blockedDomain) {
+      addMatch({
+        actionLabel: "blocked-domain",
+        reason: `links from ${blockedDomain} are not allowed here.`
+      });
+    }
+
+    if (automod.allowedDomainsOnly) {
+      const disallowedDomain = messageDomains.find(domain =>
+        !normalizedAllowedDomains.some(allowed => domain === allowed || domain.endsWith(`.${allowed}`))
+      );
+
+      if (disallowedDomain) {
+        addMatch({
+          actionLabel: "disallowed-domain",
+          reason: `links from ${disallowedDomain} are not on the allowed list.`
+        });
+      }
+    }
+  }
+
+  if (automod.attachmentsEnabled && message.attachments.size) {
+    if (automod.ageProtectionEnabled) {
+      if (automod.minAccountAgeForAttachmentsMs > 0 && accountAgeMs < automod.minAccountAgeForAttachmentsMs) {
+        addMatch({
+          actionLabel: "account-age-attachments",
+          reason: `your Discord account must be at least ${formatDuration(automod.minAccountAgeForAttachmentsMs)} old before uploading attachments.`
+        });
+      }
+
+      if (automod.minMemberAgeForAttachmentsMs > 0 && memberAgeMs < automod.minMemberAgeForAttachmentsMs) {
+        addMatch({
+          actionLabel: "member-age-attachments",
+          reason: `you must be in the server for at least ${formatDuration(automod.minMemberAgeForAttachmentsMs)} before uploading attachments.`
+        });
+      }
+    }
+
+    const blockedExtensions = (automod.blockedAttachmentExtensions || []).map(normalizeExtension);
+    const allowedExtensions = (automod.allowedAttachmentExtensions || []).map(normalizeExtension);
+
+    for (const attachment of message.attachments.values()) {
+      const fileName = attachment.name || "";
+      const extension = normalizeExtension(path.extname(fileName));
+      const sizeMb = attachment.size / (1024 * 1024);
+
+      if (automod.maxAttachmentSizeMb > 0 && sizeMb > automod.maxAttachmentSizeMb) {
+        addMatch({
+          actionLabel: "attachment-size",
+          reason: `attachments larger than ${automod.maxAttachmentSizeMb}MB are not allowed here.`
+        });
+      }
+
+      if (extension && blockedExtensions.includes(extension)) {
+        addMatch({
+          actionLabel: "blocked-extension",
+          reason: `files with the ${extension} extension are not allowed here.`
+        });
+      }
+
+      if (allowedExtensions.length && (!extension || !allowedExtensions.includes(extension))) {
+        addMatch({
+          actionLabel: "disallowed-extension",
+          reason: `only these attachment types are allowed here: ${allowedExtensions.join(", ")}.`
+        });
+      }
+    }
+  }
+
+  if (automod.invites && INVITE_REGEX.test(message.content)) {
+    addMatch({ actionLabel: "invite-link", reason: "invite links are not allowed here." });
+  }
+
+  if (automod.maxMentions > 0 && (message.mentions.users?.size || 0) >= automod.maxMentions) {
+    addMatch({ actionLabel: "mass-mentions", reason: "please do not mass mention members." });
+  }
+
+  if (automod.emojiSpamEnabled && automod.maxEmojiCount > 0 && countEmoji(message.content) >= automod.maxEmojiCount) {
+    addMatch({ actionLabel: "emoji-spam", reason: "please avoid emoji spam." });
+  }
+
+  if (automod.caps && hasExcessiveCaps(message.content, automod)) {
+    addMatch({ actionLabel: "caps", reason: "please avoid sending all-caps messages." });
+  }
+
+  const bannedWordMatch = automod.bannedWords ? findBannedWordMatch(message.content, automod) : null;
+  if (bannedWordMatch) {
+    addMatch({
+      actionLabel: "banned-word",
+      reason: `that phrase is not allowed here (${bannedWordMatch}).`
+    });
+  }
+
+  if (automod.spam && await trackSpam(message, automod)) {
+    addMatch({ actionLabel: "spam", reason: "please slow down and avoid spam." });
+  }
+
+  if (automod.linkReputationEnabled && messageDomains.length) {
+    const suspiciousDomain = messageDomains.find(domain => isSuspiciousDomain(domain));
+    if (suspiciousDomain && !policy.ignoredRules.has("scam-link")) {
+      addMatch({
+        actionLabel: "scam-link",
+        reason: `that message links to a suspicious domain (${suspiciousDomain}).`
+      });
+    }
+  }
+
+  if (previewOnly && contextMessages.length) {
+    return {
+      match: matches[0] || null,
+      contextMessages,
+      allMatches: matches
+    };
+  }
+
+  return {
+    match: matches[0] || null,
+    contextMessages,
+    allMatches: matches
+  };
 }
 
 async function notifyUser(user, embed) {
@@ -2269,11 +2858,14 @@ async function ensureModeratable(interaction, member, actionLabel) {
   return true;
 }
 
-async function handleAutoModViolation(message, reason, actionLabel, extraDetails = []) {
-  const ruleAction = getAutoModRuleAction(actionLabel);
+async function handleAutoModViolation(message, reason, actionLabel, extraDetails = [], options = {}) {
+  const policy = options.policy || resolveAutoModPolicy(message);
+  const automod = policy.automod;
+  const ruleAction = getAutoModRuleAction(actionLabel, automod);
   const alertOnly = ruleAction === "alert";
+  const dryRun = Boolean(options.dryRun ?? automod.dryRunEnabled);
 
-  if (!alertOnly) {
+  if (!alertOnly && !dryRun) {
     await message.delete().catch(() => {});
 
     const notice = await message.channel.send({
@@ -2292,25 +2884,20 @@ async function handleAutoModViolation(message, reason, actionLabel, extraDetails
     targetId: message.author.id,
     targetTag: message.author.tag,
     moderatorTag: "AutoMod",
-    reason,
+    reason: dryRun ? `[Dry Run] ${reason}` : reason,
     details: [
-      { name: "Channel", value: `${message.channel}`, inline: true },
-      {
-        name: "Message",
-        value: message.content?.slice(0, 1024) || "*No text content*",
-        inline: false
-      },
-      ...extraDetails
+      ...buildAutoModCaseDetails(message, extraDetails, policy),
+      ...(dryRun ? [{ name: "Simulation", value: "This rule was previewed only.", inline: false }] : [])
     ]
   });
 
-  const offenses = recordAutoModOffense(message.author.id, actionLabel, reason);
+  const offenses = dryRun ? getAutoModOffenses(message.author.id) : recordAutoModOffense(message.author.id, actionLabel, reason);
   const activeOffenseCount = offenses.length;
-  let escalationText = alertOnly ? "Alert only" : `Deleted (${ruleAction})`;
+  let escalationText = dryRun ? "Dry run only" : alertOnly ? "Alert only" : `Deleted (${ruleAction})`;
 
-  if (!alertOnly && ruleAction === "timeout" && message.member?.moderatable) {
+  if (!alertOnly && !dryRun && ruleAction === "timeout" && message.member?.moderatable) {
     await message.member.timeout(
-      config.automod.timeoutDurationMs,
+      automod.timeoutDurationMs,
       `AutoMod rule action (${actionLabel}): ${reason}`
     ).catch(() => {});
 
@@ -2322,11 +2909,11 @@ async function handleAutoModViolation(message, reason, actionLabel, extraDetails
       reason: `Automatic timeout from the ${actionLabel} rule. Latest: ${reason}`,
       details: [
         { name: "Rule action", value: "timeout", inline: true },
-        { name: "Duration", value: formatDuration(config.automod.timeoutDurationMs), inline: true }
+        { name: "Duration", value: formatDuration(automod.timeoutDurationMs), inline: true }
       ]
     });
 
-    escalationText = `Rule action timeout applied for ${formatDuration(config.automod.timeoutDurationMs)}.`;
+    escalationText = `Rule action timeout applied for ${formatDuration(automod.timeoutDurationMs)}.`;
 
     await notifyUser(
       message.author,
@@ -2346,7 +2933,7 @@ async function handleAutoModViolation(message, reason, actionLabel, extraDetails
         fields: buildCaseFields(timeoutEntry)
       })
     );
-  } else if (!alertOnly && ruleAction === "warn") {
+  } else if (!alertOnly && !dryRun && ruleAction === "warn") {
     const warnings = addWarning(
       message.author.id,
       "AutoMod",
@@ -2387,30 +2974,30 @@ async function handleAutoModViolation(message, reason, actionLabel, extraDetails
     );
   }
 
-  if (config.automod.escalationEnabled && !alertOnly && ruleAction !== "timeout") {
+  if (automod.escalationEnabled && !alertOnly && !dryRun && ruleAction !== "timeout") {
     if (
       activeOffenseCount >= config.automod.timeoutThreshold &&
       message.member &&
       message.member.moderatable
     ) {
       await message.member.timeout(
-        config.automod.timeoutDurationMs,
+        automod.timeoutDurationMs,
         `AutoMod escalation: ${reason}`
       ).catch(() => {});
 
       const timeoutEntry = addCase({
         action: "automod:timeout",
-        targetId: message.author.id,
-        targetTag: message.author.tag,
-        moderatorTag: "AutoMod",
-        reason: `Automatic timeout after repeated automod violations. Latest: ${reason}`,
-        details: [
+          targetId: message.author.id,
+          targetTag: message.author.tag,
+          moderatorTag: "AutoMod",
+          reason: `Automatic timeout after repeated automod violations. Latest: ${reason}`,
+          details: [
           { name: "Offenses in window", value: `${activeOffenseCount}`, inline: true },
-          { name: "Duration", value: formatDuration(config.automod.timeoutDurationMs), inline: true }
+          { name: "Duration", value: formatDuration(automod.timeoutDurationMs), inline: true }
         ]
       });
 
-      escalationText = `Automatic timeout applied for ${formatDuration(config.automod.timeoutDurationMs)}.`;
+      escalationText = `Automatic timeout applied for ${formatDuration(automod.timeoutDurationMs)}.`;
 
       await notifyUser(
         message.author,
@@ -2430,7 +3017,7 @@ async function handleAutoModViolation(message, reason, actionLabel, extraDetails
           fields: buildCaseFields(timeoutEntry)
         })
       );
-    } else if (activeOffenseCount >= config.automod.warnThreshold && ruleAction !== "warn") {
+    } else if (activeOffenseCount >= automod.warnThreshold && ruleAction !== "warn") {
       const warnings = addWarning(
         message.author.id,
         "AutoMod",
@@ -2477,7 +3064,9 @@ async function handleAutoModViolation(message, reason, actionLabel, extraDetails
       title: `Auto mod case #${entry.id}`,
       description: alertOnly
         ? `${message.author.tag} matched an AutoMod review rule.`
-        : `${message.author.tag} had a message removed.`,
+        : dryRun
+          ? `${message.author.tag} matched an AutoMod rule in dry-run mode.`
+          : `${message.author.tag} had a message removed.`,
       color: COLORS.red,
       fields: [
         ...buildCaseFields(entry),
@@ -2490,6 +3079,8 @@ async function handleAutoModViolation(message, reason, actionLabel, extraDetails
 }
 
 function buildAutoModSummary() {
+  const channelProfileCount = parseChannelProfiles(config.channelProfiles || "").length;
+  const overrideCount = Object.values(config.automod.channelRuleOverrides || {}).reduce((sum, rules) => sum + (Array.isArray(rules) ? rules.length : 0), 0);
   return [
     `Invites: ${config.automod.invites ? "on" : "off"}`,
     `Spam: ${config.automod.spam ? "on" : "off"}`,
@@ -2503,6 +3094,11 @@ function buildAutoModSummary() {
     `Allowed links only: ${config.automod.allowedDomainsOnly ? "on" : "off"}`,
     `Allowed domains: ${config.automod.allowedDomains.length}`,
     `Blocked domains: ${config.automod.blockedDomains.length}`,
+    `Dry run: ${config.automod.dryRunEnabled ? "on" : "off"}`,
+    `Quiet hours: ${config.automod.quietHoursEnabled ? `${config.automod.quietHoursStart}-${config.automod.quietHoursEnd}` : "off"}`,
+    `Channel profiles: ${channelProfileCount}`,
+    `Channel overrides: ${overrideCount}`,
+    `Context window: ${getContextMessageCount(config.automod)}`,
     `Attachment filtering: ${config.automod.attachmentsEnabled ? "on" : "off"}`,
     `Max attachment size: ${config.automod.maxAttachmentSizeMb}MB`,
     `Allowed extensions: ${config.automod.allowedAttachmentExtensions.length}`,
@@ -3637,6 +4233,10 @@ function updateWebAutomod(payload) {
     "aiModerationEnabled",
     "aiCustomRulesEnabled",
     "aiIncludeRecentContext",
+    "dryRunEnabled",
+    "linkReputationEnabled",
+    "languageAwareFiltersEnabled",
+    "quietHoursEnabled",
     "escalationEnabled",
     "emojiSpamEnabled"
   ];
@@ -3651,7 +4251,11 @@ function updateWebAutomod(payload) {
     aiModerationThreshold: [1, 100],
     aiCustomRulesThreshold: [1, 100],
     aiMinMessageLength: [1, 500],
-    aiContextMessageCount: [1, 10]
+    aiContextMessageCount: [1, 10],
+    contextMessageCount: [1, 10],
+    spamWindowMs: [1000, 60000],
+    spamBurstThreshold: [2, 20],
+    spamDuplicateThreshold: [2, 10]
   };
 
   const durationRules = [
@@ -3680,6 +4284,18 @@ function updateWebAutomod(payload) {
   for (const key of durationRules) {
     if (Object.prototype.hasOwnProperty.call(payload, key)) {
       setWebDuration(config.automod, key, payload[key], key.startsWith("min") || key === "raidAccountAgeLimitMs");
+    }
+  }
+
+  const stringKeys = ["aiModerationModel", "aiCustomRulesModel", "aiCustomRules", "aiCustomInstructions", "quietHoursStart", "quietHoursEnd", "quietHoursMode"];
+  for (const key of stringKeys) {
+    if (Object.prototype.hasOwnProperty.call(payload, key)) {
+      const value = String(payload[key] || "").trim();
+      if (key === "quietHoursMode") {
+        config.automod[key] = ["strict", "relaxed"].includes(value) ? value : "relaxed";
+      } else {
+        config.automod[key] = value.slice(0, key === "aiCustomRules" ? 4000 : 2000);
+      }
     }
   }
 
@@ -3713,23 +4329,25 @@ function updateWebAutomod(payload) {
   if (Object.prototype.hasOwnProperty.call(payload, "exemptUserIds")) {
     config.automod.exemptUserIds = toWebList(payload.exemptUserIds, value => String(value || "").trim().replace(/[<@>]/g, ""));
   }
+  if (Object.prototype.hasOwnProperty.call(payload, "channelRuleOverrides")) {
+    const overrides = String(payload.channelRuleOverrides || "").trim();
+    config.automod.channelRuleOverrides = {};
+    if (overrides) {
+      for (const line of overrides.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const [selectorRaw, rulesRaw = ""] = trimmed.split(":");
+        const selector = String(selectorRaw || "").trim().replace(/[<#>]/g, "");
+        const rules = normalizeProfileRuleList(rulesRaw);
+        if (selector && rules.length) {
+          config.automod.channelRuleOverrides[selector] = rules;
+        }
+      }
+    }
+  }
   if (Object.prototype.hasOwnProperty.call(payload, "raidAction")) {
     const raidAction = String(payload.raidAction || "").trim().toLowerCase();
     config.automod.raidAction = ["log", "timeout"].includes(raidAction) ? raidAction : "log";
-  }
-  if (Object.prototype.hasOwnProperty.call(payload, "aiModerationModel")) {
-    const model = String(payload.aiModerationModel || "").trim();
-    config.automod.aiModerationModel = model.slice(0, 80) || "omni-moderation-latest";
-  }
-  if (Object.prototype.hasOwnProperty.call(payload, "aiCustomRulesModel")) {
-    const model = String(payload.aiCustomRulesModel || "").trim();
-    config.automod.aiCustomRulesModel = model.slice(0, 80) || "gpt-4o-mini";
-  }
-  if (Object.prototype.hasOwnProperty.call(payload, "aiCustomRules")) {
-    config.automod.aiCustomRules = String(payload.aiCustomRules || "").trim().slice(0, 4000);
-  }
-  if (Object.prototype.hasOwnProperty.call(payload, "aiCustomInstructions")) {
-    config.automod.aiCustomInstructions = String(payload.aiCustomInstructions || "").trim().slice(0, 2000);
   }
 
   saveConfig();
@@ -3822,6 +4440,116 @@ function buildWebOpsPayload(includeAdmin = false) {
   }
 
   return payload;
+}
+
+function buildAutoModPreviewMessage(body) {
+  const channelId = String(body.channelId || "").trim().replace(/[<#>]/g, "") || null;
+  const content = String(body.content || "").trim().slice(0, 2000);
+  const contentMentions = (content.match(/<@/g) || []).length;
+  const attachments = Array.isArray(body.attachments) ? body.attachments : [];
+  const createdAt = Date.now() - (Number(body.accountAgeDays) || 60) * 24 * 60 * 60 * 1000;
+  const joinedAt = Date.now() - (Number(body.memberAgeHours) || 48) * 60 * 60 * 1000;
+
+  return {
+    content,
+    guild: client.guilds.cache.get(GUILD_ID) || null,
+    channel: {
+      id: channelId || "preview",
+      name: String(body.channelName || "").trim().toLowerCase(),
+      toString() {
+        return channelId ? `<#${channelId}>` : "#preview";
+      }
+    },
+    author: {
+      id: "preview-user",
+      tag: "Preview User#0001",
+      bot: false,
+      createdTimestamp: createdAt,
+      createdAt: new Date(createdAt),
+      displayAvatarURL: () => "",
+      send: async () => {}
+    },
+    member: {
+      id: "preview-user",
+      joinedTimestamp: joinedAt,
+      joinedAt: new Date(joinedAt),
+      moderatable: false,
+      permissions: { has: () => false },
+      roles: {
+        cache: {
+          some: () => false
+        },
+        highest: {
+          comparePositionTo: () => 1
+        }
+      }
+    },
+    mentions: {
+      users: { size: contentMentions }
+    },
+    attachments: {
+      size: attachments.length,
+      values: () => attachments.map(name => ({
+        name,
+        size: Number(body.attachmentSizeMb || 0) * 1024 * 1024
+      }))
+    }
+  };
+}
+
+async function previewAutoMod(body) {
+  const previewMessage = buildAutoModPreviewMessage(body);
+  const policy = resolveAutoModPolicy(previewMessage);
+  const evaluation = await evaluateAutoModMessage(previewMessage, policy, true);
+
+  return {
+    channelId: previewMessage.channel.id,
+    channelName: previewMessage.channel.name || "",
+    content: previewMessage.content,
+    profile: policy.profile ? {
+      selector: policy.profile.selector,
+      preset: policy.profile.preset || "",
+      overrides: policy.profile.overrides || {}
+    } : null,
+    quietHoursActive: policy.quietHoursActive,
+    dryRun: Boolean(policy.automod.dryRunEnabled),
+    ignoredRules: Array.from(policy.ignoredRules || []),
+    match: evaluation.match,
+    allMatches: evaluation.allMatches || [],
+    contextMessages: evaluation.contextMessages || []
+  };
+}
+
+function addChannelRuleOverride(channelId, ruleKey, mode = "rule") {
+  const cleanChannelId = String(channelId || "").trim().replace(/[<#>]/g, "");
+  const cleanMode = String(mode || "rule").trim().toLowerCase();
+  const cleanRuleKey = normalizeRuleKey(ruleKey);
+  if (!cleanChannelId || (cleanMode !== "channel" && !cleanRuleKey)) {
+    throw new Error("A valid channel and rule are required.");
+  }
+
+  if (cleanMode === "channel") {
+    const exemptChannelIds = new Set(config.automod.exemptChannelIds || []);
+    exemptChannelIds.add(cleanChannelId);
+    config.automod.exemptChannelIds = Array.from(exemptChannelIds);
+    saveConfig();
+    recordAuditLog("AutoMod", "channel-exempt-added", { channelId: cleanChannelId });
+    return config.automod.channelRuleOverrides;
+  }
+
+  const overrides = config.automod.channelRuleOverrides || {};
+  const next = new Set(Array.isArray(overrides[cleanChannelId]) ? overrides[cleanChannelId] : []);
+  next.add(cleanRuleKey);
+  config.automod.channelRuleOverrides = {
+    ...overrides,
+    [cleanChannelId]: Array.from(next)
+  };
+  saveConfig();
+  recordAuditLog("AutoMod", "channel-rule-override-added", {
+    channelId: cleanChannelId,
+    ruleKey: cleanRuleKey
+  });
+  return config.automod.channelRuleOverrides;
 }
 
 function createWebAppeal(auth, payload) {
@@ -4419,6 +5147,24 @@ async function handleWebApi(req, res, pathname) {
     }
     const body = await readWebJsonBody(req);
     return sendWebJson(res, 200, { automod: updateWebAutomod(body) });
+  }
+
+  if (req.method === "POST" && pathname === "/api/automod-preview") {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
+    const body = await readWebJsonBody(req);
+    const preview = await previewAutoMod(body);
+    return sendWebJson(res, 200, { preview });
+  }
+
+  if (req.method === "POST" && pathname === "/api/automod-override") {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
+    const body = await readWebJsonBody(req);
+    const overrides = addChannelRuleOverride(body.channelId, body.ruleKey, body.mode);
+    return sendWebJson(res, 200, { ok: true, channelRuleOverrides: overrides });
   }
 
   if (req.method === "POST" && pathname === "/api/rule-actions") {
@@ -7622,169 +8368,33 @@ client.on("messageCreate", async message => {
     if (!ENABLE_CORE_BOT) return;
     if (!message.guild || message.author.bot || !message.member) return;
     if (isAutoModExempt(message)) return;
+    const policy = resolveAutoModPolicy(message);
+    const evaluation = await evaluateAutoModMessage(message, policy, false);
+    const match = evaluation.match;
 
-    const accountAgeMs = getAccountAgeMs(message.author);
-    const memberAgeMs = getMemberAgeMs(message.member);
-    const messageDomains = extractMessageDomains(message.content);
-    const normalizedBlockedDomains = config.automod.blockedDomains.map(normalizeDomain);
-    const normalizedAllowedDomains = config.automod.allowedDomains.map(normalizeDomain);
-
-    if (config.automod.scamFilterEnabled) {
-      const scamMatch = detectScamAttempt(message);
-      if (scamMatch) {
-        await handleAutoModViolation(message, scamMatch.reason, scamMatch.actionLabel);
-        return;
-      }
-    }
-
-    if (config.automod.evasionFilterEnabled) {
-      const bypassMatch = detectBypassAttempt(message.content);
-      if (bypassMatch) {
-        await handleAutoModViolation(message, bypassMatch.reason, bypassMatch.actionLabel);
-        return;
-      }
-    }
-
-    if (config.automod.ageProtectionEnabled && messageDomains.length) {
-      if (config.automod.minAccountAgeForLinksMs > 0 && accountAgeMs < config.automod.minAccountAgeForLinksMs) {
-        await handleAutoModViolation(
-          message,
-          `your Discord account must be at least ${formatDuration(config.automod.minAccountAgeForLinksMs)} old before posting links.`,
-          "account-age-links"
-        );
-        return;
-      }
-
-      if (config.automod.minMemberAgeForLinksMs > 0 && memberAgeMs < config.automod.minMemberAgeForLinksMs) {
-        await handleAutoModViolation(
-          message,
-          `you must be in the server for at least ${formatDuration(config.automod.minMemberAgeForLinksMs)} before posting links.`,
-          "member-age-links"
-        );
-        return;
-      }
-    }
-
-    if (config.automod.linksEnabled && messageDomains.length) {
-      const blockedDomain = messageDomains.find(domain =>
-        normalizedBlockedDomains.some(blocked => domain === blocked || domain.endsWith(`.${blocked}`))
-      );
-
-      if (blockedDomain) {
-        await handleAutoModViolation(message, `links from ${blockedDomain} are not allowed here.`, "blocked-domain");
-        return;
-      }
-
-      if (config.automod.allowedDomainsOnly) {
-        const disallowedDomain = messageDomains.find(domain =>
-          !normalizedAllowedDomains.some(allowed => domain === allowed || domain.endsWith(`.${allowed}`))
-        );
-
-        if (disallowedDomain) {
-          await handleAutoModViolation(message, `links from ${disallowedDomain} are not on the allowed list.`, "disallowed-domain");
-          return;
-        }
-      }
-    }
-
-    if (config.automod.attachmentsEnabled && message.attachments.size) {
-      if (config.automod.ageProtectionEnabled) {
-        if (config.automod.minAccountAgeForAttachmentsMs > 0 && accountAgeMs < config.automod.minAccountAgeForAttachmentsMs) {
-          await handleAutoModViolation(
-            message,
-            `your Discord account must be at least ${formatDuration(config.automod.minAccountAgeForAttachmentsMs)} old before uploading attachments.`,
-            "account-age-attachments"
-          );
-          return;
-        }
-
-        if (config.automod.minMemberAgeForAttachmentsMs > 0 && memberAgeMs < config.automod.minMemberAgeForAttachmentsMs) {
-          await handleAutoModViolation(
-            message,
-            `you must be in the server for at least ${formatDuration(config.automod.minMemberAgeForAttachmentsMs)} before uploading attachments.`,
-            "member-age-attachments"
-          );
-          return;
-        }
-      }
-
-      const blockedExtensions = config.automod.blockedAttachmentExtensions.map(normalizeExtension);
-      const allowedExtensions = config.automod.allowedAttachmentExtensions.map(normalizeExtension);
-
-      for (const attachment of message.attachments.values()) {
-        const fileName = attachment.name || "";
-        const extension = normalizeExtension(path.extname(fileName));
-        const sizeMb = attachment.size / (1024 * 1024);
-
-        if (config.automod.maxAttachmentSizeMb > 0 && sizeMb > config.automod.maxAttachmentSizeMb) {
-          await handleAutoModViolation(
-            message,
-            `attachments larger than ${config.automod.maxAttachmentSizeMb}MB are not allowed here.`,
-            "attachment-size"
-          );
-          return;
-        }
-
-        if (extension && blockedExtensions.includes(extension)) {
-          await handleAutoModViolation(
-            message,
-            `files with the ${extension} extension are not allowed here.`,
-            "blocked-extension"
-          );
-          return;
-        }
-
-        if (allowedExtensions.length && (!extension || !allowedExtensions.includes(extension))) {
-          await handleAutoModViolation(
-            message,
-            `only these attachment types are allowed here: ${allowedExtensions.join(", ")}.`,
-            "disallowed-extension"
-          );
-          return;
-        }
-      }
-    }
-
-    if (config.automod.invites && INVITE_REGEX.test(message.content)) {
-      await handleAutoModViolation(message, "invite links are not allowed here.", "invite-link");
-      return;
-    }
-
-    if (config.automod.maxMentions > 0 && (message.mentions.users?.size || 0) >= config.automod.maxMentions) {
-      await handleAutoModViolation(message, "please do not mass mention members.", "mass-mentions");
-      return;
-    }
-
-    if (config.automod.emojiSpamEnabled && config.automod.maxEmojiCount > 0 && countEmoji(message.content) >= config.automod.maxEmojiCount) {
-      await handleAutoModViolation(message, "please avoid emoji spam.", "emoji-spam");
-      return;
-    }
-
-    if (config.automod.caps && hasExcessiveCaps(message.content)) {
-      await handleAutoModViolation(message, "please avoid sending all-caps messages.", "caps");
-      return;
-    }
-
-    const bannedWordMatch = config.automod.bannedWords ? findBannedWordMatch(message.content) : null;
-    if (bannedWordMatch) {
-      await handleAutoModViolation(message, `that phrase is not allowed here (${bannedWordMatch}).`, "banned-word");
-      return;
-    }
-
-    if (config.automod.spam && trackSpam(message)) {
-      await handleAutoModViolation(message, "please slow down and avoid spam.", "spam");
+    if (match) {
+      await handleAutoModViolation(message, match.reason, match.actionLabel, match.details || [], {
+        dryRun: policy.automod.dryRunEnabled,
+        policy
+      });
       return;
     }
 
     const aiMatch = await detectAiModerationIssue(message);
     if (aiMatch) {
-      await handleAutoModViolation(message, aiMatch.reason, aiMatch.actionLabel, aiMatch.details);
+      await handleAutoModViolation(message, aiMatch.reason, aiMatch.actionLabel, aiMatch.details, {
+        dryRun: policy.automod.dryRunEnabled,
+        policy
+      });
       return;
     }
 
     const customRuleMatch = await detectAiCustomRuleIssue(message);
     if (customRuleMatch) {
-      await handleAutoModViolation(message, customRuleMatch.reason, customRuleMatch.actionLabel, customRuleMatch.details);
+      await handleAutoModViolation(message, customRuleMatch.reason, customRuleMatch.actionLabel, customRuleMatch.details, {
+        dryRun: policy.automod.dryRunEnabled,
+        policy
+      });
     }
   } catch (error) {
     console.error("messageCreate error:", error);

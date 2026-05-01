@@ -201,6 +201,21 @@
           <div class="split" data-required-access="admin">
             <section class="panel">
               <div class="panel-header">
+                <h3>Quiet Hours</h3>
+              </div>
+              <div class="form-grid" id="modeFields"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Policy Overrides</h3>
+              </div>
+              <div class="stacked-fields" id="policyFields"></div>
+            </section>
+          </div>
+
+          <div class="split" data-required-access="admin">
+            <section class="panel">
+              <div class="panel-header">
                 <h3>Lists</h3>
               </div>
               <div class="stacked-fields" id="listFields"></div>
@@ -230,6 +245,18 @@
               <label>Warn rules<textarea id="warnRules" rows="4"></textarea></label>
               <label>Timeout rules<textarea id="timeoutRules" rows="4"></textarea></label>
             </div>
+          </section>
+
+          <section class="panel" data-required-access="admin">
+            <div class="panel-header">
+              <h3>AutoMod Preview</h3>
+              <button class="save-button" id="runPreview" type="button">Run Preview</button>
+            </div>
+            <div class="form-grid">
+              <label>Channel ID<input id="previewChannelId" placeholder="Channel ID"></label>
+              <label>Sample message<textarea id="previewMessage" rows="5" placeholder="Paste a message to test against the current policy"></textarea></label>
+            </div>
+            <div id="automodPreviewResult" class="event-list"></div>
           </section>
 
           <section class="panel">
