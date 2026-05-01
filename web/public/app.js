@@ -230,8 +230,31 @@ function writeStoredJson(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+function getAccessLevel() {
+  if (state.token) return "admin";
+  return state.me?.accessLevel || null;
+}
+
+function hasPanelAccess(level = "mod") {
+  const access = getAccessLevel();
+  if (access === "admin") return true;
+  return level === "mod" && access === "mod";
+}
+
+function getDefaultView() {
+  return hasPanelAccess("admin") ? "overview" : "members";
+}
+
+function isViewAllowed(view) {
+  if (["settings", "staff"].includes(view)) {
+    return hasPanelAccess("admin");
+  }
+  return hasPanelAccess("mod");
+}
+
 function setActiveView(view) {
-  const nextView = titles[view] ? view : "overview";
+  const requestedView = titles[view] ? view : getDefaultView();
+  const nextView = isViewAllowed(requestedView) ? requestedView : getDefaultView();
   document.querySelectorAll(".tab").forEach(tab => {
     tab.classList.toggle("is-active", tab.dataset.view === nextView);
   });
@@ -240,6 +263,29 @@ function setActiveView(view) {
   });
   $("#viewTitle").textContent = titles[nextView];
   localStorage.setItem(storageKeys.activeView, nextView);
+}
+
+function applyAccessRestrictions() {
+  const isAdmin = hasPanelAccess("admin");
+  const isMod = hasPanelAccess("mod");
+
+  document.querySelectorAll("[data-required-access]").forEach(element => {
+    const allowed = hasPanelAccess(element.dataset.requiredAccess);
+    element.classList.toggle("hidden", !allowed);
+    element.querySelectorAll("input, textarea, select, button").forEach(control => {
+      control.disabled = !allowed;
+    });
+  });
+
+  document.querySelectorAll(".tab").forEach(tab => {
+    const allowed = tab.dataset.requiredAccess ? hasPanelAccess(tab.dataset.requiredAccess) : isMod;
+    tab.classList.toggle("hidden", !allowed);
+    tab.disabled = !allowed;
+  });
+
+  if (!isAdmin && ["settings", "staff"].includes(localStorage.getItem(storageKeys.activeView))) {
+    localStorage.setItem(storageKeys.activeView, getDefaultView());
+  }
 }
 
 function restorePanelMemory() {
@@ -873,7 +919,9 @@ async function loadAll() {
     state.cases = casesPayload.cases || [];
     state.warnings = warningsPayload.warnings || {};
     state.notes = notesPayload.notes || {};
+    applyAccessRestrictions();
     renderAll();
+    applyAccessRestrictions();
     setLoginVisible(false);
     updateApiState("Live", "ok");
     setAlert("");
@@ -885,6 +933,10 @@ async function loadAll() {
 }
 
 async function saveAutomod() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to change AutoMod settings.", "error");
+    return;
+  }
   const payload = {};
   document.querySelectorAll("[data-automod-bool]").forEach(input => {
     payload[input.dataset.automodBool] = input.checked;
@@ -911,6 +963,10 @@ async function saveAutomod() {
 }
 
 async function saveStaff() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to change staff access.", "error");
+    return;
+  }
   const result = await api("/api/permissions", {
     method: "POST",
     body: JSON.stringify({
@@ -923,6 +979,7 @@ async function saveStaff() {
 }
 
 function applyAutomodPreset(name) {
+  if (!hasPanelAccess("admin")) return;
   const preset = automodPresets[name];
   if (!preset) return;
 
@@ -942,6 +999,10 @@ function applyAutomodPreset(name) {
 }
 
 async function saveSettings() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to change server settings.", "error");
+    return;
+  }
   const payload = {};
   document.querySelectorAll("[data-setting]").forEach(input => {
     payload[input.dataset.setting] = input.value;
@@ -956,6 +1017,10 @@ async function saveSettings() {
 }
 
 async function saveExemptions() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to change exemptions.", "error");
+    return;
+  }
   const result = await api("/api/automod", {
     method: "POST",
     body: JSON.stringify({
@@ -969,6 +1034,10 @@ async function saveExemptions() {
 }
 
 async function saveRuleActions() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to change rule actions.", "error");
+    return;
+  }
   await api("/api/rule-actions", {
     method: "POST",
     body: JSON.stringify({

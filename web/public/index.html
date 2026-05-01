@@ -45,8 +45,8 @@
           <button class="tab is-active" data-view="overview" type="button">Overview</button>
           <button class="tab" data-view="members" type="button">Members</button>
           <button class="tab" data-view="automod" type="button">AutoMod</button>
-          <button class="tab" data-view="settings" type="button">Settings</button>
-          <button class="tab" data-view="staff" type="button">Staff</button>
+          <button class="tab" data-view="settings" data-required-access="admin" type="button">Settings</button>
+          <button class="tab" data-view="staff" data-required-access="admin" type="button">Staff</button>
           <button class="tab" data-view="records" type="button">Records</button>
         </nav>
 
@@ -167,7 +167,7 @@
             <div id="automodSummary" class="summary-grid"></div>
           </section>
 
-          <div class="panel">
+          <div class="panel" data-required-access="admin">
             <div class="panel-header">
               <h3>Rule Switches</h3>
               <button class="save-button" id="saveAutomod" type="button">Save</button>
@@ -175,7 +175,7 @@
             <div class="switch-grid" id="automodSwitches"></div>
           </div>
 
-          <div class="split">
+          <div class="split" data-required-access="admin">
             <section class="panel">
               <div class="panel-header">
                 <h3>Limits</h3>
@@ -192,7 +192,7 @@
             </section>
           </div>
 
-          <div class="split">
+          <div class="split" data-required-access="admin">
             <section class="panel">
               <div class="panel-header">
                 <h3>Lists</h3>
@@ -201,14 +201,14 @@
             </section>
           </div>
 
-          <section class="panel">
+          <section class="panel" data-required-access="admin">
             <div class="panel-header">
               <h3>Durations & Gates</h3>
             </div>
             <div class="form-grid" id="durationFields"></div>
           </section>
 
-          <section class="panel">
+          <section class="panel" data-required-access="admin">
             <div class="panel-header">
               <h3>Rule Actions</h3>
               <button class="save-button" id="saveRuleActions" type="button">Save Actions</button>
