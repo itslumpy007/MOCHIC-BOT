@@ -52,6 +52,7 @@ const WEB_ADMIN_TOKEN = process.env.WEB_ADMIN_TOKEN || "";
 const WEB_BASE_URL = (process.env.WEB_BASE_URL || "").replace(/\/$/, "");
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || "";
 const SESSION_SECRET = process.env.SESSION_SECRET || WEB_ADMIN_TOKEN || "";
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const webPublicDir = path.join(__dirname, "web", "public");
 
 const client = new Client({
@@ -103,6 +104,7 @@ const AUTOMOD_RULE_KEYS = [
   "masked-link",
   "obfuscated-invite",
   "obfuscated-banned-word",
+  "ai-review",
   "raid-join",
   "nickname"
 ];
@@ -178,8 +180,11 @@ function createDefaultConfig() {
       nicknameBlockedTerms: [],
       scamFilterEnabled: true,
       evasionFilterEnabled: true,
+      aiModerationEnabled: false,
+      aiModerationModel: "omni-moderation-latest",
+      aiModerationThreshold: 70,
       scamPhraseList: [],
-      alertOnlyRules: [],
+      alertOnlyRules: ["ai-review"],
       ruleActions: {},
       maxMentions: 5,
       emojiSpamEnabled: false,
@@ -240,7 +245,7 @@ function loadConfig() {
         blockedAttachmentExtensions: Array.isArray(parsed.automod?.blockedAttachmentExtensions) ? parsed.automod.blockedAttachmentExtensions : defaults.automod.blockedAttachmentExtensions,
         nicknameBlockedTerms: Array.isArray(parsed.automod?.nicknameBlockedTerms) ? parsed.automod.nicknameBlockedTerms : [],
         scamPhraseList: Array.isArray(parsed.automod?.scamPhraseList) ? parsed.automod.scamPhraseList : [],
-        alertOnlyRules: Array.isArray(parsed.automod?.alertOnlyRules) ? parsed.automod.alertOnlyRules : [],
+        alertOnlyRules: Array.isArray(parsed.automod?.alertOnlyRules) ? parsed.automod.alertOnlyRules : defaults.automod.alertOnlyRules,
         ruleActions: parsed.automod?.ruleActions && typeof parsed.automod.ruleActions === "object" ? parsed.automod.ruleActions : {},
         offenses: parsed.automod?.offenses && typeof parsed.automod.offenses === "object" ? parsed.automod.offenses : {},
         analytics: {
@@ -276,6 +281,10 @@ function loadConfig() {
 }
 
 let config = loadConfig();
+
+if (!config.automod.ruleActions?.["ai-review"] && !config.automod.alertOnlyRules.includes("ai-review")) {
+  config.automod.alertOnlyRules.push("ai-review");
+}
 
 function saveConfig() {
   fs.mkdirSync(dataDir, { recursive: true });
@@ -498,6 +507,81 @@ function detectBypassAttempt(content) {
   }
 
   return null;
+}
+
+function getAiModerationThreshold() {
+  const threshold = Number(config.automod.aiModerationThreshold);
+  if (!Number.isFinite(threshold)) return 0.7;
+  return Math.max(0, Math.min(1, threshold > 1 ? threshold / 100 : threshold));
+}
+
+function getAiModerationModel() {
+  return String(config.automod.aiModerationModel || "omni-moderation-latest").trim() || "omni-moderation-latest";
+}
+
+function getTopModerationCategory(result) {
+  const scores = result?.category_scores || {};
+  return Object.entries(scores)
+    .filter(([, score]) => Number.isFinite(Number(score)))
+    .sort((a, b) => Number(b[1]) - Number(a[1]))[0] || [null, 0];
+}
+
+async function detectAiModerationIssue(message) {
+  if (!OPENAI_API_KEY || !config.automod.aiModerationEnabled) return null;
+
+  const content = String(message.content || "").trim();
+  if (!content || content.length < 4) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 6000);
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/moderations", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: getAiModerationModel(),
+        input: content.slice(0, 4000)
+      }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      console.error("AI moderation request failed:", response.status, errorText.slice(0, 300));
+      return null;
+    }
+
+    const payload = await response.json();
+    const result = payload?.results?.[0];
+    if (!result) return null;
+
+    const [category, scoreValue] = getTopModerationCategory(result);
+    const score = Number(scoreValue || 0);
+    const threshold = getAiModerationThreshold();
+    if (!result.flagged && score < threshold) return null;
+
+    const percent = Math.round(score * 100);
+    return {
+      actionLabel: "ai-review",
+      reason: `AI review flagged this message as ${category || "policy risk"} (${percent}% confidence).`,
+      details: [
+        { name: "AI Category", value: category || "unknown", inline: true },
+        { name: "AI Confidence", value: `${percent}%`, inline: true },
+        { name: "AI Model", value: getAiModerationModel().slice(0, 100), inline: true }
+      ]
+    };
+  } catch (error) {
+    if (error.name !== "AbortError") {
+      console.error("AI moderation error:", error.message);
+    }
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function getAccountAgeMs(user) {
@@ -1884,7 +1968,7 @@ async function ensureModeratable(interaction, member, actionLabel) {
   return true;
 }
 
-async function handleAutoModViolation(message, reason, actionLabel) {
+async function handleAutoModViolation(message, reason, actionLabel, extraDetails = []) {
   const ruleAction = getAutoModRuleAction(actionLabel);
   const alertOnly = ruleAction === "alert";
 
@@ -1914,7 +1998,8 @@ async function handleAutoModViolation(message, reason, actionLabel) {
         name: "Message",
         value: message.content?.slice(0, 1024) || "*No text content*",
         inline: false
-      }
+      },
+      ...extraDetails
     ]
   });
 
@@ -2089,7 +2174,9 @@ async function handleAutoModViolation(message, reason, actionLabel) {
   await logAutoModEmbed(
     makeEmbed({
       title: `Auto mod case #${entry.id}`,
-      description: `${message.author.tag} had a message removed.`,
+      description: alertOnly
+        ? `${message.author.tag} matched an AutoMod review rule.`
+        : `${message.author.tag} had a message removed.`,
       color: COLORS.red,
       fields: [
         ...buildCaseFields(entry),
@@ -3176,6 +3263,7 @@ function buildWebDashboardPayload() {
       nicknameFilterEnabled: config.automod.nicknameFilterEnabled,
       scamFilterEnabled: config.automod.scamFilterEnabled,
       evasionFilterEnabled: config.automod.evasionFilterEnabled,
+      aiModerationEnabled: config.automod.aiModerationEnabled,
       escalationEnabled: config.automod.escalationEnabled,
       emojiSpamEnabled: config.automod.emojiSpamEnabled
     },
@@ -3242,6 +3330,7 @@ function updateWebAutomod(payload) {
     "nicknameFilterEnabled",
     "scamFilterEnabled",
     "evasionFilterEnabled",
+    "aiModerationEnabled",
     "escalationEnabled",
     "emojiSpamEnabled"
   ];
@@ -3252,7 +3341,8 @@ function updateWebAutomod(payload) {
     maxAttachmentSizeMb: [1, 100],
     raidJoinThreshold: [2, 100],
     warnThreshold: [1, 20],
-    timeoutThreshold: [1, 20]
+    timeoutThreshold: [1, 20],
+    aiModerationThreshold: [1, 100]
   };
 
   const durationRules = [
@@ -3317,6 +3407,10 @@ function updateWebAutomod(payload) {
   if (Object.prototype.hasOwnProperty.call(payload, "raidAction")) {
     const raidAction = String(payload.raidAction || "").trim().toLowerCase();
     config.automod.raidAction = ["log", "timeout"].includes(raidAction) ? raidAction : "log";
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "aiModerationModel")) {
+    const model = String(payload.aiModerationModel || "").trim();
+    config.automod.aiModerationModel = model.slice(0, 80) || "omni-moderation-latest";
   }
 
   saveConfig();
@@ -7014,6 +7108,12 @@ client.on("messageCreate", async message => {
 
     if (config.automod.spam && trackSpam(message)) {
       await handleAutoModViolation(message, "please slow down and avoid spam.", "spam");
+      return;
+    }
+
+    const aiMatch = await detectAiModerationIssue(message);
+    if (aiMatch) {
+      await handleAutoModViolation(message, aiMatch.reason, aiMatch.actionLabel, aiMatch.details);
     }
   } catch (error) {
     console.error("messageCreate error:", error);

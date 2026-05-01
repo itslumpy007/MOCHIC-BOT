@@ -22,6 +22,7 @@ WEB_ADMIN_TOKEN=
 WEB_BASE_URL=
 DISCORD_CLIENT_SECRET=
 SESSION_SECRET=
+OPENAI_API_KEY=
 VERIFY_CHANNEL_ID=
 RULES_CHANNEL_ID=
 LOG_CHANNEL_ID=
@@ -55,6 +56,7 @@ The bot serves a web dashboard from the same Node process.
 - The website can view runtime status, cases, warnings, notes, settings, AutoMod toggles, rule limits, lists, exemptions, rule actions, and member profiles.
 - Staff can search members and run web moderation actions including warn, note, timeout, mute, unmute, clear warnings, kick, ban, and tempban. Risky actions ask for browser confirmation.
 - Records include case filters and a unified timeline. AutoMod includes duration and age-gate controls for escalation, raids, links, and attachments.
+- Optional AI moderation can be enabled from the AutoMod tab after setting `OPENAI_API_KEY`. AI review starts as alert-only via the `ai-review` rule and appears in the AI Review tab and AutoMod cases.
 
 ### Railway
 

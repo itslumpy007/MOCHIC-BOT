@@ -21,6 +21,7 @@
           <button class="tab is-active" data-view="overview" type="button">Overview</button>
           <button class="tab" data-view="members" type="button">Members</button>
           <button class="tab" data-view="automod" type="button">AutoMod</button>
+          <button class="tab" data-view="ai" type="button">AI Review</button>
           <button class="tab" data-view="settings" type="button">Settings</button>
           <button class="tab" data-view="staff" type="button">Staff</button>
           <button class="tab" data-view="records" type="button">Records</button>
@@ -164,6 +165,15 @@
             </section>
             <section class="panel">
               <div class="panel-header">
+                <h3>AI Moderation</h3>
+              </div>
+              <div class="form-grid" id="aiFields"></div>
+            </section>
+          </div>
+
+          <div class="split">
+            <section class="panel">
+              <div class="panel-header">
                 <h3>Lists</h3>
               </div>
               <div class="stacked-fields" id="listFields"></div>
@@ -193,6 +203,15 @@
               <label>Warn rules<textarea id="warnRules" rows="4"></textarea></label>
               <label>Timeout rules<textarea id="timeoutRules" rows="4"></textarea></label>
             </div>
+          </section>
+        </section>
+
+        <section id="aiView" class="view">
+          <section class="panel">
+            <div class="panel-header">
+              <h3>AI Review Queue</h3>
+            </div>
+            <div id="aiReviewList" class="event-list"></div>
           </section>
         </section>
 

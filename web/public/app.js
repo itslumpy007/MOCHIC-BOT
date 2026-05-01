@@ -13,6 +13,7 @@ const titles = {
   overview: "Overview",
   members: "Members",
   automod: "AutoMod",
+  ai: "AI Review",
   settings: "Settings",
   staff: "Staff",
   records: "Records"
@@ -39,6 +40,7 @@ const automodSwitchLabels = {
   nicknameFilterEnabled: "Nickname filter",
   scamFilterEnabled: "Scam filter",
   evasionFilterEnabled: "Evasion filter",
+  aiModerationEnabled: "AI moderation",
   escalationEnabled: "Escalation",
   emojiSpamEnabled: "Emoji spam"
 };
@@ -49,7 +51,12 @@ const limitLabels = {
   maxAttachmentSizeMb: "Attachment MB limit",
   raidJoinThreshold: "Raid threshold",
   warnThreshold: "Warn threshold",
-  timeoutThreshold: "Timeout threshold"
+  timeoutThreshold: "Timeout threshold",
+  aiModerationThreshold: "AI threshold %"
+};
+
+const aiModerationLabels = {
+  aiModerationModel: "AI moderation model"
 };
 
 const durationLabels = {
@@ -95,6 +102,7 @@ const automodPresets = {
     nicknameFilterEnabled: false,
     scamFilterEnabled: true,
     evasionFilterEnabled: true,
+    aiModerationEnabled: false,
     emojiSpamEnabled: false,
     escalationEnabled: true,
     maxMentions: 8,
@@ -119,6 +127,7 @@ const automodPresets = {
     nicknameFilterEnabled: false,
     scamFilterEnabled: true,
     evasionFilterEnabled: true,
+    aiModerationEnabled: false,
     emojiSpamEnabled: true,
     escalationEnabled: true,
     maxMentions: 5,
@@ -146,6 +155,7 @@ const automodPresets = {
     nicknameFilterEnabled: true,
     scamFilterEnabled: true,
     evasionFilterEnabled: true,
+    aiModerationEnabled: true,
     emojiSpamEnabled: true,
     escalationEnabled: true,
     maxMentions: 4,
@@ -353,6 +363,13 @@ function renderAutomod() {
       </label>
     `).join("");
 
+  $("#aiFields").innerHTML = Object.entries(aiModerationLabels)
+    .map(([key, label]) => `
+      <label>${label}
+        <input data-automod-string="${key}" value="${escapeHtml(automod[key] || "")}" placeholder="omni-moderation-latest">
+      </label>
+    `).join("");
+
   $("#listFields").innerHTML = Object.entries(listLabels)
     .map(([key, label]) => `
       <label>${label}
@@ -390,7 +407,8 @@ function renderAutomodSummary(automod) {
     ["Enabled", `${enabledRules}/${totalRules}`],
     ["Detections", analytics.totalDetections || 0],
     ["Top Rule", topRule ? `${topRule[0]} (${topRule[1]})` : "None"],
-    ["Raid Action", automod.raidAction || "log"]
+    ["Raid Action", automod.raidAction || "log"],
+    ["AI", automod.aiModerationEnabled ? `${automod.aiModerationThreshold || 70}%` : "Off"]
   ];
 
   $("#automodSummary").innerHTML = summary
@@ -447,6 +465,32 @@ function renderRecords() {
 
   $("#warningsList").innerHTML = renderRecordMap(state.warnings, "warning");
   $("#timelineList").innerHTML = renderTimeline(filteredCases);
+}
+
+function getCaseDetail(entry, name) {
+  return (entry.details || []).find(detail => detail.name === name)?.value || "";
+}
+
+function renderAiReview() {
+  const aiCases = (state.cases || [])
+    .filter(entry => entry.action === "automod:ai-review")
+    .slice(0, 80);
+
+  $("#aiReviewList").innerHTML = aiCases.length
+    ? aiCases.map(entry => {
+        const category = getCaseDetail(entry, "AI Category");
+        const confidence = getCaseDetail(entry, "AI Confidence");
+        const channel = getCaseDetail(entry, "Channel");
+        const message = getCaseDetail(entry, "Message");
+        return `
+          <article class="event">
+            <strong>#${escapeHtml(entry.id)} ${escapeHtml(entry.targetTag || entry.targetId)} <span class="badge">${escapeHtml(category || "AI")}</span> <span class="badge">${escapeHtml(confidence || "")}</span></strong>
+            <p>${escapeHtml(formatDate(entry.createdAt))}<br>${escapeHtml(entry.reason || "No reason")}<br>${escapeHtml(channel)}</p>
+            <p>${escapeHtml(message || "No message text")}</p>
+          </article>
+        `;
+      }).join("")
+    : renderEmptyState("No AI reviews", "AI moderation has not flagged any messages.");
 }
 
 function formatDate(value) {
@@ -667,6 +711,7 @@ function renderAll() {
   renderRuntime();
   renderRecentViolations();
   renderAutomod();
+  renderAiReview();
   renderSettings();
   renderStaff();
   renderRecords();
