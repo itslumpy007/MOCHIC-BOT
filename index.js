@@ -67,6 +67,9 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel, Partials.Reaction]
 });
 
+let webServer = null;
+let shuttingDown = false;
+
 const COLORS = {
   pink: 0xffb6d9,
   rose: 0xff8fb1,
@@ -4540,6 +4543,27 @@ function startWebServer() {
   server.on("error", error => {
     console.error("Web moderation panel error:", error.message);
   });
+
+  webServer = server;
+}
+
+async function shutdownProcess(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  console.log(`Received ${signal}; shutting down cleanly.`);
+
+  if (webServer) {
+    await new Promise(resolve => {
+      webServer.close(() => resolve());
+    }).catch(() => {});
+  }
+
+  if (client && !client.destroyed) {
+    client.destroy();
+  }
+
+  process.exit(0);
 }
 
 client.once("clientReady", async () => {
@@ -7950,6 +7974,20 @@ process.on("unhandledRejection", error => {
 
 process.on("uncaughtException", error => {
   console.error("Uncaught exception:", error);
+});
+
+process.on("SIGTERM", () => {
+  shutdownProcess("SIGTERM").catch(error => {
+    console.error("Shutdown error:", error.message || error);
+    process.exit(1);
+  });
+});
+
+process.on("SIGINT", () => {
+  shutdownProcess("SIGINT").catch(error => {
+    console.error("Shutdown error:", error.message || error);
+    process.exit(1);
+  });
 });
 
 try {
