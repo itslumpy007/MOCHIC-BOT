@@ -5,6 +5,7 @@ const state = {
   config: null,
   aiReviews: {},
   selectedMember: null,
+  memberAiSummary: null,
   cases: [],
   warnings: {},
   notes: {}
@@ -609,6 +610,7 @@ function renderMemberProfile() {
   const member = state.selectedMember;
   if (!member) {
     $("#memberProfile").innerHTML = "Search for a member to load their moderation profile.";
+    $("#memberAiSummary").innerHTML = "";
     $("#memberCases").innerHTML = "";
     $("#memberSignals").innerHTML = "";
     return;
@@ -663,6 +665,51 @@ function renderMemberProfile() {
       </article>
     `).join("")
     : renderEmptyState("No warnings or notes", "This member has no saved signals.");
+
+  renderMemberAiSummary();
+}
+
+function renderMemberAiSummary() {
+  const summary = state.memberAiSummary;
+  if (!summary) {
+    $("#memberAiSummary").innerHTML = "";
+    return;
+  }
+
+  const canUseSuggestion = ["note", "warn", "timeout"].includes(summary.suggestedAction);
+  $("#memberAiSummary").innerHTML = `
+    <article class="event ai-summary-card">
+      <strong>AI Risk: ${escapeHtml(summary.riskLevel)} <span class="badge">${escapeHtml(summary.confidence)}%</span></strong>
+      <p>${escapeHtml(summary.summary)}</p>
+      <p>${(summary.patterns || []).map(item => escapeHtml(item)).join("<br>") || "No clear pattern."}</p>
+      <p>Suggested: ${escapeHtml(summary.suggestedAction)}<br>${escapeHtml(summary.suggestedReason || "")}</p>
+      ${canUseSuggestion ? `<button id="useAiSuggestionButton" class="ghost-button" type="button">Use Suggestion</button>` : ""}
+    </article>
+  `;
+
+  $("#useAiSuggestionButton")?.addEventListener("click", () => {
+    $("#memberAction").value = summary.suggestedAction;
+    $("#memberActionReason").value = summary.suggestedReason || "";
+    if (summary.suggestedAction === "timeout") {
+      $("#memberActionDuration").value = summary.timeoutDuration || "10m";
+    }
+    localStorage.setItem(storageKeys.memberAction, $("#memberAction").value);
+    setAlert("AI suggestion loaded into the moderation form. Review it before applying.");
+  });
+}
+
+async function loadMemberAiSummary() {
+  if (!state.selectedMember) {
+    setAlert("Search for a member first.", "error");
+    return;
+  }
+
+  $("#memberAiSummary").innerHTML = renderEmptyState("Building summary", "Reviewing this member's moderation history.");
+  const payload = await api(`/api/member-ai-summary?query=${encodeURIComponent(state.selectedMember.id)}`);
+  state.selectedMember = payload.member || state.selectedMember;
+  state.memberAiSummary = payload.summary;
+  renderMemberAiSummary();
+  setAlert("");
 }
 
 async function searchMember() {
@@ -675,6 +722,7 @@ async function searchMember() {
   localStorage.setItem(storageKeys.lastMemberSearch, query);
   const payload = await api(`/api/member?query=${encodeURIComponent(query)}`);
   state.selectedMember = payload.member;
+  state.memberAiSummary = null;
   renderMemberProfile();
   setAlert("");
 }
@@ -909,6 +957,7 @@ function bindEvents() {
     button.addEventListener("click", () => applyAutomodPreset(button.dataset.automodPreset));
   });
   $("#memberSearchButton").addEventListener("click", () => searchMember().catch(error => setAlert(error.message, "error")));
+  $("#memberAiSummaryButton").addEventListener("click", () => loadMemberAiSummary().catch(error => setAlert(error.message, "error")));
   $("#memberActionButton").addEventListener("click", () => applyMemberAction().catch(error => setAlert(error.message, "error")));
   $("#memberAction").addEventListener("change", () => {
     localStorage.setItem(storageKeys.memberAction, $("#memberAction").value);

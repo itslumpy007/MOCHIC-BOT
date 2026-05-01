@@ -572,6 +572,10 @@ button:active,
   min-width: 0;
 }
 
+.ai-summary-card .ghost-button {
+  margin-top: 10px;
+}
+
 .status-dot {
   width: 8px;
   height: 8px;

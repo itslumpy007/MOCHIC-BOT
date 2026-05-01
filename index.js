@@ -53,6 +53,7 @@ const WEB_BASE_URL = (process.env.WEB_BASE_URL || "").replace(/\/$/, "");
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || "";
 const SESSION_SECRET = process.env.SESSION_SECRET || WEB_ADMIN_TOKEN || "";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+const OPENAI_SUMMARY_MODEL = process.env.OPENAI_SUMMARY_MODEL || "gpt-4o-mini";
 const webPublicDir = path.join(__dirname, "web", "public");
 
 const client = new Client({
@@ -3783,6 +3784,130 @@ async function handleWebAiReviewAction(auth, payload) {
   return { status, entry: result.entry };
 }
 
+function getResponseOutputText(payload) {
+  if (typeof payload?.output_text === "string") return payload.output_text;
+  const message = (payload?.output || []).find(item => item.type === "message");
+  const textItem = (message?.content || []).find(item => item.type === "output_text" && typeof item.text === "string");
+  return textItem?.text || "";
+}
+
+function buildMemberSummaryInput(memberPayload) {
+  return {
+    member: {
+      id: memberPayload.id,
+      tag: memberPayload.tag,
+      inGuild: memberPayload.inGuild,
+      joinedAt: memberPayload.joinedAt,
+      createdAt: memberPayload.createdAt,
+      timeoutUntil: memberPayload.timeoutUntil,
+      counts: memberPayload.counts
+    },
+    recentCases: (memberPayload.cases || []).slice(0, 15).map(entry => ({
+      id: entry.id,
+      action: entry.action,
+      reason: entry.reason,
+      moderatorTag: entry.moderatorTag,
+      createdAt: entry.createdAt
+    })),
+    recentWarnings: (memberPayload.warnings || []).slice(0, 15).map(entry => ({
+      reason: entry.reason,
+      moderatorTag: entry.moderatorTag,
+      createdAt: entry.createdAt
+    })),
+    recentNotes: (memberPayload.notes || []).slice(0, 10).map(entry => ({
+      content: entry.content,
+      moderatorTag: entry.moderatorTag,
+      createdAt: entry.createdAt
+    }))
+  };
+}
+
+async function buildWebMemberAiSummary(auth, query) {
+  if (!hasWebAccess(auth, "mod")) {
+    throw new Error("Moderator web access is required.");
+  }
+  if (!OPENAI_API_KEY) {
+    throw new Error("OPENAI_API_KEY is required for AI member summaries.");
+  }
+
+  const { member, user } = await resolveWebMember(query);
+  const memberPayload = serializeWebMember(member, user);
+  const input = buildMemberSummaryInput(memberPayload);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: OPENAI_SUMMARY_MODEL,
+        input: [
+          {
+            role: "system",
+            content:
+              "You assist Discord moderators. Summarize only the provided moderation record. " +
+              "Do not invent evidence. Prefer human review for ambiguous or severe decisions."
+          },
+          {
+            role: "user",
+            content: `Create a concise moderation risk summary for this member JSON:\n${JSON.stringify(input)}`
+          }
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "member_risk_summary",
+            strict: true,
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                riskLevel: { type: "string", enum: ["low", "medium", "high", "critical"] },
+                confidence: { type: "integer" },
+                summary: { type: "string" },
+                patterns: { type: "array", items: { type: "string" } },
+                suggestedAction: { type: "string", enum: ["none", "note", "warn", "timeout", "review"] },
+                suggestedReason: { type: "string" },
+                timeoutDuration: { type: "string" }
+              },
+              required: [
+                "riskLevel",
+                "confidence",
+                "summary",
+                "patterns",
+                "suggestedAction",
+                "suggestedReason",
+                "timeoutDuration"
+              ]
+            }
+          }
+        }
+      }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      throw new Error(`AI summary request failed (${response.status}): ${errorText.slice(0, 200)}`);
+    }
+
+    const payload = await response.json();
+    const text = getResponseOutputText(payload);
+    if (!text) throw new Error("AI summary returned no text.");
+
+    return {
+      member: memberPayload,
+      summary: JSON.parse(text)
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function getWebMimeType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   return {
@@ -3859,6 +3984,12 @@ async function handleWebApi(req, res, pathname) {
     const requestUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     const { member, user } = await resolveWebMember(requestUrl.searchParams.get("query"));
     return sendWebJson(res, 200, { member: serializeWebMember(member, user) });
+  }
+
+  if (req.method === "GET" && pathname === "/api/member-ai-summary") {
+    const requestUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    const result = await buildWebMemberAiSummary(auth, requestUrl.searchParams.get("query"));
+    return sendWebJson(res, 200, result);
   }
 
   if (req.method === "POST" && pathname === "/api/member-action") {
