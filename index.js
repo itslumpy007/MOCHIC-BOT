@@ -189,6 +189,10 @@ function createDefaultConfig() {
       aiCustomRulesModel: "gpt-4o-mini",
       aiCustomRulesThreshold: 75,
       aiCustomRules: "",
+      aiCustomInstructions: "",
+      aiMinMessageLength: 4,
+      aiIncludeRecentContext: false,
+      aiContextMessageCount: 3,
       scamPhraseList: [],
       alertOnlyRules: ["ai-review"],
       ruleActions: {},
@@ -526,6 +530,11 @@ function getAiModerationModel() {
   return String(config.automod.aiModerationModel || "omni-moderation-latest").trim() || "omni-moderation-latest";
 }
 
+function getAiMinMessageLength() {
+  const length = Number(config.automod.aiMinMessageLength);
+  return Number.isInteger(length) ? Math.max(1, Math.min(500, length)) : 4;
+}
+
 function getAiCustomRulesThreshold() {
   const threshold = Number(config.automod.aiCustomRulesThreshold);
   if (!Number.isFinite(threshold)) return 0.75;
@@ -534,6 +543,15 @@ function getAiCustomRulesThreshold() {
 
 function getAiCustomRulesModel() {
   return String(config.automod.aiCustomRulesModel || "gpt-4o-mini").trim() || "gpt-4o-mini";
+}
+
+function getAiCustomInstructions() {
+  return String(config.automod.aiCustomInstructions || "").trim().slice(0, 2000);
+}
+
+function getAiContextMessageCount() {
+  const count = Number(config.automod.aiContextMessageCount);
+  return Number.isInteger(count) ? Math.max(1, Math.min(10, count)) : 3;
 }
 
 function getTopModerationCategory(result) {
@@ -547,7 +565,7 @@ async function detectAiModerationIssue(message) {
   if (!OPENAI_API_KEY || !config.automod.aiModerationEnabled) return null;
 
   const content = String(message.content || "").trim();
-  if (!content || content.length < 4) return null;
+  if (!content || content.length < getAiMinMessageLength()) return null;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 6000);
@@ -606,7 +624,12 @@ async function detectAiCustomRuleIssue(message) {
 
   const rules = String(config.automod.aiCustomRules || "").trim();
   const content = String(message.content || "").trim();
-  if (!rules || !content || content.length < 4) return null;
+  if (!rules || !content || content.length < getAiMinMessageLength()) return null;
+
+  const recentContext = config.automod.aiIncludeRecentContext
+    ? await getRecentMessagesForUser(message.channel, message.author.id, getAiContextMessageCount()).catch(() => [])
+    : [];
+  const extraInstructions = getAiCustomInstructions();
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 9000);
@@ -625,12 +648,14 @@ async function detectAiCustomRuleIssue(message) {
             role: "system",
             content:
               "You classify Discord messages against server-specific rules. " +
-              "Use only the supplied rules and message. Do not flag ambiguous jokes or harmless chat."
+              "Use only the supplied rules, guidance, and message context. Do not flag ambiguous jokes or harmless chat."
           },
           {
             role: "user",
             content:
               `Server rules:\n${rules.slice(0, 4000)}\n\n` +
+              `Extra moderator guidance:\n${extraInstructions || "None"}\n\n` +
+              `Recent context from same user:\n${recentContext.length ? recentContext.join("\n") : "None"}\n\n` +
               `Message from ${message.author.tag} in #${message.channel?.name || "unknown"}:\n${content.slice(0, 2000)}`
           }
         ],
@@ -3387,6 +3412,7 @@ function buildWebDashboardPayload() {
       evasionFilterEnabled: config.automod.evasionFilterEnabled,
       aiModerationEnabled: config.automod.aiModerationEnabled,
       aiCustomRulesEnabled: config.automod.aiCustomRulesEnabled,
+      aiIncludeRecentContext: config.automod.aiIncludeRecentContext,
       escalationEnabled: config.automod.escalationEnabled,
       emojiSpamEnabled: config.automod.emojiSpamEnabled
     },
@@ -3456,6 +3482,7 @@ function updateWebAutomod(payload) {
     "evasionFilterEnabled",
     "aiModerationEnabled",
     "aiCustomRulesEnabled",
+    "aiIncludeRecentContext",
     "escalationEnabled",
     "emojiSpamEnabled"
   ];
@@ -3468,7 +3495,9 @@ function updateWebAutomod(payload) {
     warnThreshold: [1, 20],
     timeoutThreshold: [1, 20],
     aiModerationThreshold: [1, 100],
-    aiCustomRulesThreshold: [1, 100]
+    aiCustomRulesThreshold: [1, 100],
+    aiMinMessageLength: [1, 500],
+    aiContextMessageCount: [1, 10]
   };
 
   const durationRules = [
@@ -3544,6 +3573,9 @@ function updateWebAutomod(payload) {
   }
   if (Object.prototype.hasOwnProperty.call(payload, "aiCustomRules")) {
     config.automod.aiCustomRules = String(payload.aiCustomRules || "").trim().slice(0, 4000);
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "aiCustomInstructions")) {
+    config.automod.aiCustomInstructions = String(payload.aiCustomInstructions || "").trim().slice(0, 2000);
   }
 
   saveConfig();

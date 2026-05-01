@@ -59,6 +59,7 @@ The bot serves a web dashboard from the same Node process.
 - Records include case filters and a unified timeline. AutoMod includes duration and age-gate controls for escalation, raids, links, and attachments.
 - Optional AI moderation can be enabled from the AutoMod tab after setting `OPENAI_API_KEY`. AI review starts as alert-only via the `ai-review` rule and appears in the AI Review tab and AutoMod cases.
 - AI custom server rules can be added in the AutoMod lists section. When enabled, they flag server-specific rule issues into the same AI Review queue.
+- AI moderation settings include thresholds, minimum message length, optional recent-message context, and extra moderator guidance.
 - Member profiles include an optional AI risk summary after `OPENAI_API_KEY` is configured. The summary can fill the moderation form, but staff still apply actions manually.
 
 ### Railway

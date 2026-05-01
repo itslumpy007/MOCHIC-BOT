@@ -44,6 +44,7 @@ const automodSwitchLabels = {
   evasionFilterEnabled: "Evasion filter",
   aiModerationEnabled: "AI moderation",
   aiCustomRulesEnabled: "AI custom rules",
+  aiIncludeRecentContext: "AI recent context",
   escalationEnabled: "Escalation",
   emojiSpamEnabled: "Emoji spam"
 };
@@ -54,14 +55,24 @@ const limitLabels = {
   maxAttachmentSizeMb: "Attachment MB limit",
   raidJoinThreshold: "Raid threshold",
   warnThreshold: "Warn threshold",
-  timeoutThreshold: "Timeout threshold",
+  timeoutThreshold: "Timeout threshold"
+};
+
+const aiNumberLabels = {
   aiModerationThreshold: "AI threshold %",
-  aiCustomRulesThreshold: "Custom rules threshold %"
+  aiCustomRulesThreshold: "Custom rules threshold %",
+  aiMinMessageLength: "Minimum message length",
+  aiContextMessageCount: "Recent context count"
 };
 
 const aiModerationLabels = {
   aiModerationModel: "AI moderation model",
   aiCustomRulesModel: "Custom rules model"
+};
+
+const aiTextareaLabels = {
+  aiCustomRules: "AI custom server rules",
+  aiCustomInstructions: "Extra AI moderator guidance"
 };
 
 const durationLabels = {
@@ -82,8 +93,7 @@ const listLabels = {
   allowedDomains: "Allowed domains",
   blockedDomains: "Blocked domains",
   allowedAttachmentExtensions: "Allowed extensions",
-  blockedAttachmentExtensions: "Blocked extensions",
-  aiCustomRules: "AI custom server rules"
+  blockedAttachmentExtensions: "Blocked extensions"
 };
 
 const settingLabels = {
@@ -110,6 +120,7 @@ const automodPresets = {
     evasionFilterEnabled: true,
     aiModerationEnabled: false,
     aiCustomRulesEnabled: false,
+    aiIncludeRecentContext: false,
     emojiSpamEnabled: false,
     escalationEnabled: true,
     maxMentions: 8,
@@ -136,6 +147,7 @@ const automodPresets = {
     evasionFilterEnabled: true,
     aiModerationEnabled: false,
     aiCustomRulesEnabled: false,
+    aiIncludeRecentContext: false,
     emojiSpamEnabled: true,
     escalationEnabled: true,
     maxMentions: 5,
@@ -165,6 +177,7 @@ const automodPresets = {
     evasionFilterEnabled: true,
     aiModerationEnabled: true,
     aiCustomRulesEnabled: true,
+    aiIncludeRecentContext: true,
     emojiSpamEnabled: true,
     escalationEnabled: true,
     maxMentions: 4,
@@ -379,10 +392,24 @@ function renderAutomod() {
       </label>
     `).join("");
 
+  $("#aiAdvancedFields").innerHTML = Object.entries(aiNumberLabels)
+    .map(([key, label]) => `
+      <label>${label}
+        <input type="number" data-automod-number="${key}" value="${escapeHtml(automod[key] ?? "")}">
+      </label>
+    `).join("");
+
+  $("#aiInstructionFields").innerHTML = Object.entries(aiTextareaLabels)
+    .map(([key, label]) => `
+      <label>${label}
+        <textarea data-automod-string="${key}" rows="${key === "aiCustomRules" ? "8" : "5"}">${escapeHtml(automod[key] || "")}</textarea>
+      </label>
+    `).join("");
+
   $("#listFields").innerHTML = Object.entries(listLabels)
     .map(([key, label]) => `
       <label>${label}
-        <textarea data-automod-list="${key}" rows="${key === "aiCustomRules" ? "8" : "4"}">${escapeHtml(Array.isArray(automod[key]) ? automod[key].join(", ") : automod[key] || "")}</textarea>
+        <textarea data-automod-list="${key}" rows="4">${escapeHtml((automod[key] || []).join(", "))}</textarea>
       </label>
     `).join("");
 
@@ -417,7 +444,8 @@ function renderAutomodSummary(automod) {
     ["Detections", analytics.totalDetections || 0],
     ["Top Rule", topRule ? `${topRule[0]} (${topRule[1]})` : "None"],
     ["Raid Action", automod.raidAction || "log"],
-    ["AI", automod.aiModerationEnabled ? `${automod.aiModerationThreshold || 70}%` : "Off"]
+    ["AI", automod.aiModerationEnabled ? `${automod.aiModerationThreshold || 70}%` : "Off"],
+    ["Custom AI", automod.aiCustomRulesEnabled ? `${automod.aiCustomRulesThreshold || 75}%` : "Off"]
   ];
 
   $("#automodSummary").innerHTML = summary
