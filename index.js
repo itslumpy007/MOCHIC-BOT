@@ -414,6 +414,46 @@ function normalizeBypassText(content) {
   return normalizeComparisonText(content).replace(/[^a-z0-9]/g, "");
 }
 
+function escapeRegExp(value) {
+  return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasAlphaNumeric(value) {
+  return /[\p{L}\p{N}]/u.test(value);
+}
+
+function buildBoundaryPattern(term) {
+  const normalized = normalizeComparisonText(term).trim().replace(/\s+/g, " ");
+  if (!normalized) return null;
+
+  const escaped = escapeRegExp(normalized).replace(/\\ /g, "\\s+");
+  const start = hasAlphaNumeric(normalized[0]) ? "(^|[^\\p{L}\\p{N}_])" : "(^|\\s)";
+  const end = hasAlphaNumeric(normalized[normalized.length - 1]) ? "($|[^\\p{L}\\p{N}_])" : "($|\\s)";
+  return new RegExp(`${start}${escaped}${end}`, "iu");
+}
+
+function findBannedWordMatch(content) {
+  const normalizedContent = normalizeComparisonText(content).replace(/\s+/g, " ");
+  return getBannedWords().find(term => {
+    const pattern = buildBoundaryPattern(term);
+    return pattern ? pattern.test(normalizedContent) : false;
+  }) || null;
+}
+
+function findBypassBannedWordMatch(content) {
+  if (!config.automod.bannedWords) return null;
+  if (findBannedWordMatch(content)) return null;
+
+  const normalized = normalizeBypassText(content);
+  if (!normalized) return null;
+
+  return getBannedWords().find(term => {
+    const normalizedTerm = normalizeBypassText(term);
+    if (!normalizedTerm || normalizedTerm.length < 4) return false;
+    return normalized.includes(normalizedTerm);
+  }) || null;
+}
+
 function countEmoji(content) {
   if (!content) return 0;
   const customMatches = content.match(/<a?:\w+:\d+>/g) || [];
@@ -505,10 +545,7 @@ function detectBypassAttempt(content) {
     };
   }
 
-  const blockedWord = getBannedWords().find(term => {
-    const normalizedTerm = normalizeBypassText(term);
-    return normalizedTerm && normalized.includes(normalizedTerm);
-  });
+  const blockedWord = findBypassBannedWordMatch(content);
 
   if (blockedWord) {
     return {
@@ -7449,11 +7486,9 @@ client.on("messageCreate", async message => {
       return;
     }
 
-    if (
-      config.automod.bannedWords &&
-      getBannedWords().some(word => message.content.toLowerCase().includes(word))
-    ) {
-      await handleAutoModViolation(message, "that phrase is not allowed here.", "banned-word");
+    const bannedWordMatch = config.automod.bannedWords ? findBannedWordMatch(message.content) : null;
+    if (bannedWordMatch) {
+      await handleAutoModViolation(message, `that phrase is not allowed here (${bannedWordMatch}).`, "banned-word");
       return;
     }
 
