@@ -141,6 +141,7 @@ const pendingPanelActions = new Map();
 const webSessions = new Map();
 const webOauthStates = new Map();
 let tempBanInterval = null;
+let scheduledReportInterval = null;
 
 const dataDir = path.join(__dirname, "data");
 const configPath = path.join(dataDir, "config.json");
@@ -151,6 +152,21 @@ function createDefaultConfig() {
     warnings: {},
     notes: {},
     cases: [],
+    appeals: [],
+    nextAppealId: 1,
+    auditLog: [],
+    modTemplates: [
+      { label: "Spam", action: "warn", duration: "", reason: "Please stop spamming or repeating messages." },
+      { label: "Harassment", action: "warn", duration: "", reason: "Harassment or targeted insults are not allowed." },
+      { label: "Scam link", action: "timeout", duration: "1h", reason: "Suspicious or scam links are not allowed." }
+    ],
+    channelProfiles: "",
+    reportSettings: {
+      enabled: false,
+      channelId: null,
+      frequency: "daily",
+      lastSentAt: null
+    },
     aiReviews: {},
     tempBans: [],
     nextCaseId: 1,
@@ -244,6 +260,14 @@ function loadConfig() {
       warnings: parsed.warnings && typeof parsed.warnings === "object" ? parsed.warnings : {},
       notes: parsed.notes && typeof parsed.notes === "object" ? parsed.notes : {},
       cases: Array.isArray(parsed.cases) ? parsed.cases : [],
+      appeals: Array.isArray(parsed.appeals) ? parsed.appeals : [],
+      auditLog: Array.isArray(parsed.auditLog) ? parsed.auditLog.slice(-200) : [],
+      modTemplates: Array.isArray(parsed.modTemplates) ? parsed.modTemplates : defaults.modTemplates,
+      channelProfiles: typeof parsed.channelProfiles === "string" ? parsed.channelProfiles : "",
+      reportSettings: {
+        ...defaults.reportSettings,
+        ...(parsed.reportSettings || {})
+      },
       aiReviews: parsed.aiReviews && typeof parsed.aiReviews === "object" ? parsed.aiReviews : {},
       tempBans: Array.isArray(parsed.tempBans) ? parsed.tempBans : [],
       automod: {
@@ -283,7 +307,8 @@ function loadConfig() {
         modRoleIds: Array.isArray(parsed.permissions?.modRoleIds) ? parsed.permissions.modRoleIds : [],
         adminRoleIds: Array.isArray(parsed.permissions?.adminRoleIds) ? parsed.permissions.adminRoleIds : []
       },
-      nextCaseId: Number.isInteger(parsed.nextCaseId) ? parsed.nextCaseId : defaults.nextCaseId
+      nextCaseId: Number.isInteger(parsed.nextCaseId) ? parsed.nextCaseId : defaults.nextCaseId,
+      nextAppealId: Number.isInteger(parsed.nextAppealId) ? parsed.nextAppealId : defaults.nextAppealId
     };
   } catch (error) {
     console.error("Failed to load config, using defaults:", error.message);
@@ -300,6 +325,18 @@ if (!config.automod.ruleActions?.["ai-review"] && !config.automod.alertOnlyRules
 function saveConfig() {
   fs.mkdirSync(dataDir, { recursive: true });
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+}
+
+function recordAuditLog(actorTag, action, details = {}) {
+  if (!Array.isArray(config.auditLog)) config.auditLog = [];
+  config.auditLog.push({
+    actorTag: actorTag || "System",
+    action,
+    details,
+    createdAt: new Date().toISOString()
+  });
+  config.auditLog = config.auditLog.slice(-200);
+  saveConfig();
 }
 
 function getVerifyChannelId() {
@@ -1884,6 +1921,39 @@ function getCasesForUser(userId) {
   return config.cases.filter(entry => entry.targetId === userId);
 }
 
+function calculateUserRisk(userId) {
+  const warnings = getWarnings(userId).length;
+  const cases = getCasesForUser(userId);
+  const now = Date.now();
+  const recentCases = cases.filter(entry => now - new Date(entry.createdAt).getTime() <= 7 * 24 * 60 * 60 * 1000);
+  const aiFlags = cases.filter(entry => entry.action === "automod:ai-review").length;
+  const severeCases = cases.filter(entry => ["ban", "tempban", "kick", "timeout", "automod:timeout"].includes(entry.action)).length;
+  const score = Math.min(100, warnings * 10 + recentCases.length * 8 + aiFlags * 6 + severeCases * 12);
+  const strikes = Math.floor(score / 25);
+  const level = score >= 75 ? "high" : score >= 40 ? "medium" : score > 0 ? "low" : "clear";
+  return { score, strikes, level, warnings, cases: cases.length, recentCases: recentCases.length, aiFlags };
+}
+
+function buildRiskLeaderboard(limit = 10) {
+  const userIds = new Set([
+    ...Object.keys(config.warnings || {}),
+    ...(config.cases || []).map(entry => entry.targetId).filter(Boolean)
+  ]);
+  return [...userIds]
+    .map(userId => {
+      const risk = calculateUserRisk(userId);
+      const latestCase = getCasesForUser(userId).slice(-1)[0];
+      return {
+        userId,
+        tag: latestCase?.targetTag || userId,
+        ...risk
+      };
+    })
+    .filter(entry => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
 function getCaseById(caseId) {
   return config.cases.find(entry => entry.id === caseId) || null;
 }
@@ -2081,6 +2151,50 @@ async function processExpiredTempBans() {
 
     removeTempBan(entry.userId);
   }
+}
+
+function shouldSendScheduledReport() {
+  const settings = config.reportSettings || {};
+  if (!settings.enabled || !settings.channelId) return false;
+  const last = settings.lastSentAt ? new Date(settings.lastSentAt).getTime() : 0;
+  const interval = settings.frequency === "weekly" ? 7 * 24 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+  return Date.now() - last >= interval;
+}
+
+async function sendScheduledModReport() {
+  if (!client.isReady() || !shouldSendScheduledReport()) return;
+  const settings = config.reportSettings;
+  const channel = await client.channels.fetch(settings.channelId).catch(() => null);
+  if (!channel?.send) return;
+
+  const ops = buildWebOpsPayload(true);
+  const analytics = getAutoModAnalytics();
+  await channel.send({
+    embeds: [
+      makeEmbed({
+        title: "Mochi moderation report",
+        description: `Scheduled ${settings.frequency || "daily"} moderation summary.`,
+        color: COLORS.blue,
+        fields: [
+          { name: "Cases", value: `${config.cases.length}`, inline: true },
+          { name: "Open AI Reviews", value: `${ops.openAiReviews}`, inline: true },
+          { name: "AI False Positives", value: `${ops.falsePositiveCount}`, inline: true },
+          { name: "AutoMod Detections", value: `${analytics.totalDetections || 0}`, inline: true },
+          { name: "Top Risk Users", value: ops.riskUsers.slice(0, 5).map(user => `${user.tag}: ${user.score}`).join("\n") || "None", inline: false }
+        ]
+      })
+    ]
+  }).catch(() => null);
+
+  config.reportSettings.lastSentAt = new Date().toISOString();
+  saveConfig();
+}
+
+function startScheduledReports() {
+  if (scheduledReportInterval) clearInterval(scheduledReportInterval);
+  scheduledReportInterval = setInterval(() => {
+    sendScheduledModReport().catch(error => console.error("Scheduled report error:", error.message));
+  }, 15 * 60 * 1000);
 }
 
 function isAutoModExempt(message) {
@@ -3651,6 +3765,88 @@ function updateWebPermissions(payload) {
   return buildWebConfigPayload().permissions;
 }
 
+function parseTemplatesInput(value) {
+  if (Array.isArray(value)) return value;
+  return String(value || "")
+    .split("\n")
+    .map(line => {
+      const [label, action, duration, ...reasonParts] = line.split("|").map(part => part.trim());
+      const reason = reasonParts.join("|").trim();
+      if (!label || !action || !reason) return null;
+      return {
+        label: label.slice(0, 80),
+        action: action.toLowerCase().slice(0, 30),
+        duration: duration || "",
+        reason: reason.slice(0, 500)
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 50);
+}
+
+function updateWebOpsConfig(auth, payload) {
+  config.modTemplates = parseTemplatesInput(payload.modTemplates);
+  config.channelProfiles = String(payload.channelProfiles || "").trim().slice(0, 4000);
+  config.reportSettings = {
+    enabled: envFlag(payload.reportEnabled, false),
+    channelId: String(payload.reportChannelId || "").trim().replace(/[<#>]/g, "") || null,
+    frequency: ["daily", "weekly"].includes(String(payload.reportFrequency || "").trim().toLowerCase())
+      ? String(payload.reportFrequency).trim().toLowerCase()
+      : "daily",
+    lastSentAt: config.reportSettings?.lastSentAt || null
+  };
+  recordAuditLog(getWebModeratorTag(auth), "ops-config-updated", {
+    templates: config.modTemplates.length,
+    reports: config.reportSettings.enabled
+  });
+  return buildWebOpsPayload(true);
+}
+
+function buildWebOpsPayload(includeAdmin = false) {
+  const aiReviewStatuses = Object.values(config.aiReviews || {});
+  const payload = {
+    templates: config.modTemplates || [],
+    riskUsers: buildRiskLeaderboard(12),
+    falsePositiveCount: aiReviewStatuses.filter(entry => entry.status === "dismissed").length,
+    openAiReviews: (config.cases || []).filter(entry => entry.action === "automod:ai-review" && !config.aiReviews?.[String(entry.id)]).length
+  };
+
+  if (includeAdmin) {
+    payload.appeals = config.appeals || [];
+    payload.auditLog = (config.auditLog || []).slice(-100).reverse();
+    payload.channelProfiles = config.channelProfiles || "";
+    payload.reportSettings = config.reportSettings || {};
+  }
+
+  return payload;
+}
+
+function createWebAppeal(auth, payload) {
+  const userId = String(payload.userId || "").trim().replace(/[<@!>]/g, "");
+  const reason = String(payload.reason || "").trim().slice(0, 1000);
+  if (!/^\d{15,25}$/.test(userId)) {
+    throw new Error("A valid user ID is required for an appeal.");
+  }
+  if (!reason) {
+    throw new Error("An appeal reason is required.");
+  }
+
+  const appeal = {
+    id: config.nextAppealId || 1,
+    userId,
+    userTag: String(payload.userTag || userId).trim().slice(0, 100),
+    reason,
+    status: "open",
+    createdBy: getWebModeratorTag(auth),
+    createdAt: new Date().toISOString()
+  };
+  config.nextAppealId = appeal.id + 1;
+  config.appeals.push(appeal);
+  saveConfig();
+  recordAuditLog(getWebModeratorTag(auth), "appeal-created", { appealId: appeal.id, userId });
+  return appeal;
+}
+
 function serializeWebMember(member, user = null) {
   const resolvedUser = user || member?.user || null;
   if (!resolvedUser) return null;
@@ -3686,7 +3882,8 @@ function serializeWebMember(member, user = null) {
       warnings: warnings.length,
       notes: notes.length,
       cases: getCasesForUser(resolvedUser.id).length
-    }
+    },
+    risk: calculateUserRisk(resolvedUser.id)
   };
 }
 
@@ -3935,6 +4132,7 @@ async function handleWebAiReviewAction(auth, payload) {
       moderatorTag,
       note: String(payload.reason || "Dismissed from AI review.").trim().slice(0, 500)
     });
+    recordAuditLog(moderatorTag, "ai-review-dismissed", { caseId, note: status.note });
     return { status };
   }
 
@@ -3962,6 +4160,7 @@ async function handleWebAiReviewAction(auth, payload) {
     action: memberAction,
     actionCaseId: result.entry?.id || null
   });
+  recordAuditLog(moderatorTag, "ai-review-actioned", { caseId, action: memberAction, actionCaseId: result.entry?.id || null });
 
   return { status, entry: result.entry };
 }
@@ -4149,6 +4348,10 @@ async function handleWebApi(req, res, pathname) {
     return sendWebJson(res, 200, buildWebConfigPayload());
   }
 
+  if (req.method === "GET" && pathname === "/api/ops") {
+    return sendWebJson(res, 200, buildWebOpsPayload(hasWebAccess(auth, "admin")));
+  }
+
   if (req.method === "GET" && pathname === "/api/cases") {
     const cases = [...(config.cases || [])].reverse().slice(0, 200);
     return sendWebJson(res, 200, { cases });
@@ -4221,6 +4424,48 @@ async function handleWebApi(req, res, pathname) {
     }
     const body = await readWebJsonBody(req);
     return sendWebJson(res, 200, updateWebRuleActions(body));
+  }
+
+  if (req.method === "POST" && pathname === "/api/ops") {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
+    const body = await readWebJsonBody(req);
+    return sendWebJson(res, 200, updateWebOpsConfig(auth, body));
+  }
+
+  if (req.method === "POST" && pathname === "/api/appeals") {
+    if (!hasWebAccess(auth, "mod")) {
+      return sendWebJson(res, 403, { error: "Moderator web access is required." });
+    }
+    const body = await readWebJsonBody(req);
+    const appeal = createWebAppeal(auth, body);
+    return sendWebJson(res, 200, { ok: true, appeal, ops: buildWebOpsPayload(hasWebAccess(auth, "admin")) });
+  }
+
+  if (req.method === "GET" && pathname === "/api/backup") {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
+    recordAuditLog(getWebModeratorTag(auth), "backup-downloaded", {});
+    return sendWebJson(res, 200, { config });
+  }
+
+  if (req.method === "POST" && pathname === "/api/backup-restore") {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
+    const body = await readWebJsonBody(req);
+    if (!body.config || typeof body.config !== "object") {
+      return sendWebJson(res, 400, { error: "A config object is required." });
+    }
+    config = {
+      ...createDefaultConfig(),
+      ...body.config
+    };
+    saveConfig();
+    recordAuditLog(getWebModeratorTag(auth), "backup-restored", {});
+    return sendWebJson(res, 200, { ok: true, config: buildWebConfigPayload() });
   }
 
   if (req.method === "POST" && pathname === "/api/reload-config") {
@@ -4312,6 +4557,7 @@ client.once("clientReady", async () => {
           console.error("Temp ban processing error:", error.message);
         });
       }, 60 * 1000);
+      startScheduledReports();
     }
   } catch (error) {
     console.error("Ready error:", error);

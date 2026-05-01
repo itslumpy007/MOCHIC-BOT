@@ -3,6 +3,7 @@ const state = {
   me: null,
   dashboard: null,
   config: null,
+  ops: null,
   aiReviews: {},
   selectedMember: null,
   memberAiSummary: null,
@@ -17,6 +18,7 @@ const titles = {
   automod: "AutoMod + AI",
   settings: "Settings",
   staff: "Staff",
+  ops: "Ops",
   records: "Records"
 };
 
@@ -246,7 +248,7 @@ function getDefaultView() {
 }
 
 function isViewAllowed(view) {
-  if (["settings", "staff"].includes(view)) {
+  if (["settings", "staff", "ops"].includes(view)) {
     return hasPanelAccess("admin");
   }
   return hasPanelAccess("mod");
@@ -283,7 +285,7 @@ function applyAccessRestrictions() {
     tab.disabled = !allowed;
   });
 
-  if (!isAdmin && ["settings", "staff"].includes(localStorage.getItem(storageKeys.activeView))) {
+  if (!isAdmin && ["settings", "staff", "ops"].includes(localStorage.getItem(storageKeys.activeView))) {
     localStorage.setItem(storageKeys.activeView, getDefaultView());
   }
 }
@@ -542,6 +544,52 @@ function renderStaff() {
     .join("");
 }
 
+function renderOps() {
+  const ops = state.ops || {};
+  const templates = ops.templates || [];
+  $("#modTemplates").value = templates.map(item =>
+    `${item.label || ""} | ${item.action || "warn"} | ${item.duration || ""} | ${item.reason || ""}`
+  ).join("\n");
+  $("#channelProfiles").value = ops.channelProfiles || "";
+  $("#reportEnabled").value = ops.reportSettings?.enabled ? "true" : "false";
+  $("#reportChannelId").value = ops.reportSettings?.channelId || "";
+  $("#reportFrequency").value = ops.reportSettings?.frequency || "daily";
+
+  $("#riskLeaderboard").innerHTML = (ops.riskUsers || []).length
+    ? ops.riskUsers.map(user => `
+      <article class="event">
+        <strong>${escapeHtml(user.tag)} <span class="badge">${escapeHtml(user.level)}</span> <span class="badge">${escapeHtml(user.score)}</span></strong>
+        <p>Strikes: ${escapeHtml(user.strikes)}<br>Warnings: ${escapeHtml(user.warnings)} | Cases: ${escapeHtml(user.cases)} | AI flags: ${escapeHtml(user.aiFlags)}</p>
+      </article>
+    `).join("")
+    : renderEmptyState("No risk signals", "No members have risk signals yet.");
+
+  $("#appealsList").innerHTML = (ops.appeals || []).length
+    ? ops.appeals.slice().reverse().map(appeal => `
+      <article class="event">
+        <strong>#${escapeHtml(appeal.id)} ${escapeHtml(appeal.userTag || appeal.userId)} <span class="badge">${escapeHtml(appeal.status || "open")}</span></strong>
+        <p>${escapeHtml(appeal.reason || "No appeal reason")}<br>${escapeHtml(formatDate(appeal.createdAt))}</p>
+      </article>
+    `).join("")
+    : renderEmptyState("No appeals", "No appeal records have been created yet.");
+
+  $("#auditLogList").innerHTML = (ops.auditLog || []).length
+    ? ops.auditLog.slice(0, 80).map(entry => `
+      <article class="event">
+        <strong>${escapeHtml(entry.action)} <span class="badge">${escapeHtml(entry.actorTag || "System")}</span></strong>
+        <p>${escapeHtml(formatDate(entry.createdAt))}<br>${escapeHtml(JSON.stringify(entry.details || {}))}</p>
+      </article>
+    `).join("")
+    : renderEmptyState("No audit events", "Panel changes will appear here.");
+}
+
+function renderTemplates() {
+  const templates = state.ops?.templates || [];
+  $("#memberTemplate").innerHTML = `<option value="">No template</option>` + templates.map((item, index) =>
+    `<option value="${index}">${escapeHtml(item.label || `Template ${index + 1}`)}</option>`
+  ).join("");
+}
+
 function renderRecords() {
   const filteredCases = getFilteredCases();
   $("#casesTable").innerHTML = filteredCases.slice(0, 120).map(entry => `
@@ -720,6 +768,7 @@ function renderMemberProfile() {
         <dt>Created</dt><dd>${escapeHtml(formatDate(member.createdAt))}</dd>
         <dt>Top Role</dt><dd>${escapeHtml(member.topRole?.name || "None")}</dd>
         <dt>Timeout</dt><dd>${escapeHtml(member.timeoutUntil ? formatDate(member.timeoutUntil) : "No active timeout")}</dd>
+        <dt>Risk</dt><dd>${escapeHtml(member.risk ? `${member.risk.level} (${member.risk.score}) - ${member.risk.strikes} strikes` : "Clear")}</dd>
       </dl>
       <div class="badge-row">
         <span class="badge">${member.counts.warnings} warnings</span>
@@ -890,6 +939,8 @@ function renderAll() {
   renderAiReview();
   renderSettings();
   renderStaff();
+  renderOps();
+  renderTemplates();
   renderRecords();
 }
 
@@ -905,12 +956,13 @@ async function loadAll() {
       return;
     }
 
-    const [dashboard, config, casesPayload, warningsPayload, notesPayload] = await Promise.all([
+    const [dashboard, config, casesPayload, warningsPayload, notesPayload, opsPayload] = await Promise.all([
       api("/api/dashboard"),
       api("/api/config"),
       api("/api/cases"),
       api("/api/warnings"),
-      api("/api/notes")
+      api("/api/notes"),
+      api("/api/ops")
     ]);
 
     state.dashboard = dashboard;
@@ -919,6 +971,7 @@ async function loadAll() {
     state.cases = casesPayload.cases || [];
     state.warnings = warningsPayload.warnings || {};
     state.notes = notesPayload.notes || {};
+    state.ops = opsPayload;
     applyAccessRestrictions();
     renderAll();
     applyAccessRestrictions();
@@ -1050,6 +1103,59 @@ async function saveRuleActions() {
   await loadAll();
 }
 
+async function saveOps() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to change operations settings.", "error");
+    return;
+  }
+  state.ops = await api("/api/ops", {
+    method: "POST",
+    body: JSON.stringify({
+      modTemplates: $("#modTemplates").value,
+      channelProfiles: $("#channelProfiles").value,
+      reportEnabled: $("#reportEnabled").value,
+      reportChannelId: $("#reportChannelId").value,
+      reportFrequency: $("#reportFrequency").value
+    })
+  });
+  renderOps();
+  setAlert("Operations settings saved.");
+}
+
+async function downloadBackup() {
+  const payload = await api("/api/backup");
+  $("#restoreConfig").value = JSON.stringify(payload.config, null, 2);
+  setAlert("Backup loaded into the restore box.");
+}
+
+async function restoreBackup() {
+  if (!window.confirm("Restore this config backup? This replaces live panel settings.")) return;
+  const config = JSON.parse($("#restoreConfig").value);
+  await api("/api/backup-restore", {
+    method: "POST",
+    body: JSON.stringify({ config })
+  });
+  await loadAll();
+  setAlert("Backup restored.");
+}
+
+async function createAppeal() {
+  const payload = await api("/api/appeals", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: $("#appealUserId").value,
+      userTag: $("#appealUserTag").value,
+      reason: $("#appealReason").value
+    })
+  });
+  state.ops = payload.ops || state.ops;
+  $("#appealUserId").value = "";
+  $("#appealUserTag").value = "";
+  $("#appealReason").value = "";
+  renderOps();
+  setAlert("Appeal created.");
+}
+
 function bindEvents() {
   $("#loginTokenInput").value = state.token;
   updateAuthPanel();
@@ -1073,6 +1179,10 @@ function bindEvents() {
   $("#saveStaff").addEventListener("click", () => saveStaff().catch(error => setAlert(error.message, "error")));
   $("#saveExemptions").addEventListener("click", () => saveExemptions().catch(error => setAlert(error.message, "error")));
   $("#saveRuleActions").addEventListener("click", () => saveRuleActions().catch(error => setAlert(error.message, "error")));
+  $("#saveOps").addEventListener("click", () => saveOps().catch(error => setAlert(error.message, "error")));
+  $("#downloadBackup").addEventListener("click", () => downloadBackup().catch(error => setAlert(error.message, "error")));
+  $("#restoreBackup").addEventListener("click", () => restoreBackup().catch(error => setAlert(error.message, "error")));
+  $("#createAppeal").addEventListener("click", () => createAppeal().catch(error => setAlert(error.message, "error")));
   document.querySelectorAll("[data-automod-preset]").forEach(button => {
     button.addEventListener("click", () => applyAutomodPreset(button.dataset.automodPreset));
   });
@@ -1080,6 +1190,14 @@ function bindEvents() {
   $("#memberAiSummaryButton").addEventListener("click", () => loadMemberAiSummary().catch(error => setAlert(error.message, "error")));
   $("#memberActionButton").addEventListener("click", () => applyMemberAction().catch(error => setAlert(error.message, "error")));
   $("#memberAction").addEventListener("change", () => {
+    localStorage.setItem(storageKeys.memberAction, $("#memberAction").value);
+  });
+  $("#memberTemplate").addEventListener("change", () => {
+    const template = (state.ops?.templates || [])[Number($("#memberTemplate").value)];
+    if (!template) return;
+    $("#memberAction").value = template.action || "warn";
+    $("#memberActionReason").value = template.reason || "";
+    $("#memberActionDuration").value = template.duration || "";
     localStorage.setItem(storageKeys.memberAction, $("#memberAction").value);
   });
   $("#memberActionDuration").addEventListener("input", () => {

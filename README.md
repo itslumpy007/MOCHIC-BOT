@@ -63,6 +63,7 @@ The bot serves a web dashboard from the same Node process.
 - AI moderation settings include thresholds, minimum message length, optional recent-message context, and extra moderator guidance.
 - The AutoMod workspace includes the AI Review queue so rule tuning and AI decisions live together.
 - Member profiles include an optional AI risk summary after `OPENAI_API_KEY` is configured. The summary can fill the moderation form, but staff still apply actions manually.
+- The Ops tab includes moderation templates, risk/strike signals, appeals, audit logs, config backup/restore, channel profile notes, and scheduled report settings.
 
 ### Railway
 
