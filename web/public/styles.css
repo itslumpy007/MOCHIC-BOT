@@ -560,6 +560,18 @@ button:active,
   line-height: 1.45;
 }
 
+.ai-review-actions {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 130px repeat(4, max-content);
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.ai-review-actions input {
+  min-width: 0;
+}
+
 .status-dot {
   width: 8px;
   height: 8px;
@@ -818,7 +830,8 @@ tbody tr:hover td {
   }
 
   .search-row,
-  .token-row {
+  .token-row,
+  .ai-review-actions {
     grid-template-columns: 1fr;
   }
 

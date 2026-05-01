@@ -150,6 +150,7 @@ function createDefaultConfig() {
     warnings: {},
     notes: {},
     cases: [],
+    aiReviews: {},
     tempBans: [],
     nextCaseId: 1,
     automod: {
@@ -234,6 +235,7 @@ function loadConfig() {
       warnings: parsed.warnings && typeof parsed.warnings === "object" ? parsed.warnings : {},
       notes: parsed.notes && typeof parsed.notes === "object" ? parsed.notes : {},
       cases: Array.isArray(parsed.cases) ? parsed.cases : [],
+      aiReviews: parsed.aiReviews && typeof parsed.aiReviews === "object" ? parsed.aiReviews : {},
       tempBans: Array.isArray(parsed.tempBans) ? parsed.tempBans : [],
       automod: {
         ...defaults.automod,
@@ -1759,6 +1761,22 @@ function updateCase(caseId, updates) {
 
   saveConfig();
   return entry;
+}
+
+function getAiReviewStatus(caseId) {
+  return config.aiReviews?.[String(caseId)] || null;
+}
+
+function setAiReviewStatus(caseId, status) {
+  if (!config.aiReviews || typeof config.aiReviews !== "object") {
+    config.aiReviews = {};
+  }
+  config.aiReviews[String(caseId)] = {
+    ...status,
+    updatedAt: new Date().toISOString()
+  };
+  saveConfig();
+  return config.aiReviews[String(caseId)];
 }
 
 function memberHasConfiguredRole(member, roleIds) {
@@ -3290,6 +3308,7 @@ function buildWebConfigPayload() {
       offenses: undefined,
       analytics: undefined
     },
+    aiReviews: config.aiReviews || {},
     permissions: config.permissions
   };
 }
@@ -3714,6 +3733,56 @@ async function handleWebMemberAction(auth, payload) {
   throw new Error("Unknown moderation action.");
 }
 
+async function handleWebAiReviewAction(auth, payload) {
+  if (!hasWebAccess(auth, "mod")) {
+    throw new Error("Moderator web access is required.");
+  }
+
+  const caseId = Number(payload.caseId);
+  const reviewAction = String(payload.reviewAction || "").trim().toLowerCase();
+  const entry = Number.isInteger(caseId) ? getCaseById(caseId) : null;
+  if (!entry || entry.action !== "automod:ai-review") {
+    throw new Error("AI review case not found.");
+  }
+
+  const moderatorTag = getWebModeratorTag(auth);
+  if (reviewAction === "dismiss") {
+    const status = setAiReviewStatus(caseId, {
+      status: "dismissed",
+      moderatorTag,
+      note: String(payload.reason || "Dismissed from AI review.").trim().slice(0, 500)
+    });
+    return { status };
+  }
+
+  const actionMap = {
+    note: "note",
+    warn: "warn",
+    timeout: "timeout"
+  };
+  const memberAction = actionMap[reviewAction];
+  if (!memberAction) {
+    throw new Error("Unknown AI review action.");
+  }
+
+  const reason = String(payload.reason || `AI review case #${caseId}: ${entry.reason || "Needs staff review."}`).trim();
+  const result = await handleWebMemberAction(auth, {
+    userId: entry.targetId,
+    action: memberAction,
+    reason,
+    duration: payload.duration || "10m"
+  });
+
+  const status = setAiReviewStatus(caseId, {
+    status: "actioned",
+    moderatorTag,
+    action: memberAction,
+    actionCaseId: result.entry?.id || null
+  });
+
+  return { status, entry: result.entry };
+}
+
 function getWebMimeType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   return {
@@ -3801,6 +3870,12 @@ async function handleWebApi(req, res, pathname) {
       ...result,
       member: serializeWebMember(member, user)
     });
+  }
+
+  if (req.method === "POST" && pathname === "/api/ai-review-action") {
+    const body = await readWebJsonBody(req);
+    const result = await handleWebAiReviewAction(auth, body);
+    return sendWebJson(res, 200, { ok: true, ...result, aiReviews: config.aiReviews || {} });
   }
 
   if (req.method === "POST" && pathname === "/api/settings") {

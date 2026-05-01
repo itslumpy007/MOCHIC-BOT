@@ -3,6 +3,7 @@ const state = {
   me: null,
   dashboard: null,
   config: null,
+  aiReviews: {},
   selectedMember: null,
   cases: [],
   warnings: {},
@@ -472,8 +473,9 @@ function getCaseDetail(entry, name) {
 }
 
 function renderAiReview() {
+  const statuses = state.aiReviews || {};
   const aiCases = (state.cases || [])
-    .filter(entry => entry.action === "automod:ai-review")
+    .filter(entry => entry.action === "automod:ai-review" && !statuses[String(entry.id)])
     .slice(0, 80);
 
   $("#aiReviewList").innerHTML = aiCases.length
@@ -483,14 +485,51 @@ function renderAiReview() {
         const channel = getCaseDetail(entry, "Channel");
         const message = getCaseDetail(entry, "Message");
         return `
-          <article class="event">
+          <article class="event ai-review-card" data-ai-case-id="${escapeHtml(entry.id)}">
             <strong>#${escapeHtml(entry.id)} ${escapeHtml(entry.targetTag || entry.targetId)} <span class="badge">${escapeHtml(category || "AI")}</span> <span class="badge">${escapeHtml(confidence || "")}</span></strong>
             <p>${escapeHtml(formatDate(entry.createdAt))}<br>${escapeHtml(entry.reason || "No reason")}<br>${escapeHtml(channel)}</p>
             <p>${escapeHtml(message || "No message text")}</p>
+            <div class="ai-review-actions">
+              <input data-ai-reason="${escapeHtml(entry.id)}" placeholder="Reason or note">
+              <input data-ai-duration="${escapeHtml(entry.id)}" placeholder="Timeout duration" value="10m">
+              <button class="ghost-button" type="button" data-ai-action="dismiss" data-case-id="${escapeHtml(entry.id)}">Dismiss</button>
+              <button class="ghost-button" type="button" data-ai-action="note" data-case-id="${escapeHtml(entry.id)}">Note</button>
+              <button class="ghost-button" type="button" data-ai-action="warn" data-case-id="${escapeHtml(entry.id)}">Warn</button>
+              <button class="save-button" type="button" data-ai-action="timeout" data-case-id="${escapeHtml(entry.id)}">Timeout</button>
+            </div>
           </article>
         `;
       }).join("")
     : renderEmptyState("No AI reviews", "AI moderation has not flagged any messages.");
+}
+
+async function applyAiReviewAction(caseId, reviewAction) {
+  const reason = document.querySelector(`[data-ai-reason="${caseId}"]`)?.value.trim() || "";
+  const duration = document.querySelector(`[data-ai-duration="${caseId}"]`)?.value.trim() || "10m";
+  const actionLabel = reviewAction === "dismiss" ? "dismiss" : reviewAction;
+
+  if (["warn", "timeout"].includes(reviewAction) && !reason) {
+    setAlert("Enter a reason before applying that AI review action.", "error");
+    return;
+  }
+
+  if (reviewAction === "timeout" && !duration) {
+    setAlert("Enter a timeout duration like 10m, 2h, or 1d.", "error");
+    return;
+  }
+
+  if (["warn", "timeout"].includes(reviewAction) && !window.confirm(`Apply ${actionLabel} from AI review case #${caseId}?`)) {
+    return;
+  }
+
+  const result = await api("/api/ai-review-action", {
+    method: "POST",
+    body: JSON.stringify({ caseId, reviewAction, reason, duration })
+  });
+
+  state.aiReviews = result.aiReviews || state.aiReviews;
+  await loadAll();
+  setAlert(`AI review case #${caseId} marked ${reviewAction}.`);
 }
 
 function formatDate(value) {
@@ -739,6 +778,7 @@ async function loadAll() {
 
     state.dashboard = dashboard;
     state.config = config;
+    state.aiReviews = config.aiReviews || {};
     state.cases = casesPayload.cases || [];
     state.warnings = warningsPayload.warnings || {};
     state.notes = notesPayload.notes || {};
@@ -894,6 +934,11 @@ function bindEvents() {
     $("#caseFilterModerator").value = "";
     localStorage.removeItem(storageKeys.caseFilters);
     renderRecords();
+  });
+  $("#aiReviewList").addEventListener("click", event => {
+    const button = event.target.closest("[data-ai-action]");
+    if (!button) return;
+    applyAiReviewAction(button.dataset.caseId, button.dataset.aiAction).catch(error => setAlert(error.message, "error"));
   });
 
   document.querySelectorAll(".tab").forEach(button => {
