@@ -52,7 +52,7 @@ The bot serves a web dashboard from the same Node process.
 - Add your deployed callback URL in the Discord Developer Portal: `https://your-domain/auth/callback`.
 - Set `WEB_BASE_URL` to your deployed URL if your host does not infer it correctly.
 - Set `WEB_ADMIN_TOKEN` to a long private token if you want backup token access.
-- Set `WEB_PORT` if your host does not use `PORT`.
+- On Railway and similar hosts, leave `PORT` alone and do not force `WEB_PORT` unless the platform tells you to.
 - Open `http://localhost:3000` locally, or your deployed service URL online.
 - The website can view runtime status, cases, warnings, notes, settings, AutoMod toggles, rule limits, lists, exemptions, rule actions, and member profiles.
 - The web panel opens on a dedicated login screen before exposing moderation controls.

@@ -47,7 +47,7 @@ function envFlag(value, fallback = false) {
 }
 
 const ENABLE_CORE_BOT = envFlag(process.env.ENABLE_CORE_BOT, true);
-const WEB_PORT = Number(process.env.WEB_PORT || process.env.PORT || 3000);
+const WEB_PORT = Number(process.env.PORT || process.env.WEB_PORT || 3000);
 const WEB_ADMIN_TOKEN = process.env.WEB_ADMIN_TOKEN || "";
 const WEB_BASE_URL = (process.env.WEB_BASE_URL || "").replace(/\/$/, "");
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || "";
@@ -4488,6 +4488,15 @@ function startWebServer() {
     const requestUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     const pathname = requestUrl.pathname;
 
+    if (pathname === "/healthz") {
+      sendWebJson(res, 200, {
+        ok: true,
+        status: "healthy",
+        port: WEB_PORT
+      });
+      return;
+    }
+
     if (pathname === "/auth/login") {
       handleWebLogin(req, res);
       return;
@@ -7946,7 +7955,9 @@ process.on("uncaughtException", error => {
 try {
   validateEnv();
   startWebServer();
-  client.login(TOKEN);
+  client.login(TOKEN).catch(error => {
+    console.error("Discord login failed:", error.message || error);
+  });
 } catch (error) {
   console.error("Startup error:", error.message);
   process.exit(1);
