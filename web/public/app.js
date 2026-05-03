@@ -866,10 +866,16 @@ function renderMemberProfile() {
   if (!member) {
     $("#memberProfile").innerHTML = "Search for a member to load their moderation profile.";
     $("#memberAiSummary").innerHTML = "";
+    $("#memberAiSummaryButton").disabled = true;
+    $("#memberAiSummaryButton").textContent = "AI Summary";
     $("#memberCases").innerHTML = "";
     $("#memberSignals").innerHTML = "";
     return;
   }
+
+  const aiSummariesEnabled = Boolean(state.config?.capabilities?.aiMemberSummaries);
+  $("#memberAiSummaryButton").disabled = !aiSummariesEnabled;
+  $("#memberAiSummaryButton").textContent = aiSummariesEnabled ? "AI Summary" : "AI Summary (disabled)";
 
   $("#memberProfile").innerHTML = `
     <article class="profile-card">
@@ -960,9 +966,20 @@ async function loadMemberAiSummary() {
     return;
   }
 
+  if (!state.config?.capabilities?.aiMemberSummaries) {
+    setAlert("AI member summaries are disabled until OPENAI_API_KEY is configured for the web service.", "error");
+    return;
+  }
+
   $("#memberAiSummary").innerHTML = renderEmptyState("Building summary", "Reviewing this member's moderation history.");
   const payload = await api(`/api/member-ai-summary?query=${encodeURIComponent(state.selectedMember.id)}`);
   state.selectedMember = payload.member || state.selectedMember;
+  if (payload.disabled) {
+    state.memberAiSummary = null;
+    $("#memberAiSummary").innerHTML = renderEmptyState("AI summaries unavailable", payload.error || "AI member summaries are disabled for this deployment.");
+    setAlert(payload.error || "AI member summaries are disabled for this deployment.", "error");
+    return;
+  }
   state.memberAiSummary = payload.summary;
   renderMemberAiSummary();
   setAlert("");

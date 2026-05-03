@@ -4227,7 +4227,10 @@ function buildWebConfigPayload() {
       analytics: undefined
     },
     aiReviews: config.aiReviews || {},
-    permissions: config.permissions
+    permissions: config.permissions,
+    capabilities: {
+      aiMemberSummaries: Boolean(OPENAI_API_KEY)
+    }
   };
 }
 
@@ -4975,12 +4978,18 @@ async function buildWebMemberAiSummary(auth, query) {
   if (!hasWebAccess(auth, "mod")) {
     throw new Error("Moderator web access is required.");
   }
-  if (!OPENAI_API_KEY) {
-    throw new Error("OPENAI_API_KEY is required for AI member summaries.");
-  }
 
   const { member, user } = await resolveWebMember(query);
   const memberPayload = serializeWebMember(member, user);
+  if (!OPENAI_API_KEY) {
+    return {
+      member: memberPayload,
+      summary: null,
+      disabled: true,
+      error: "AI member summaries are unavailable until OPENAI_API_KEY is configured for the web service."
+    };
+  }
+
   const input = buildMemberSummaryInput(memberPayload);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 12000);
