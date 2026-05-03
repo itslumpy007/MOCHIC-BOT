@@ -3101,6 +3101,11 @@ function buildAutoModSummary() {
     `Scam filter: ${config.automod.scamFilterEnabled ? "on" : "off"}`,
     `Scam phrase count: ${getScamPhrases().length}`,
     `Evasion filter: ${config.automod.evasionFilterEnabled ? "on" : "off"}`,
+    `AI moderation: ${config.automod.aiModerationEnabled ? "on" : "off"}`,
+    `AI custom rules: ${config.automod.aiCustomRulesEnabled ? "on" : "off"}`,
+    `AI model: ${config.automod.aiModerationModel}`,
+    `AI threshold: ${config.automod.aiModerationThreshold}%`,
+    `AI context: ${config.automod.aiIncludeRecentContext ? `${config.automod.aiContextMessageCount} msgs` : "off"}`,
     `Link filtering: ${config.automod.linksEnabled ? "on" : "off"}`,
     `Allowed links only: ${config.automod.allowedDomainsOnly ? "on" : "off"}`,
     `Allowed domains: ${config.automod.allowedDomains.length}`,
@@ -3259,6 +3264,14 @@ function parseDurationInputOrZero(input) {
   }
 
   return parseDuration(normalized);
+}
+
+function parseBooleanInput(input, fallback = false) {
+  const normalized = String(input || "").trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (["1", "true", "yes", "on", "enabled"].includes(normalized)) return true;
+  if (["0", "false", "no", "off", "disabled"].includes(normalized)) return false;
+  return fallback;
 }
 
 function parseDurationPairInput(input) {
@@ -3540,7 +3553,8 @@ function buildAdminPanelButtons(view, targetUserId = null) {
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "limits", targetUserId)).setLabel("Limits").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "guard", targetUserId)).setLabel("Guard Settings").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "lists", targetUserId)).setLabel("Lists").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "rule-actions", targetUserId)).setLabel("Rule Actions").setStyle(ButtonStyle.Secondary)
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "rule-actions", targetUserId)).setLabel("Rule Actions").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "ai-settings", targetUserId)).setLabel("AI Settings").setStyle(ButtonStyle.Primary)
       )
     );
   }
@@ -3716,6 +3730,18 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
             `Channels: ${config.automod.exemptChannelIds.length}`,
             `Roles: ${config.automod.exemptRoleIds.length}`,
             `Users: ${config.automod.exemptUserIds.length}`
+          ].join("\n"),
+          inline: true
+        },
+        {
+          name: "AI Moderation",
+          value: [
+            `API key: ${OPENAI_API_KEY ? "Configured" : "Missing"}`,
+            `Review: ${config.automod.aiModerationEnabled ? "On" : "Off"}`,
+            `Custom rules: ${config.automod.aiCustomRulesEnabled ? "On" : "Off"}`,
+            `Model: ${config.automod.aiModerationModel || "omni-moderation-latest"}`,
+            `Threshold: ${config.automod.aiModerationThreshold}%`,
+            `Context: ${config.automod.aiIncludeRecentContext ? `${config.automod.aiContextMessageCount} msgs` : "Off"}`
           ].join("\n"),
           inline: true
         },
@@ -6001,6 +6027,60 @@ client.on("interactionCreate", async interaction => {
             );
           return interaction.showModal(modal);
         }
+
+        if (action === "ai-settings") {
+          const modal = new ModalBuilder()
+            .setCustomId(buildAdminPanelCustomId("configsubmit", "ai-settings", targetUserId))
+            .setTitle("Set AI Moderation")
+            .addComponents(
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("enabled")
+                  .setLabel("Enable AI moderation: on/off")
+                  .setPlaceholder(config.automod.aiModerationEnabled ? "on" : "off")
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setValue(config.automod.aiModerationEnabled ? "on" : "off")
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("model")
+                  .setLabel("Moderation model")
+                  .setPlaceholder("omni-moderation-latest")
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setValue(String(config.automod.aiModerationModel || "omni-moderation-latest").slice(0, 100))
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("threshold")
+                  .setLabel("Moderation threshold 1-100")
+                  .setPlaceholder(`${config.automod.aiModerationThreshold}`)
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setValue(`${config.automod.aiModerationThreshold}`)
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("minLength")
+                  .setLabel("Minimum message length")
+                  .setPlaceholder(`${config.automod.aiMinMessageLength}`)
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setValue(`${config.automod.aiMinMessageLength}`)
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("contextCount")
+                  .setLabel("Recent context messages")
+                  .setPlaceholder(`${config.automod.aiContextMessageCount}`)
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setValue(`${config.automod.aiContextMessageCount}`)
+              )
+            );
+          return interaction.showModal(modal);
+        }
       }
 
       if (kind === "toggle") {
@@ -6684,6 +6764,37 @@ client.on("interactionCreate", async interaction => {
           config.automod.allowedDomains = parseCommaSeparatedList(interaction.fields.getTextInputValue("allowedDomains"), normalizeDomain);
           config.automod.blockedDomains = parseCommaSeparatedList(interaction.fields.getTextInputValue("blockedDomains"), normalizeDomain);
           config.automod.scamPhraseList = parseCommaSeparatedList(interaction.fields.getTextInputValue("scamPhrases"), normalizeComparisonText);
+        }
+
+        if (action === "ai-settings") {
+          const enabled = parseBooleanInput(interaction.fields.getTextInputValue("enabled"), config.automod.aiModerationEnabled);
+          const model = String(interaction.fields.getTextInputValue("model") || "").trim();
+          const threshold = Number(interaction.fields.getTextInputValue("threshold"));
+          const minLength = Number(interaction.fields.getTextInputValue("minLength"));
+          const contextCount = Number(interaction.fields.getTextInputValue("contextCount"));
+
+          if (!model || model.length > 100) {
+            return interaction.reply({ content: "AI moderation model must be a non-empty model name up to 100 characters.", ephemeral: true });
+          }
+
+          if (!Number.isInteger(threshold) || threshold < 1 || threshold > 100) {
+            return interaction.reply({ content: "AI moderation threshold must be a whole number from 1 to 100.", ephemeral: true });
+          }
+
+          if (!Number.isInteger(minLength) || minLength < 1 || minLength > 500) {
+            return interaction.reply({ content: "AI minimum message length must be a whole number from 1 to 500.", ephemeral: true });
+          }
+
+          if (!Number.isInteger(contextCount) || contextCount < 0 || contextCount > 10) {
+            return interaction.reply({ content: "AI context count must be a whole number from 0 to 10.", ephemeral: true });
+          }
+
+          config.automod.aiModerationEnabled = enabled;
+          config.automod.aiModerationModel = model;
+          config.automod.aiModerationThreshold = threshold;
+          config.automod.aiMinMessageLength = minLength;
+          config.automod.aiContextMessageCount = contextCount;
+          config.automod.aiIncludeRecentContext = contextCount > 0;
         }
 
         if (action === "rule-actions") {
