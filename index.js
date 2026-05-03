@@ -4234,7 +4234,7 @@ function buildWebConfigPayload() {
   };
 }
 
-function updateWebSettings(payload) {
+function updateWebSettings(auth, payload) {
   const allowed = [
     "verifyChannelId",
     "rulesChannelId",
@@ -4253,10 +4253,17 @@ function updateWebSettings(payload) {
   }
 
   saveConfig();
+  recordAuditLog(getWebModeratorTag(auth), "settings-updated", {
+    verifyChannelId: config.settings.verifyChannelId,
+    rulesChannelId: config.settings.rulesChannelId,
+    logChannelId: config.settings.logChannelId,
+    automodLogChannelId: config.settings.automodLogChannelId,
+    mutedRoleId: config.settings.mutedRoleId
+  });
   return buildWebConfigPayload().settings;
 }
 
-function updateWebAutomod(payload) {
+function updateWebAutomod(auth, payload) {
   const booleanKeys = [
     "invites",
     "spam",
@@ -4391,10 +4398,19 @@ function updateWebAutomod(payload) {
   }
 
   saveConfig();
+  recordAuditLog(getWebModeratorTag(auth), "automod-updated", {
+    enabledRules: Object.entries(config.automod)
+      .filter(([key, value]) => typeof value === "boolean" && value)
+      .map(([key]) => key)
+      .slice(0, 20),
+    exemptChannels: config.automod.exemptChannelIds.length,
+    exemptRoles: config.automod.exemptRoleIds.length,
+    exemptUsers: config.automod.exemptUserIds.length
+  });
   return buildWebConfigPayload().automod;
 }
 
-function updateWebRuleActions(payload) {
+function updateWebRuleActions(auth, payload) {
   const ruleActions = {};
   const alertRules = parseRuleKeyList(payload.alertRules || "");
   const warnRules = parseRuleKeyList(payload.warnRules || "");
@@ -4411,6 +4427,12 @@ function updateWebRuleActions(payload) {
     config.automod.raidAction = raidAction;
   }
   saveConfig();
+  recordAuditLog(getWebModeratorTag(auth), "rule-actions-updated", {
+    alertRules: alertRules.length,
+    warnRules: warnRules.length,
+    timeoutRules: timeoutRules.length,
+    raidAction: config.automod.raidAction
+  });
 
   return {
     alertOnlyRules: config.automod.alertOnlyRules,
@@ -4419,10 +4441,14 @@ function updateWebRuleActions(payload) {
   };
 }
 
-function updateWebPermissions(payload) {
+function updateWebPermissions(auth, payload) {
   config.permissions.modRoleIds = parseIdList(payload.modRoleIds || "");
   config.permissions.adminRoleIds = parseIdList(payload.adminRoleIds || "");
   saveConfig();
+  recordAuditLog(getWebModeratorTag(auth), "permissions-updated", {
+    modRoleIds: config.permissions.modRoleIds.length,
+    adminRoleIds: config.permissions.adminRoleIds.length
+  });
   return buildWebConfigPayload().permissions;
 }
 
@@ -4615,6 +4641,38 @@ function createWebAppeal(auth, payload) {
   config.appeals.push(appeal);
   saveConfig();
   recordAuditLog(getWebModeratorTag(auth), "appeal-created", { appealId: appeal.id, userId });
+  return appeal;
+}
+
+function updateWebAppealStatus(auth, payload) {
+  if (!hasWebAccess(auth, "admin")) {
+    throw new Error("Admin web access is required.");
+  }
+
+  const appealId = Number(payload.appealId);
+  const status = String(payload.status || "").trim().toLowerCase();
+  const allowedStatuses = new Set(["open", "reviewed", "approved", "rejected", "closed"]);
+  if (!Number.isInteger(appealId)) {
+    throw new Error("A valid appeal ID is required.");
+  }
+  if (!allowedStatuses.has(status)) {
+    throw new Error("Unknown appeal status.");
+  }
+
+  const appeal = (config.appeals || []).find(entry => entry.id === appealId);
+  if (!appeal) {
+    throw new Error("Appeal not found.");
+  }
+
+  appeal.status = status;
+  appeal.reviewedBy = getWebModeratorTag(auth);
+  appeal.reviewedAt = new Date().toISOString();
+  saveConfig();
+  recordAuditLog(getWebModeratorTag(auth), "appeal-status-updated", {
+    appealId,
+    status,
+    userId: appeal.userId
+  });
   return appeal;
 }
 
@@ -5176,7 +5234,7 @@ async function handleWebApi(req, res, pathname) {
       return sendWebJson(res, 403, { error: "Admin web access is required." });
     }
     const body = await readWebJsonBody(req);
-    return sendWebJson(res, 200, { settings: updateWebSettings(body) });
+    return sendWebJson(res, 200, { settings: updateWebSettings(auth, body) });
   }
 
   if (req.method === "POST" && pathname === "/api/permissions") {
@@ -5184,7 +5242,7 @@ async function handleWebApi(req, res, pathname) {
       return sendWebJson(res, 403, { error: "Admin web access is required." });
     }
     const body = await readWebJsonBody(req);
-    return sendWebJson(res, 200, { permissions: updateWebPermissions(body) });
+    return sendWebJson(res, 200, { permissions: updateWebPermissions(auth, body) });
   }
 
   if (req.method === "POST" && pathname === "/api/automod") {
@@ -5192,7 +5250,7 @@ async function handleWebApi(req, res, pathname) {
       return sendWebJson(res, 403, { error: "Admin web access is required." });
     }
     const body = await readWebJsonBody(req);
-    return sendWebJson(res, 200, { automod: updateWebAutomod(body) });
+    return sendWebJson(res, 200, { automod: updateWebAutomod(auth, body) });
   }
 
   if (req.method === "POST" && pathname === "/api/automod-preview") {
@@ -5218,7 +5276,7 @@ async function handleWebApi(req, res, pathname) {
       return sendWebJson(res, 403, { error: "Admin web access is required." });
     }
     const body = await readWebJsonBody(req);
-    return sendWebJson(res, 200, updateWebRuleActions(body));
+    return sendWebJson(res, 200, updateWebRuleActions(auth, body));
   }
 
   if (req.method === "POST" && pathname === "/api/ops") {
@@ -5235,6 +5293,15 @@ async function handleWebApi(req, res, pathname) {
     }
     const body = await readWebJsonBody(req);
     const appeal = createWebAppeal(auth, body);
+    return sendWebJson(res, 200, { ok: true, appeal, ops: buildWebOpsPayload(hasWebAccess(auth, "admin")) });
+  }
+
+  if (req.method === "POST" && pathname === "/api/appeals/status") {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
+    const body = await readWebJsonBody(req);
+    const appeal = updateWebAppealStatus(auth, body);
     return sendWebJson(res, 200, { ok: true, appeal, ops: buildWebOpsPayload(hasWebAccess(auth, "admin")) });
   }
 

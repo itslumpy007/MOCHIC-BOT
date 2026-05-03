@@ -114,6 +114,12 @@
                 <h3>Moderation Actions</h3>
               </div>
               <div class="action-form">
+                <div class="button-row">
+                  <button class="ghost-button" type="button" data-member-preset="firstOffense">First offense</button>
+                  <button class="ghost-button" type="button" data-member-preset="spamRaid">Spam raid</button>
+                  <button class="ghost-button" type="button" data-member-preset="scamLink">Scam link</button>
+                  <button class="ghost-button" type="button" data-member-preset="harassment">Harassment</button>
+                </div>
                 <label>Action
                   <select id="memberAction">
                     <option value="warn">Warn</option>
@@ -139,6 +145,10 @@
                 <label>Reason
                   <textarea id="memberActionReason" rows="5" placeholder="Reason or note content"></textarea>
                 </label>
+                <div class="button-row" data-required-access="admin">
+                  <button class="ghost-button" id="toggleMemberExemption" type="button">Add AutoMod Exemption</button>
+                  <button class="ghost-button" id="removeMemberExemption" type="button">Remove AutoMod Exemption</button>
+                </div>
                 <button id="memberActionButton" class="save-button" type="button">Apply Action</button>
               </div>
             </section>
@@ -158,6 +168,14 @@
               <div id="memberSignals" class="event-list"></div>
             </section>
           </div>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>Member Timeline</h3>
+              <label class="inline-search">Search history<input id="timelineSearchInput" placeholder="action, reason, moderator, note"></label>
+            </div>
+            <div id="memberTimeline" class="event-list"></div>
+          </section>
         </section>
 
         <section id="automodView" class="view">
@@ -256,6 +274,12 @@
               <label>Channel ID<input id="previewChannelId" placeholder="Channel ID"></label>
               <label>Sample message<textarea id="previewMessage" rows="5" placeholder="Paste a message to test against the current policy"></textarea></label>
             </div>
+            <div class="button-row">
+              <button class="ghost-button" type="button" data-automod-sample="spam">Spam test</button>
+              <button class="ghost-button" type="button" data-automod-sample="invite">Invite test</button>
+              <button class="ghost-button" type="button" data-automod-sample="scam">Scam test</button>
+              <button class="ghost-button" type="button" data-automod-sample="caps">Caps test</button>
+            </div>
             <div id="automodPreviewResult" class="event-list"></div>
           </section>
 
@@ -334,6 +358,18 @@
             <section class="panel">
               <div class="panel-header"><h3>Appeals</h3></div>
               <div class="form-grid">
+                <label>Status filter
+                  <select id="appealStatusFilter">
+                    <option value="open">Open</option>
+                    <option value="reviewed">Reviewed</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="closed">Closed</option>
+                    <option value="all">All</option>
+                  </select>
+                </label>
+              </div>
+              <div class="form-grid">
                 <label>User ID<input id="appealUserId" placeholder="Discord user ID"></label>
                 <label>User tag<input id="appealUserTag" placeholder="username"></label>
               </div>
@@ -348,6 +384,9 @@
           <div class="split">
             <section class="panel">
               <div class="panel-header"><h3>Audit Log</h3></div>
+              <div class="form-grid">
+                <label>Search audit log<input id="auditFilterInput" placeholder="action, actor, detail"></label>
+              </div>
               <div id="auditLogList" class="event-list"></div>
             </section>
             <section class="panel">
@@ -373,6 +412,9 @@
               <label>User or ID<input id="caseFilterUser" placeholder="username, tag, or ID"></label>
               <label>Action<input id="caseFilterAction" placeholder="warn, ban, automod"></label>
               <label>Moderator<input id="caseFilterModerator" placeholder="moderator tag"></label>
+            </div>
+            <div class="form-grid">
+              <label>Timeline search<input id="timelineSearchInput" placeholder="search across cases, warnings, and notes"></label>
             </div>
           </section>
           <div class="split">

@@ -10,6 +10,7 @@ const state = {
   automodPreview: null,
   previewChannelId: "",
   previewMessage: "",
+  timelineSearch: "",
   cases: [],
   warnings: {},
   notes: {}
@@ -30,7 +31,10 @@ const storageKeys = {
   caseFilters: "mochiCaseFilters",
   lastMemberSearch: "mochiLastMemberSearch",
   memberAction: "mochiMemberAction",
-  memberDuration: "mochiMemberDuration"
+  memberDuration: "mochiMemberDuration",
+  timelineSearch: "mochiTimelineSearch",
+  auditFilter: "mochiAuditFilter",
+  appealFilter: "mochiAppealFilter"
 };
 
 const automodSwitchLabels = {
@@ -244,6 +248,36 @@ const automodPresets = {
   }
 };
 
+const memberActionPresets = {
+  firstOffense: {
+    action: "warn",
+    duration: "",
+    reason: "First offense. Please review the rules and avoid repeating this behavior."
+  },
+  spamRaid: {
+    action: "timeout",
+    duration: "10m",
+    reason: "Spam or raid behavior. Take a short cooldown and review server rules."
+  },
+  scamLink: {
+    action: "ban",
+    duration: "",
+    reason: "Suspicious or scam-linked content. Removed for server safety."
+  },
+  harassment: {
+    action: "timeout",
+    duration: "1d",
+    reason: "Harassment or targeted abuse. Cooldown issued pending review."
+  }
+};
+
+const automodTestSamples = {
+  spam: "Join my server now join my server now join my server now",
+  invite: "discord.gg/example",
+  scam: "Free nitro here: https://discord-gift.click claim now",
+  caps: "THIS IS AN ALL CAPS MESSAGE THAT SHOULD TRIP CAPS RULES"
+};
+
 function $(selector) {
   return document.querySelector(selector);
 }
@@ -343,6 +377,7 @@ function restorePanelMemory() {
   $("#memberSearchInput").value = localStorage.getItem(storageKeys.lastMemberSearch) || "";
   $("#memberAction").value = localStorage.getItem(storageKeys.memberAction) || "warn";
   $("#memberActionDuration").value = localStorage.getItem(storageKeys.memberDuration) || "";
+  $("#timelineSearchInput").value = localStorage.getItem(storageKeys.timelineSearch) || "";
   setActiveView(localStorage.getItem(storageKeys.activeView) || "overview");
 }
 
@@ -672,33 +707,54 @@ function renderOps() {
   $("#reportEnabled").value = ops.reportSettings?.enabled ? "true" : "false";
   $("#reportChannelId").value = ops.reportSettings?.channelId || "";
   $("#reportFrequency").value = ops.reportSettings?.frequency || "daily";
+  $("#appealStatusFilter").value = localStorage.getItem(storageKeys.appealFilter) || "open";
+  $("#auditFilterInput").value = localStorage.getItem(storageKeys.auditFilter) || "";
 
   $("#riskLeaderboard").innerHTML = (ops.riskUsers || []).length
     ? ops.riskUsers.map(user => `
-      <article class="event">
+      <article class="event risk-${escapeHtml(user.level || "clear")}">
         <strong>${escapeHtml(user.tag)} <span class="badge">${escapeHtml(user.level)}</span> <span class="badge">${escapeHtml(user.score)}</span></strong>
         <p>Strikes: ${escapeHtml(user.strikes)}<br>Warnings: ${escapeHtml(user.warnings)} | Cases: ${escapeHtml(user.cases)} | AI flags: ${escapeHtml(user.aiFlags)}</p>
       </article>
     `).join("")
     : renderEmptyState("No risk signals", "No members have risk signals yet.");
 
-  $("#appealsList").innerHTML = (ops.appeals || []).length
-    ? ops.appeals.slice().reverse().map(appeal => `
+  const appealFilter = ($("#appealStatusFilter").value || "open").trim().toLowerCase();
+  const appeals = (ops.appeals || []).filter(appeal => {
+    if (appealFilter === "all") return true;
+    return String(appeal.status || "open").toLowerCase() === appealFilter;
+  });
+
+  $("#appealsList").innerHTML = appeals.length
+    ? appeals.slice().reverse().map(appeal => `
       <article class="event">
         <strong>#${escapeHtml(appeal.id)} ${escapeHtml(appeal.userTag || appeal.userId)} <span class="badge">${escapeHtml(appeal.status || "open")}</span></strong>
-        <p>${escapeHtml(appeal.reason || "No appeal reason")}<br>${escapeHtml(formatDate(appeal.createdAt))}</p>
+        <p>${escapeHtml(appeal.reason || "No appeal reason")}<br>${escapeHtml(formatDate(appeal.createdAt))}<br>Created by ${escapeHtml(appeal.createdBy || "Unknown")}</p>
+        <div class="button-row">
+          <button class="ghost-button" type="button" data-appeal-status="reviewed" data-appeal-id="${escapeHtml(appeal.id)}">Review</button>
+          <button class="ghost-button" type="button" data-appeal-status="approved" data-appeal-id="${escapeHtml(appeal.id)}">Approve</button>
+          <button class="ghost-button" type="button" data-appeal-status="rejected" data-appeal-id="${escapeHtml(appeal.id)}">Reject</button>
+          <button class="save-button" type="button" data-appeal-status="closed" data-appeal-id="${escapeHtml(appeal.id)}">Close</button>
+        </div>
       </article>
     `).join("")
-    : renderEmptyState("No appeals", "No appeal records have been created yet.");
+    : renderEmptyState("No appeals", "No appeal records match this filter.");
 
-  $("#auditLogList").innerHTML = (ops.auditLog || []).length
-    ? ops.auditLog.slice(0, 80).map(entry => `
+  const auditFilter = ($("#auditFilterInput").value || "").trim().toLowerCase();
+  const auditEntries = (ops.auditLog || []).filter(entry => {
+    if (!auditFilter) return true;
+    const haystack = [entry.action, entry.actorTag, JSON.stringify(entry.details || {})].join(" ").toLowerCase();
+    return haystack.includes(auditFilter);
+  });
+
+  $("#auditLogList").innerHTML = auditEntries.length
+    ? auditEntries.slice(0, 80).map(entry => `
       <article class="event">
         <strong>${escapeHtml(entry.action)} <span class="badge">${escapeHtml(entry.actorTag || "System")}</span></strong>
         <p>${escapeHtml(formatDate(entry.createdAt))}<br>${escapeHtml(JSON.stringify(entry.details || {}))}</p>
       </article>
     `).join("")
-    : renderEmptyState("No audit events", "Panel changes will appear here.");
+    : renderEmptyState("No audit events", "No audit events match this filter.");
 }
 
 function renderTemplates() {
@@ -821,6 +877,7 @@ function getFilteredCases() {
 }
 
 function renderTimeline(filteredCases) {
+  const timelineFilter = ($("#timelineSearchInput")?.value || "").trim().toLowerCase();
   const warningEvents = Object.entries(state.warnings || {}).flatMap(([userId, entries]) =>
     (entries || []).map(entry => ({
       type: "warning",
@@ -848,6 +905,16 @@ function renderTimeline(filteredCases) {
   }));
 
   const events = [...caseEvents, ...warningEvents, ...noteEvents]
+    .filter(entry => {
+      if (!timelineFilter) return true;
+      const haystack = [
+        entry.title,
+        entry.text,
+        entry.moderatorTag,
+        entry.type
+      ].join(" ").toLowerCase();
+      return haystack.includes(timelineFilter);
+    })
     .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))
     .slice(0, 80);
 
@@ -868,6 +935,7 @@ function renderMemberProfile() {
     $("#memberAiSummary").innerHTML = "";
     $("#memberAiSummaryButton").disabled = true;
     $("#memberAiSummaryButton").textContent = "AI Summary";
+    $("#memberTimeline").innerHTML = "";
     $("#memberCases").innerHTML = "";
     $("#memberSignals").innerHTML = "";
     return;
@@ -876,6 +944,11 @@ function renderMemberProfile() {
   const aiSummariesEnabled = Boolean(state.config?.capabilities?.aiMemberSummaries);
   $("#memberAiSummaryButton").disabled = !aiSummariesEnabled;
   $("#memberAiSummaryButton").textContent = aiSummariesEnabled ? "AI Summary" : "AI Summary (disabled)";
+  const exemptUsers = new Set(state.config?.automod?.exemptUserIds || []);
+  const isExempt = exemptUsers.has(member.id);
+  const risk = member.risk || {};
+  const riskScore = Number(risk.score || 0);
+  const riskWidth = Math.max(4, Math.min(100, riskScore));
 
   $("#memberProfile").innerHTML = `
     <article class="profile-card">
@@ -893,11 +966,16 @@ function renderMemberProfile() {
         <dt>Top Role</dt><dd>${escapeHtml(member.topRole?.name || "None")}</dd>
         <dt>Timeout</dt><dd>${escapeHtml(member.timeoutUntil ? formatDate(member.timeoutUntil) : "No active timeout")}</dd>
         <dt>Risk</dt><dd>${escapeHtml(member.risk ? `${member.risk.level} (${member.risk.score}) - ${member.risk.strikes} strikes` : "Clear")}</dd>
+        <dt>Exempt</dt><dd>${isExempt ? "AutoMod exempt" : "Not exempt"}</dd>
       </dl>
       <div class="badge-row">
         <span class="badge">${member.counts.warnings} warnings</span>
         <span class="badge">${member.counts.notes} notes</span>
         <span class="badge">${member.counts.cases} cases</span>
+        <span class="badge">Risk ${riskScore}</span>
+      </div>
+      <div class="risk-meter" title="Member risk score">
+        <span style="width: ${riskWidth}%"></span>
       </div>
       <div class="badge-row">
         ${(member.roles || []).slice(0, 10).map(role => `<span class="badge">${escapeHtml(role.name)}</span>`).join("") || `<span class="badge">No roles</span>`}
@@ -929,6 +1007,7 @@ function renderMemberProfile() {
     : renderEmptyState("No warnings or notes", "This member has no saved signals.");
 
   renderMemberAiSummary();
+  renderMemberTimeline();
 }
 
 function renderMemberAiSummary() {
@@ -958,6 +1037,68 @@ function renderMemberAiSummary() {
     localStorage.setItem(storageKeys.memberAction, $("#memberAction").value);
     setAlert("AI suggestion loaded into the moderation form. Review it before applying.");
   });
+}
+
+function buildMemberTimelineEntries(member) {
+  if (!member) return [];
+  const warnings = (member.warnings || []).map(entry => ({
+    type: "Warning",
+    createdAt: entry.createdAt,
+    title: "Warning",
+    text: entry.reason,
+    moderatorTag: entry.moderatorTag,
+    details: `Warning issued`
+  }));
+  const notes = (member.notes || []).map(entry => ({
+    type: "Note",
+    createdAt: entry.createdAt,
+    title: "Note",
+    text: entry.content,
+    moderatorTag: entry.moderatorTag,
+    details: "Staff note added"
+  }));
+  const cases = (member.cases || []).map(entry => ({
+    type: "Case",
+    createdAt: entry.createdAt,
+    title: `#${entry.id} ${entry.action}`,
+    text: entry.reason,
+    moderatorTag: entry.moderatorTag,
+    details: entry.details || []
+  }));
+
+  return [...cases, ...warnings, ...notes]
+    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+}
+
+function renderMemberTimeline() {
+  const member = state.selectedMember;
+  const container = $("#memberTimeline");
+  if (!container) return;
+  if (!member) {
+    container.innerHTML = renderEmptyState("No member selected", "Search for a member to load a unified history.");
+    return;
+  }
+
+  const query = ($("#timelineSearchInput")?.value || "").trim().toLowerCase();
+  const events = buildMemberTimelineEntries(member).filter(entry => {
+    if (!query) return true;
+    const haystack = [
+      entry.title,
+      entry.text,
+      entry.moderatorTag,
+      JSON.stringify(entry.details || "")
+    ].join(" ").toLowerCase();
+    return haystack.includes(query);
+  });
+
+  container.innerHTML = events.length
+    ? events.slice(0, 30).map(entry => `
+      <article class="event">
+        <strong>${escapeHtml(entry.title)} <span class="badge">${escapeHtml(entry.type)}</span></strong>
+        <p>${escapeHtml(formatDate(entry.createdAt))}<br>${escapeHtml(entry.text || "No details")}<br>${escapeHtml(entry.moderatorTag || "")}</p>
+      </article>
+    `).join("")
+    : renderEmptyState("No matching history", "Try a different member history search.");
 }
 
 async function loadMemberAiSummary() {
@@ -998,6 +1139,46 @@ async function searchMember() {
   state.memberAiSummary = null;
   renderMemberProfile();
   setAlert("");
+}
+
+function applyMemberPreset(name) {
+  const preset = memberActionPresets[name];
+  if (!preset) return;
+  $("#memberAction").value = preset.action || "warn";
+  $("#memberActionDuration").value = preset.duration || "";
+  $("#memberActionReason").value = preset.reason || "";
+  localStorage.setItem(storageKeys.memberAction, $("#memberAction").value);
+  localStorage.setItem(storageKeys.memberDuration, $("#memberActionDuration").value);
+  setAlert(`Loaded ${name} moderation preset. Review it before applying.`);
+}
+
+async function toggleSelectedMemberExemption(enabled) {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to change exemptions.", "error");
+    return;
+  }
+  if (!state.selectedMember) {
+    setAlert("Search for a member first.", "error");
+    return;
+  }
+
+  const exemptUserIds = new Set(state.config?.automod?.exemptUserIds || []);
+  if (enabled) {
+    exemptUserIds.add(state.selectedMember.id);
+  } else {
+    exemptUserIds.delete(state.selectedMember.id);
+  }
+
+  const result = await api("/api/automod", {
+    method: "POST",
+    body: JSON.stringify({
+      exemptUserIds: Array.from(exemptUserIds)
+    })
+  });
+
+  state.config.automod = result.automod;
+  await loadAll();
+  setAlert(enabled ? "Member added to AutoMod exemptions." : "Member removed from AutoMod exemptions.");
 }
 
 async function applyMemberAction() {
@@ -1077,6 +1258,7 @@ function renderAll() {
   renderOps();
   renderTemplates();
   renderRecords();
+  if (state.selectedMember) renderMemberProfile();
 }
 
 async function loadAll() {
@@ -1309,6 +1491,22 @@ async function saveOps() {
   setAlert("Operations settings saved.");
 }
 
+async function updateAppealStatus(appealId, status) {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to review appeals.", "error");
+    return;
+  }
+
+  const result = await api("/api/appeals/status", {
+    method: "POST",
+    body: JSON.stringify({ appealId, status })
+  });
+
+  state.ops = result.ops || state.ops;
+  await loadAll();
+  setAlert(`Appeal #${appealId} marked ${status}.`);
+}
+
 async function downloadBackup() {
   const payload = await api("/api/backup");
   $("#restoreConfig").value = JSON.stringify(payload.config, null, 2);
@@ -1386,9 +1584,21 @@ function bindEvents() {
   document.querySelectorAll("[data-automod-preset]").forEach(button => {
     button.addEventListener("click", () => applyAutomodPreset(button.dataset.automodPreset));
   });
+  document.querySelectorAll("[data-automod-sample]").forEach(button => {
+    button.addEventListener("click", () => {
+      $("#previewMessage").value = automodTestSamples[button.dataset.automodSample] || "";
+      state.previewMessage = $("#previewMessage").value;
+      runAutomodPreview().catch(error => setAlert(error.message, "error"));
+    });
+  });
   $("#memberSearchButton").addEventListener("click", () => searchMember().catch(error => setAlert(error.message, "error")));
   $("#memberAiSummaryButton").addEventListener("click", () => loadMemberAiSummary().catch(error => setAlert(error.message, "error")));
   $("#memberActionButton").addEventListener("click", () => applyMemberAction().catch(error => setAlert(error.message, "error")));
+  document.querySelectorAll("[data-member-preset]").forEach(button => {
+    button.addEventListener("click", () => applyMemberPreset(button.dataset.memberPreset));
+  });
+  $("#toggleMemberExemption").addEventListener("click", () => toggleSelectedMemberExemption(true).catch(error => setAlert(error.message, "error")));
+  $("#removeMemberExemption").addEventListener("click", () => toggleSelectedMemberExemption(false).catch(error => setAlert(error.message, "error")));
   $("#memberAction").addEventListener("change", () => {
     localStorage.setItem(storageKeys.memberAction, $("#memberAction").value);
   });
@@ -1403,11 +1613,24 @@ function bindEvents() {
   $("#memberActionDuration").addEventListener("input", () => {
     localStorage.setItem(storageKeys.memberDuration, $("#memberActionDuration").value);
   });
+  $("#timelineSearchInput").addEventListener("input", () => {
+    localStorage.setItem(storageKeys.timelineSearch, $("#timelineSearchInput").value);
+    renderMemberTimeline();
+    renderRecords();
+  });
   $("#memberSearchInput").addEventListener("keydown", event => {
     if (event.key === "Enter") {
       event.preventDefault();
       searchMember().catch(error => setAlert(error.message, "error"));
     }
+  });
+  $("#auditFilterInput").addEventListener("input", () => {
+    localStorage.setItem(storageKeys.auditFilter, $("#auditFilterInput").value);
+    renderOps();
+  });
+  $("#appealStatusFilter").addEventListener("change", () => {
+    localStorage.setItem(storageKeys.appealFilter, $("#appealStatusFilter").value);
+    renderOps();
   });
   ["#caseFilterUser", "#caseFilterAction", "#caseFilterModerator"].forEach(selector => {
     $(selector).addEventListener("input", () => {
@@ -1426,6 +1649,11 @@ function bindEvents() {
     const button = event.target.closest("[data-ai-action]");
     if (!button) return;
     applyAiReviewAction(button.dataset.caseId, button.dataset.aiAction).catch(error => setAlert(error.message, "error"));
+  });
+  $("#appealsList").addEventListener("click", event => {
+    const button = event.target.closest("[data-appeal-status]");
+    if (!button) return;
+    updateAppealStatus(button.dataset.appealId, button.dataset.appealStatus).catch(error => setAlert(error.message, "error"));
   });
 
   document.querySelectorAll(".tab").forEach(button => {
