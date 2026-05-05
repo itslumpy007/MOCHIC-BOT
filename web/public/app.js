@@ -1515,7 +1515,7 @@ async function markAllUnverified() {
   });
 
   await loadAll();
-  setAlert(`Marked ${result.updated} member${result.updated === 1 ? "" : "s"} as unverified. Skipped ${result.skipped}, failed ${result.failed}.`);
+  setAlert(`Marked ${result.updated} reaction-role member${result.updated === 1 ? "" : "s"} as unverified. Skipped ${result.skipped}, failed ${result.failed}.`);
 }
 
 async function saveExemptions() {
