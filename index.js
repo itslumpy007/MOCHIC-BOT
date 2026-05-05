@@ -301,7 +301,7 @@ function getUnverifiedRoleId() {
 }
 
 function isTikTokVerificationEnabled() {
-  return Boolean(getTikTokHandle() && (getVerificationRoleId() || getUnverifiedRoleId()));
+  return Boolean(getTikTokHandle() && getVerificationRoleId());
 }
 
 function matchesTikTokVerification(member) {
@@ -2084,6 +2084,17 @@ const allCommands = [
     )
     .addSubcommand(subcommand =>
       subcommand
+        .setName("tiktokaliases")
+        .setDescription("Set alternate nicknames that should count as verified")
+        .addStringOption(option =>
+          option
+            .setName("aliases")
+            .setDescription("Comma or newline separated alternate nicknames")
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
         .setName("verifiedrole")
         .setDescription("Set the role given after nickname verification")
         .addRoleOption(option =>
@@ -2125,6 +2136,7 @@ const allCommands = [
               { name: "muted role", value: "mutedrole" },
               { name: "verify channel", value: "verifychannel" },
               { name: "TikTok handle", value: "tiktokhandle" },
+              { name: "TikTok aliases", value: "tiktokaliases" },
               { name: "verified role", value: "verifiedrole" },
               { name: "unverified role", value: "unverifiedrole" },
               { name: "rules channel", value: "ruleschannel" }
@@ -3339,14 +3351,14 @@ function buildTikTokVerifyEmbed() {
     title: "TikTok name verification",
     description:
       handle
-        ? `Set your server nickname to match **@${handle}**${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""} and press the button below or run \`/verify\` in ${getVerifyChannelMention()}.\n\nOnce it matches, the bot will remove the unverified role and grant access.`
+        ? `Set your server nickname to match **@${handle}**${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""} and press the button below or run \`/verify\` in ${getVerifyChannelMention()}.\n\nOnce it matches, the bot will grant the verified role${getUnverifiedRoleId() ? " and remove the unverified role" : ""}.`
         : `Set your server nickname to match the TikTok handle your staff configured, then press the button below or run \`/verify\` in ${getVerifyChannelMention()}.\n\nAsk staff if you are not sure what format they want.`,
     color: COLORS.pink,
     fields: [
       { name: "TikTok handle", value: handle ? `@${handle}` : "Not set", inline: true },
       { name: "Accepted nicknames", value: getTikTokNicknameAliases().length ? getTikTokNicknameAliases().map(alias => `@${alias}`).join(", ").slice(0, 1024) : "None", inline: false },
       { name: "Verified role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
-      { name: "Unverified role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Not set", inline: true },
+      { name: "Unverified role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Optional", inline: true },
       { name: "How it works", value: "Match your nickname, then press check. The bot will handle the roles automatically.", inline: false }
     ]
   });
@@ -8784,6 +8796,14 @@ client.on("interactionCreate", async interaction => {
         config.settings.tiktokHandle = interaction.options.getString("handle").trim().replace(/^@/, "");
       }
 
+      if (subcommand === "tiktokaliases") {
+        config.settings.tiktokNicknameAliases = interaction.options.getString("aliases")
+          .split(/[\n,]+/)
+          .map(alias => alias.trim())
+          .filter(Boolean)
+          .map(alias => alias.replace(/^@/, ""));
+      }
+
       if (subcommand === "verifiedrole") {
         config.settings.verifiedRoleId = interaction.options.getRole("role").id;
       }
@@ -8820,6 +8840,10 @@ client.on("interactionCreate", async interaction => {
           config.settings.tiktokHandle = "";
         }
 
+        if (target === "tiktokaliases") {
+          config.settings.tiktokNicknameAliases = [];
+        }
+
         if (target === "verifiedrole") {
           config.settings.verifiedRoleId = null;
         }
@@ -8842,7 +8866,7 @@ client.on("interactionCreate", async interaction => {
         }
       }
 
-      if (["tiktokhandle", "verifiedrole", "unverifiedrole", "verifychannel"].includes(subcommand)) {
+      if (["tiktokhandle", "tiktokaliases", "verifiedrole", "unverifiedrole", "verifychannel"].includes(subcommand)) {
         await resolveVerifyMessageId().catch(() => null);
       }
 
