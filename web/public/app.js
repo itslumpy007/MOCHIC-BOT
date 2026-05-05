@@ -1499,6 +1499,25 @@ async function setVerifiedVisibility(locked, scope) {
     : `Removed verified visibility locks from ${result.updated} channel${result.updated === 1 ? "" : "s"}.`);
 }
 
+async function markAllUnverified() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to bulk sync verification.", "error");
+    return;
+  }
+
+  if (!window.confirm("Mark everyone without the verified role as unverified? This may take a moment.")) {
+    return;
+  }
+
+  const result = await api("/api/verification-mark-unverified", {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+
+  await loadAll();
+  setAlert(`Marked ${result.updated} member${result.updated === 1 ? "" : "s"} as unverified. Skipped ${result.skipped}, failed ${result.failed}.`);
+}
+
 async function saveExemptions() {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change exemptions.", "error");
@@ -1629,6 +1648,7 @@ function bindEvents() {
   $("#unlockVerifiedCurrent").addEventListener("click", () => setVerifiedVisibility(false, "current").catch(error => setAlert(error.message, "error")));
   $("#lockVerifiedAll").addEventListener("click", () => setVerifiedVisibility(true, "all").catch(error => setAlert(error.message, "error")));
   $("#unlockVerifiedAll").addEventListener("click", () => setVerifiedVisibility(false, "all").catch(error => setAlert(error.message, "error")));
+  $("#markAllUnverified").addEventListener("click", () => markAllUnverified().catch(error => setAlert(error.message, "error")));
   $("#saveStaff").addEventListener("click", () => saveStaff().catch(error => setAlert(error.message, "error")));
   $("#saveExemptions").addEventListener("click", () => saveExemptions().catch(error => setAlert(error.message, "error")));
   $("#saveRuleActions").addEventListener("click", () => saveRuleActions().catch(error => setAlert(error.message, "error")));

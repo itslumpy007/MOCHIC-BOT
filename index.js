@@ -3543,6 +3543,72 @@ async function applyVerifiedVisibilityScope(guild, scope, referenceChannel, lock
   return updated;
 }
 
+async function markAllMembersUnverified(guild) {
+  const verifiedRoleId = getVerificationRoleId();
+  const unverifiedRoleId = getUnverifiedRoleId();
+
+  if (!verifiedRoleId) {
+    throw new Error("Set the verified role first.");
+  }
+
+  if (!unverifiedRoleId) {
+    throw new Error("Set the unverified role first.");
+  }
+
+  const members = await guild.members.fetch().catch(() => null);
+  if (!members) {
+    throw new Error("The server members could not be loaded.");
+  }
+
+  let updated = 0;
+  let skipped = 0;
+  let failed = 0;
+
+  for (const member of members.values()) {
+    if (member.user?.bot) continue;
+
+    const hasVerified = member.roles.cache.has(verifiedRoleId);
+    const hasUnverified = member.roles.cache.has(unverifiedRoleId);
+    const wantsUnverified = !hasVerified;
+
+    if (hasVerified && hasUnverified) {
+      if (!member.manageable) {
+        skipped += 1;
+        continue;
+      }
+
+      try {
+        await member.roles.remove(unverifiedRoleId, "Bulk verification sweep: remove unverified from verified members");
+        updated += 1;
+      } catch {
+        failed += 1;
+      }
+      continue;
+    }
+
+    if (wantsUnverified && !hasUnverified) {
+      if (!member.manageable) {
+        skipped += 1;
+        continue;
+      }
+
+      try {
+        await member.roles.add(unverifiedRoleId, "Bulk verification sweep: mark unverified members");
+        updated += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+  }
+
+  return {
+    total: members.size,
+    updated,
+    skipped,
+    failed
+  };
+}
+
 async function postTikTokVerifyPanel(source = "manual") {
   const setupIssues = getTikTokVerificationSetupIssues();
   if (setupIssues.length) {
@@ -5763,6 +5829,25 @@ async function handleWebApi(req, res, pathname) {
         updated,
         scope,
         locked
+      });
+    }
+
+    if (req.method === "POST" && pathname === "/api/verification-mark-unverified") {
+      if (!hasWebAccess(auth, "admin")) {
+        return sendWebJson(res, 403, { error: "Admin web access is required." });
+      }
+
+      const guild = await client.guilds.fetch(GUILD_ID).catch(() => client.guilds.cache.get(GUILD_ID) || null);
+      if (!guild) {
+        return sendWebJson(res, 500, { error: "The Discord guild could not be loaded." });
+      }
+
+      const result = await markAllMembersUnverified(guild);
+      recordAuditLog(getWebModeratorTag(auth), "verification-mark-unverified", result);
+
+      return sendWebJson(res, 200, {
+        ok: true,
+        ...result
       });
     }
 
