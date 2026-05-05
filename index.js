@@ -402,7 +402,7 @@ async function syncTikTokVerification(member, source = "manual") {
       changed: false,
       reason: matched
         ? "Nickname already matches the TikTok handle."
-        : `Change your nickname to match @${handle}${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""} to unlock the server. Reaction roles are optional.`
+        : `Change your nickname to match @${handle}${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""} to unlock the garden. Reaction roles are optional.`
     };
   }
 
@@ -3428,15 +3428,15 @@ function buildTikTokVerifyEmbed() {
     title: "TikTok name verification",
     description:
       handle
-        ? `Set your server nickname to match **@${handle}**${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""} and press the button below or run \`/verify\` in ${getVerifyChannelMention()}.\n\nReaction roles are optional flavor roles and do not affect verification.`
-        : `Set your server nickname to match the TikTok handle your staff configured, then press the button below or run \`/verify\` in ${getVerifyChannelMention()}.\n\nAsk staff if you are not sure what format they want.`,
+        ? `Welcome to the mochi garden. Set your server nickname to match **@${handle}**${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""}, then press the button below or run \`/verify\` in ${getVerifyChannelMention()}.\n\nOnce it matches, I’ll hand you the verified role so you can wander the rest of the server. Flavor roles are just for fun.`
+        : `Welcome to the mochi garden. Set your server nickname to match the TikTok handle your staff configured, then press the button below or run \`/verify\` in ${getVerifyChannelMention()}.\n\nAsk staff if you are not sure what format they want.`,
     color: COLORS.pink,
     fields: [
-      { name: "TikTok handle", value: handle ? `@${handle}` : "Not set", inline: true },
-      { name: "Accepted nicknames", value: getTikTokNicknameAliases().length ? getTikTokNicknameAliases().map(alias => `@${alias}`).join(", ").slice(0, 1024) : "None", inline: false },
-      { name: "Verified role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
-      { name: "Unverified role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Optional", inline: true },
-      { name: "How it works", value: "Match your nickname to unlock the server. Reaction roles are optional flavor roles.", inline: false }
+      { name: "🌸 TikTok handle", value: handle ? `@${handle}` : "Not set", inline: true },
+      { name: "🍡 Accepted nicknames", value: getTikTokNicknameAliases().length ? getTikTokNicknameAliases().map(alias => `@${alias}`).join(", ").slice(0, 1024) : "None", inline: false },
+      { name: "✨ Verified role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
+      { name: "🫧 Unverified role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Optional", inline: true },
+      { name: "How it works", value: "1. Match your nickname\n2. Tap Check My Name\n3. Enjoy the garden", inline: false }
     ]
   });
 }
@@ -7258,7 +7258,7 @@ client.on("interactionCreate", async interaction => {
           const verifyEmbed = makeEmbed({
             title: "welcome to the mochi garden",
             description:
-              "Pick any flavor role you want by reacting below. Then complete TikTok nickname verification to unlock the server.\n\n" +
+              "Pick any flavor role you want by reacting below. Then complete TikTok nickname verification to unlock the garden.\n\n" +
               "🌸 Sakura\n🍓 Strawberry Milk\n🍵 Matcha Dream\n🫐 Mystic Berry\n💜 Taro Cloud\n\n" +
               "You can switch your role anytime by changing your reaction.",
             color: COLORS.pink
@@ -8047,13 +8047,13 @@ client.on("interactionCreate", async interaction => {
         return interaction.editReply("Set a verify channel first.");
       }
       const verifyChannel = await client.channels.fetch(verifyChannelId);
-        const sentMessage = await verifyChannel.send({
-          embeds: [makeEmbed({
-            title: "welcome to the mochi garden",
-            description:
-            "Pick any flavor role you want by reacting below. Then complete TikTok nickname verification to unlock the server.\n\n" +
-            "🌸 Sakura\n🍓 Strawberry Milk\n🍵 Matcha Dream\n🫐 Mystic Berry\n💜 Taro Cloud\n\n" +
-            "You can switch your role anytime by changing your reaction.",
+          const sentMessage = await verifyChannel.send({
+            embeds: [makeEmbed({
+              title: "welcome to the mochi garden",
+              description:
+            "Pick any flavor role you want by reacting below. Then complete TikTok nickname verification to unlock the garden.\n\n" +
+              "🌸 Sakura\n🍓 Strawberry Milk\n🍵 Matcha Dream\n🫐 Mystic Berry\n💜 Taro Cloud\n\n" +
+              "You can switch your role anytime by changing your reaction.",
             color: COLORS.pink
           })]
         });
@@ -9549,7 +9549,7 @@ client.on("guildMemberAdd", async member => {
           `We are happy you joined.\n` +
           (isTikTokVerificationEnabled()
             ? `If you want a flavor role, pick one by reacting below. Then set your server nickname to match **@${getTikTokHandle()}** and press **Check My Name** in ${getVerifyChannelMention()} or run \`/verify\`.\n\n`
-            : `Please head to ${getVerifyChannelMention()} to verify and unlock the server.\n\n`) +
+            : `Please head to ${getVerifyChannelMention()} to verify and unlock the garden.\n\n`) +
           "Have fun and enjoy your stay.",
         color: COLORS.pink,
         thumbnail: member.user.displayAvatarURL({ dynamic: true })
