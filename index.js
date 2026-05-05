@@ -320,12 +320,6 @@ function getWelcomeChannelId() {
   return config.settings?.welcomeChannelId || null;
 }
 
-function assertDistinctVerificationChannels(nextVerifyChannelId, nextWelcomeChannelId) {
-  if (nextVerifyChannelId && nextWelcomeChannelId && String(nextVerifyChannelId) === String(nextWelcomeChannelId)) {
-    throw new Error("The verify channel and welcome channel must be different channels.");
-  }
-}
-
 function isTikTokVerificationEnabled() {
   return Boolean(getTikTokHandle() && getVerificationRoleId());
 }
@@ -3620,14 +3614,18 @@ async function applyVerifiedVisibilityScope(guild, scope, referenceChannel, lock
   }
 
   const welcomeChannelId = getWelcomeChannelId();
-  if (welcomeChannelId) {
+  const verifyChannelId = getVerifyChannelId();
+  const sharedOnboardingChannelId = welcomeChannelId && verifyChannelId && String(welcomeChannelId) === String(verifyChannelId)
+    ? verifyChannelId
+    : null;
+
+  if (welcomeChannelId && !sharedOnboardingChannelId) {
     const welcomeChannel = await guild.channels.fetch(welcomeChannelId).catch(() => null);
     if (welcomeChannel) {
       await setWelcomeVisibility(welcomeChannel, locked);
     }
   }
 
-  const verifyChannelId = getVerifyChannelId();
   if (verifyChannelId) {
     const verifyChannel = await guild.channels.fetch(verifyChannelId).catch(() => null);
     if (verifyChannel) {
@@ -4881,8 +4879,6 @@ function updateWebSettings(auth, payload) {
   const nextWelcomeChannelId = Object.prototype.hasOwnProperty.call(payload, "welcomeChannelId")
     ? String(payload.welcomeChannelId || "").trim() || null
     : config.settings.welcomeChannelId || null;
-
-  assertDistinctVerificationChannels(nextVerifyChannelId, nextWelcomeChannelId);
 
   for (const key of allowed) {
     if (Object.prototype.hasOwnProperty.call(payload, key)) {
@@ -9291,14 +9287,12 @@ client.on("interactionCreate", async interaction => {
 
       if (subcommand === "verifychannel") {
         const nextVerifyChannelId = interaction.options.getChannel("channel").id;
-        assertDistinctVerificationChannels(nextVerifyChannelId, config.settings.welcomeChannelId);
         config.settings.verifyChannelId = nextVerifyChannelId;
         config.verifyMessageId = null;
       }
 
       if (subcommand === "welcomechannel") {
         const nextWelcomeChannelId = interaction.options.getChannel("channel").id;
-        assertDistinctVerificationChannels(config.settings.verifyChannelId, nextWelcomeChannelId);
         config.settings.welcomeChannelId = nextWelcomeChannelId;
       }
 
