@@ -311,6 +311,14 @@ function isTikTokVerificationEnabled() {
   return Boolean(getTikTokHandle() && getVerificationRoleId());
 }
 
+function getTikTokVerificationSetupIssues() {
+  const issues = [];
+  if (!getVerifyChannelId()) issues.push("verify channel");
+  if (!getTikTokHandle()) issues.push("TikTok handle");
+  if (!getVerificationRoleId()) issues.push("verified role");
+  return issues;
+}
+
 function matchesTikTokVerification(member) {
   const handle = normalizeVerificationText(getTikTokHandle());
   if (!handle) return false;
@@ -3383,14 +3391,15 @@ function buildTikTokVerifyComponents() {
 }
 
 async function postTikTokVerifyPanel(source = "manual") {
-  if (!isTikTokVerificationEnabled()) {
-    throw new Error("Set the TikTok handle and verified role first.");
+  const setupIssues = getTikTokVerificationSetupIssues();
+  if (setupIssues.length) {
+    const listed = setupIssues.length === 1
+      ? setupIssues[0]
+      : `${setupIssues.slice(0, -1).join(", ")} and ${setupIssues[setupIssues.length - 1]}`;
+    throw new Error(`Set the ${listed} first.`);
   }
 
   const verifyChannelId = getVerifyChannelId();
-  if (!verifyChannelId) {
-    throw new Error("Set a verify channel first.");
-  }
 
   const verifyChannel = await client.channels.fetch(verifyChannelId).catch(() => null);
   if (!verifyChannel || typeof verifyChannel.send !== "function") {
