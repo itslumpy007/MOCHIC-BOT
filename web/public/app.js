@@ -127,7 +127,10 @@ const settingLabels = {
   rulesChannelId: "Rules channel ID",
   logChannelId: "Log channel ID",
   automodLogChannelId: "AutoMod log channel ID",
-  mutedRoleId: "Muted role ID"
+  mutedRoleId: "Muted role ID",
+  tiktokHandle: "TikTok handle",
+  verifiedRoleId: "Verified role ID",
+  unverifiedRoleId: "Unverified role ID"
 };
 
 const automodPresets = {

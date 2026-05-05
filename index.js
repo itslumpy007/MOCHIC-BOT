@@ -250,12 +250,120 @@ function createDefaultConfig() {
       rulesChannelId: null,
       logChannelId: null,
       automodLogChannelId: null,
-      mutedRoleId: null
+      mutedRoleId: null,
+      tiktokHandle: "",
+      verifiedRoleId: null,
+      unverifiedRoleId: null
     },
     permissions: {
       modRoleIds: [],
       adminRoleIds: []
     }
+  };
+}
+
+function normalizeVerificationText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/^https?:\/\/(www\.)?tiktok\.com\/@/i, "")
+    .replace(/^@/, "")
+    .replace(/\/.*$/, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function getTikTokHandle() {
+  return String(config.settings?.tiktokHandle || "").trim().replace(/^@/, "");
+}
+
+function getVerificationRoleId() {
+  return config.settings?.verifiedRoleId || null;
+}
+
+function getUnverifiedRoleId() {
+  return config.settings?.unverifiedRoleId || null;
+}
+
+function isTikTokVerificationEnabled() {
+  return Boolean(getTikTokHandle() && (getVerificationRoleId() || getUnverifiedRoleId()));
+}
+
+function matchesTikTokVerification(member) {
+  const handle = normalizeVerificationText(getTikTokHandle());
+  if (!handle) return false;
+  const displayName = normalizeVerificationText(member?.displayName || member?.nickname || member?.user?.username || "");
+  return Boolean(displayName && displayName.includes(handle));
+}
+
+function buildTikTokVerificationSummary() {
+  const handle = getTikTokHandle();
+  return [
+    `TikTok handle: ${handle ? `@${handle}` : "Not set"}`,
+    `Verified role: ${getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set"}`,
+    `Unverified role: ${getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Not set"}`,
+    `Mode: ${isTikTokVerificationEnabled() ? "Nickname gate" : "Disabled"}`
+  ].join("\n");
+}
+
+async function syncTikTokVerification(member, source = "manual") {
+  if (!member?.guild) {
+    return { matched: false, changed: false, reason: "Member not found." };
+  }
+
+  const handle = getTikTokHandle();
+  const verifiedRoleId = getVerificationRoleId();
+  const unverifiedRoleId = getUnverifiedRoleId();
+  if (!handle || (!verifiedRoleId && !unverifiedRoleId)) {
+    return { matched: false, changed: false, reason: "TikTok verification is not configured." };
+  }
+
+  const matched = matchesTikTokVerification(member);
+  const rolesToAdd = [];
+  const rolesToRemove = [];
+
+  if (matched) {
+    if (verifiedRoleId && !member.roles.cache.has(verifiedRoleId)) {
+      rolesToAdd.push(verifiedRoleId);
+    }
+    if (unverifiedRoleId && member.roles.cache.has(unverifiedRoleId)) {
+      rolesToRemove.push(unverifiedRoleId);
+    }
+  } else {
+    if (unverifiedRoleId && !member.roles.cache.has(unverifiedRoleId)) {
+      rolesToAdd.push(unverifiedRoleId);
+    }
+    if (verifiedRoleId && member.roles.cache.has(verifiedRoleId)) {
+      rolesToRemove.push(verifiedRoleId);
+    }
+  }
+
+  if (!rolesToAdd.length && !rolesToRemove.length) {
+    return {
+      matched,
+      changed: false,
+      reason: matched
+        ? "Nickname already matches the TikTok handle."
+        : `Change your nickname to match @${handle} to unlock the server.`
+    };
+  }
+
+  if ((rolesToAdd.length || rolesToRemove.length) && !member.manageable) {
+    throw new Error("I cannot manage that member's roles.");
+  }
+
+  if (rolesToRemove.length) {
+    await member.roles.remove(rolesToRemove, `TikTok verification sync (${source})`).catch(() => {});
+  }
+
+  if (rolesToAdd.length) {
+    await member.roles.add(rolesToAdd, `TikTok verification sync (${source})`).catch(() => {});
+  }
+
+  return {
+    matched,
+    changed: Boolean(rolesToAdd.length || rolesToRemove.length),
+    reason: matched
+      ? `Verified as @${handle}.`
+      : `Change your nickname to match @${handle} and use /verify again.`
   };
 }
 
@@ -359,6 +467,11 @@ function recordAuditLog(actorTag, action, details = {}) {
 
 function getVerifyChannelId() {
   return config.settings.verifyChannelId || VERIFY_CHANNEL_ID;
+}
+
+function getVerifyChannelMention() {
+  const verifyChannelId = getVerifyChannelId();
+  return verifyChannelId ? `<#${verifyChannelId}>` : "the verify channel";
 }
 
 function getRulesChannelId() {
@@ -1241,6 +1354,11 @@ const allCommands = [
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   new SlashCommandBuilder()
+    .setName("setuptiktokverify")
+    .setDescription("Create the TikTok nickname verify menu")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
     .setName("setuprules")
     .setDescription("Post the server rules")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
@@ -1929,6 +2047,33 @@ const allCommands = [
     )
     .addSubcommand(subcommand =>
       subcommand
+        .setName("tiktokhandle")
+        .setDescription("Set the TikTok handle used for nickname verification")
+        .addStringOption(option =>
+          option
+            .setName("handle")
+            .setDescription("TikTok handle, with or without @")
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("verifiedrole")
+        .setDescription("Set the role given after nickname verification")
+        .addRoleOption(option =>
+          option.setName("role").setDescription("Role to grant on verify").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("unverifiedrole")
+        .setDescription("Set the role given before nickname verification")
+        .addRoleOption(option =>
+          option.setName("role").setDescription("Role to restrict unverified members").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
         .setName("ruleschannel")
         .setDescription("Set the rules channel")
         .addChannelOption(option =>
@@ -1953,10 +2098,18 @@ const allCommands = [
               { name: "automod log channel", value: "automodlogchannel" },
               { name: "muted role", value: "mutedrole" },
               { name: "verify channel", value: "verifychannel" },
+              { name: "TikTok handle", value: "tiktokhandle" },
+              { name: "verified role", value: "verifiedrole" },
+              { name: "unverified role", value: "unverifiedrole" },
               { name: "rules channel", value: "ruleschannel" }
             )
         )
     ),
+
+  new SlashCommandBuilder()
+    .setName("verify")
+    .setDescription("Check your TikTok nickname verification")
+    .setDMPermission(false),
 
   new SlashCommandBuilder()
     .setName("staffroles")
@@ -3149,8 +3302,38 @@ function buildSettingsSummary() {
     `Log channel: ${getLogChannelId() ? `<#${getLogChannelId()}>` : "Not set"}`,
     `Verify channel: ${getVerifyChannelId() ? `<#${getVerifyChannelId()}>` : "Not set"}`,
     `Rules channel: ${getRulesChannelId() ? `<#${getRulesChannelId()}>` : "Not set"}`,
-    `Muted role: ${getMutedRoleId() ? `<@&${getMutedRoleId()}>` : "Not set"}`
+    `Muted role: ${getMutedRoleId() ? `<@&${getMutedRoleId()}>` : "Not set"}`,
+    buildTikTokVerificationSummary()
   ].join("\n");
+}
+
+function buildTikTokVerifyEmbed() {
+  const handle = getTikTokHandle();
+  return makeEmbed({
+    title: "TikTok name verification",
+    description:
+      handle
+        ? `Set your server nickname to match **@${handle}** and press the button below or run \`/verify\` in ${getVerifyChannelMention()}.\n\nOnce it matches, the bot will remove the unverified role and grant access.`
+        : `Set your server nickname to match the TikTok handle your staff configured, then press the button below or run \`/verify\` in ${getVerifyChannelMention()}.\n\nAsk staff if you are not sure what format they want.`,
+    color: COLORS.pink,
+    fields: [
+      { name: "TikTok handle", value: handle ? `@${handle}` : "Not set", inline: true },
+      { name: "Verified role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
+      { name: "Unverified role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Not set", inline: true },
+      { name: "How it works", value: "Match your nickname, then press check. The bot will handle the roles automatically.", inline: false }
+    ]
+  });
+}
+
+function buildTikTokVerifyComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("verify:tiktok-check")
+        .setLabel("Check My Name")
+        .setStyle(ButtonStyle.Primary)
+    )
+  ];
 }
 
 function buildHelpEmbed() {
@@ -3168,13 +3351,18 @@ function buildHelpEmbed() {
       inline: false
     },
     {
+      name: "Verification",
+      value: "`/verify`, `/setupverify`, `/setuptiktokverify`, `/settings`",
+      inline: false
+    },
+    {
       name: "Runtime",
       value: "`/status`, `/reload`",
       inline: false
     },
     {
       name: "Server Tools",
-      value: "`/setupverify`, `/setuprules`, `/announce`, `/purge`, `/lockdown`, `/unlockdown`",
+      value: "`/setupverify`, `/setuptiktokverify`, `/setuprules`, `/announce`, `/purge`, `/lockdown`, `/unlockdown`",
       inline: false
     },
     {
@@ -3210,6 +3398,9 @@ function buildStatusEmbed() {
       { name: "Rules Channel", value: rulesChannelId ? `<#${rulesChannelId}>` : "Not set", inline: true },
       { name: "Log Channel", value: logChannelId ? `<#${logChannelId}>` : "Not set", inline: true },
       { name: "AutoMod Log Channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
+      { name: "TikTok Verify", value: isTikTokVerificationEnabled() ? `@${getTikTokHandle()}` : "Disabled", inline: true },
+      { name: "Verified Role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
+      { name: "Unverified Role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Not set", inline: true },
       { name: "Core Features", value: ENABLE_CORE_BOT ? "Enabled" : "Disabled", inline: true },
       { name: "Verify Message", value: config.verifyMessageId || "Not cached", inline: false },
       { name: "Cases Logged", value: `${config.cases.length}`, inline: true },
@@ -3237,6 +3428,7 @@ function buildDashboardEmbed() {
       { name: "Total cases", value: `${allCases.length}`, inline: true },
       { name: "Warnings saved", value: `${Object.keys(config.warnings || {}).length}`, inline: true },
       { name: "Staff notes", value: `${Object.keys(config.notes || {}).length}`, inline: true },
+      { name: "TikTok verification", value: isTikTokVerificationEnabled() ? `@${getTikTokHandle()}` : "Disabled", inline: true },
       { name: "AutoMod log channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
       { name: "Alert-only rules", value: getAlertOnlyRules().join(", ") || "None", inline: false },
       { name: "Nickname filter terms", value: `${getNicknameBlockedTerms().length}`, inline: true },
@@ -3586,7 +3778,8 @@ function buildAdminPanelButtons(view, targetUserId = null) {
   if (view === "setup") {
     rows.push(
       new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setupverify", targetUserId)).setLabel("Post Verify Panel").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setupverify", targetUserId)).setLabel("Post Reaction Verify").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setuptiktokverify", targetUserId)).setLabel("Post TikTok Verify").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setuprules", targetUserId)).setLabel("Post Rules").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "settings-view", targetUserId)).setLabel("View Settings").setStyle(ButtonStyle.Secondary)
       )
@@ -4219,7 +4412,10 @@ function buildWebConfigPayload() {
       rulesChannelId: config.settings.rulesChannelId || "",
       logChannelId: config.settings.logChannelId || "",
       automodLogChannelId: config.settings.automodLogChannelId || "",
-      mutedRoleId: config.settings.mutedRoleId || ""
+      mutedRoleId: config.settings.mutedRoleId || "",
+      tiktokHandle: config.settings.tiktokHandle || "",
+      verifiedRoleId: config.settings.verifiedRoleId || "",
+      unverifiedRoleId: config.settings.unverifiedRoleId || ""
     },
     automod: {
       ...config.automod,
@@ -4240,12 +4436,19 @@ function updateWebSettings(auth, payload) {
     "rulesChannelId",
     "logChannelId",
     "automodLogChannelId",
-    "mutedRoleId"
+    "mutedRoleId",
+    "tiktokHandle",
+    "verifiedRoleId",
+    "unverifiedRoleId"
   ];
 
   for (const key of allowed) {
     if (Object.prototype.hasOwnProperty.call(payload, key)) {
-      config.settings[key] = String(payload[key] || "").trim() || null;
+      if (key === "tiktokHandle") {
+        config.settings[key] = String(payload[key] || "").trim().replace(/^@/, "");
+      } else {
+        config.settings[key] = String(payload[key] || "").trim() || null;
+      }
       if (key === "verifyChannelId") {
         config.verifyMessageId = null;
       }
@@ -4258,7 +4461,10 @@ function updateWebSettings(auth, payload) {
     rulesChannelId: config.settings.rulesChannelId,
     logChannelId: config.settings.logChannelId,
     automodLogChannelId: config.settings.automodLogChannelId,
-    mutedRoleId: config.settings.mutedRoleId
+    mutedRoleId: config.settings.mutedRoleId,
+    tiktokHandle: config.settings.tiktokHandle,
+    verifiedRoleId: config.settings.verifiedRoleId,
+    unverifiedRoleId: config.settings.unverifiedRoleId
   });
   return buildWebConfigPayload().settings;
 }
@@ -5539,6 +5745,33 @@ client.on("channelCreate", async channel => {
 client.on("interactionCreate", async interaction => {
   try {
     if (interaction.isButton()) {
+      if (interaction.customId === "verify:tiktok-check") {
+        if (!ENABLE_CORE_BOT) {
+          return interaction.reply({ content: "Verification is disabled on this deployment.", ephemeral: true });
+        }
+
+        await interaction.deferReply({ ephemeral: true });
+        const member = interaction.member || await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+        if (!member) {
+          return interaction.editReply("I could not find your server membership.");
+        }
+
+        if (!isTikTokVerificationEnabled()) {
+          return interaction.editReply("TikTok verification is not configured yet. Ask staff to set the handle and roles.");
+        }
+
+        try {
+          const result = await syncTikTokVerification(member, "button");
+          return interaction.editReply(
+            result.matched
+              ? `Verified. ${result.reason}`
+              : result.reason
+          );
+        } catch (error) {
+          return interaction.editReply(error.message || "Verification failed.");
+        }
+      }
+
       if (!interaction.customId.startsWith("adminpanel:")) return;
       if (!ENABLE_CORE_BOT) {
         return interaction.reply({ content: "Admin controls are disabled on this deployment.", ephemeral: true });
@@ -5551,7 +5784,7 @@ client.on("interactionCreate", async interaction => {
         kind === "selectrole" ||
         kind === "configmodal" ||
         kind === "exemptselect" ||
-        ["reload-config", "setupverify", "setuprules", "settings-view", "reset-mod-roles", "reset-admin-roles"].includes(action)
+        ["reload-config", "setupverify", "setuptiktokverify", "setuprules", "settings-view", "reset-mod-roles", "reset-admin-roles"].includes(action)
           ? "admin"
           : "mod";
 
@@ -6535,6 +6768,22 @@ client.on("interactionCreate", async interaction => {
           return interaction.reply({ content: "Verify panel posted.", ephemeral: true });
         }
 
+        if (action === "setuptiktokverify") {
+          if (!isTikTokVerificationEnabled()) {
+            return interaction.reply({ content: "Set the TikTok handle and verification roles first.", ephemeral: true });
+          }
+          const verifyChannelId = getVerifyChannelId();
+          if (!verifyChannelId) {
+            return interaction.reply({ content: "Set a verify channel first.", ephemeral: true });
+          }
+          const verifyChannel = await client.channels.fetch(verifyChannelId);
+          await verifyChannel.send({
+            embeds: [buildTikTokVerifyEmbed()],
+            components: buildTikTokVerifyComponents()
+          });
+
+          return interaction.reply({ content: "TikTok verify panel posted.", ephemeral: true });
+        }
         if (action === "setuprules") {
           const rulesChannel = await client.channels.fetch(getRulesChannelId());
           await rulesChannel.send({
@@ -7117,6 +7366,7 @@ client.on("interactionCreate", async interaction => {
       "backup",
       "reload",
       "setupverify",
+      "setuptiktokverify",
       "setuprules",
       "automod",
       "automodlinks",
@@ -7267,27 +7517,74 @@ client.on("interactionCreate", async interaction => {
       });
     }
 
+    if (interaction.commandName === "verify") {
+      if (!ENABLE_CORE_BOT) {
+        return interaction.reply({ content: "Verification is disabled on this deployment.", ephemeral: true });
+      }
+
+      const member = interaction.member || await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+      if (!member) {
+        return interaction.reply({ content: "I could not find your server membership.", ephemeral: true });
+      }
+
+      if (!isTikTokVerificationEnabled()) {
+        return interaction.reply({ content: "TikTok verification is not configured yet. Ask staff to set the handle and roles.", ephemeral: true });
+      }
+
+      try {
+        const result = await syncTikTokVerification(member, "slash");
+        return interaction.reply({
+          content: result.matched ? `Verified. ${result.reason}` : result.reason,
+          ephemeral: true
+        });
+      } catch (error) {
+        return interaction.reply({ content: error.message || "Verification failed.", ephemeral: true });
+      }
+    }
+
     if (interaction.commandName === "setupverify") {
       await interaction.deferReply({ ephemeral: true });
-      const verifyChannel = await client.channels.fetch(getVerifyChannelId());
-
-      const verifyEmbed = makeEmbed({
-        title: "welcome to the mochi garden",
-        description:
-          "Pick one flavor role by reacting below to unlock your vibe.\n\n" +
-          "🌸 Sakura\n🍓 Strawberry Milk\n🍵 Matcha Dream\n🫐 Mystic Berry\n💜 Taro Cloud\n\n" +
-          "You can switch your role anytime by changing your reaction.",
-        color: COLORS.pink
+      const verifyChannelId = getVerifyChannelId();
+      if (!verifyChannelId) {
+        return interaction.editReply("Set a verify channel first.");
+      }
+      const verifyChannel = await client.channels.fetch(verifyChannelId);
+      const sentMessage = await verifyChannel.send({
+        embeds: [makeEmbed({
+          title: "welcome to the mochi garden",
+          description:
+            "Pick one flavor role by reacting below to unlock your vibe.\n\n" +
+            "🌸 Sakura\n🍓 Strawberry Milk\n🍵 Matcha Dream\n🫐 Mystic Berry\n💜 Taro Cloud\n\n" +
+            "You can switch your role anytime by changing your reaction.",
+          color: COLORS.pink
+        })]
       });
 
-      const sentMessage = await verifyChannel.send({ embeds: [verifyEmbed] });
       for (const emoji of Object.keys(MOCHI_ROLES)) {
         await sentMessage.react(emoji);
       }
 
       config.verifyMessageId = sentMessage.id;
       saveConfig();
-      return interaction.editReply("Verify menu created.");
+      return interaction.editReply("Reaction verify menu created.");
+    }
+
+    if (interaction.commandName === "setuptiktokverify") {
+      await interaction.deferReply({ ephemeral: true });
+      if (!isTikTokVerificationEnabled()) {
+        return interaction.editReply("Set the TikTok handle and verification roles first.");
+      }
+      const verifyChannelId = getVerifyChannelId();
+      if (!verifyChannelId) {
+        return interaction.editReply("Set a verify channel first.");
+      }
+      const verifyChannel = await client.channels.fetch(verifyChannelId);
+      await verifyChannel.send({
+        embeds: [buildTikTokVerifyEmbed()],
+        components: buildTikTokVerifyComponents()
+      });
+
+      return interaction.editReply("TikTok verify menu created.");
     }
 
     if (interaction.commandName === "setuprules") {
@@ -8446,6 +8743,18 @@ client.on("interactionCreate", async interaction => {
         config.verifyMessageId = null;
       }
 
+      if (subcommand === "tiktokhandle") {
+        config.settings.tiktokHandle = interaction.options.getString("handle").trim().replace(/^@/, "");
+      }
+
+      if (subcommand === "verifiedrole") {
+        config.settings.verifiedRoleId = interaction.options.getRole("role").id;
+      }
+
+      if (subcommand === "unverifiedrole") {
+        config.settings.unverifiedRoleId = interaction.options.getRole("role").id;
+      }
+
       if (subcommand === "ruleschannel") {
         config.settings.rulesChannelId = interaction.options.getChannel("channel").id;
       }
@@ -8470,6 +8779,18 @@ client.on("interactionCreate", async interaction => {
           config.verifyMessageId = null;
         }
 
+        if (target === "tiktokhandle") {
+          config.settings.tiktokHandle = "";
+        }
+
+        if (target === "verifiedrole") {
+          config.settings.verifiedRoleId = null;
+        }
+
+        if (target === "unverifiedrole") {
+          config.settings.unverifiedRoleId = null;
+        }
+
         if (target === "ruleschannel") {
           config.settings.rulesChannelId = null;
         }
@@ -8482,6 +8803,10 @@ client.on("interactionCreate", async interaction => {
         if (mutedRole) {
           await applyMutedRoleToChannels(guild, mutedRole);
         }
+      }
+
+      if (["tiktokhandle", "verifiedrole", "unverifiedrole", "verifychannel"].includes(subcommand)) {
+        await resolveVerifyMessageId().catch(() => null);
       }
 
       return interaction.reply({
@@ -8696,7 +9021,9 @@ client.on("guildMemberAdd", async member => {
         description:
           `Hi ${member.user.username}.\n\n` +
           `We are happy you joined.\n` +
-          `Please head to <#${getVerifyChannelId()}> to verify and unlock the server.\n\n` +
+          (isTikTokVerificationEnabled()
+            ? `Please set your server nickname to match **@${getTikTokHandle()}** and press **Check My Name** in ${getVerifyChannelMention()} or run \`/verify\`.\n\n`
+            : `Please head to ${getVerifyChannelMention()} to verify and unlock the server.\n\n`) +
           "Have fun and enjoy your stay.",
         color: COLORS.pink,
         thumbnail: member.user.displayAvatarURL({ dynamic: true })
@@ -8711,6 +9038,24 @@ client.on("guildMemberAdd", async member => {
         thumbnail: member.user.displayAvatarURL({ dynamic: true })
       })
     );
+
+    if (isTikTokVerificationEnabled()) {
+      const verificationResult = await syncTikTokVerification(member, "join").catch(error => {
+        console.error("TikTok verification sync error:", error.message);
+        return null;
+      });
+
+      if (verificationResult?.matched) {
+        await notifyUser(
+          member.user,
+          makeEmbed({
+            title: "Verified",
+            description: `You're verified as @${getTikTokHandle()}. You should now be able to see the server.`,
+            color: COLORS.mint
+          })
+        );
+      }
+    }
 
     if (config.automod.nicknameFilterEnabled) {
       const displayName = (member.nickname || member.user.username || "").toLowerCase();
@@ -8744,6 +9089,23 @@ client.on("guildMemberAdd", async member => {
 client.on("guildMemberUpdate", async (oldMember, newMember) => {
   try {
     if (!ENABLE_CORE_BOT) return;
+    if (isTikTokVerificationEnabled() && oldMember.displayName !== newMember.displayName) {
+      const verificationResult = await syncTikTokVerification(newMember, "nickname-change").catch(error => {
+        console.error("TikTok verification sync error:", error.message);
+        return null;
+      });
+      if (verificationResult?.matched && verificationResult?.changed) {
+        await logEmbed(
+          makeEmbed({
+            title: "Member verified",
+            description: `${newMember.user.tag} matched the TikTok handle and was verified.`,
+            color: COLORS.mint,
+            thumbnail: newMember.user.displayAvatarURL({ dynamic: true })
+          })
+        );
+      }
+    }
+
     if (!config.automod.nicknameFilterEnabled) return;
 
     const previousName = (oldMember.nickname || oldMember.user.username || "").toLowerCase();
