@@ -127,8 +127,12 @@ const settingLabels = {
   rulesChannelId: "Rules channel ID",
   logChannelId: "Log channel ID",
   automodLogChannelId: "AutoMod log channel ID",
-  mutedRoleId: "Muted role ID",
+  mutedRoleId: "Muted role ID"
+};
+
+const verificationSettingLabels = {
   tiktokHandle: "TikTok handle",
+  tiktokNicknameAliases: "Accepted nicknames",
   verifiedRoleId: "Verified role ID",
   unverifiedRoleId: "Unverified role ID"
 };
@@ -669,10 +673,17 @@ function renderSettings() {
   const settings = state.config?.settings || {};
   const automod = state.config?.automod || {};
 
-  $("#settingsFields").innerHTML = Object.entries(settingLabels)
+  $("#generalSettingsFields").innerHTML = Object.entries(settingLabels)
     .map(([key, label]) => `
       <label>${label}
         <input data-setting="${key}" value="${escapeHtml(settings[key] || "")}">
+      </label>
+    `).join("");
+
+  $("#verificationSettingsFields").innerHTML = Object.entries(verificationSettingLabels)
+    .map(([key, label]) => `
+      <label>${label}
+        <textarea data-setting="${key}" rows="${key === "tiktokNicknameAliases" ? "4" : "2"}" placeholder="${key === "tiktokNicknameAliases" ? "Name 1, Name 2, Name 3" : ""}">${escapeHtml(Array.isArray(settings[key]) ? settings[key].join(", ") : (settings[key] || ""))}</textarea>
       </label>
     `).join("");
 

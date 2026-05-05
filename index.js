@@ -252,6 +252,7 @@ function createDefaultConfig() {
       automodLogChannelId: null,
       mutedRoleId: null,
       tiktokHandle: "",
+      tiktokNicknameAliases: [],
       verifiedRoleId: null,
       unverifiedRoleId: null
     },
@@ -275,6 +276,22 @@ function getTikTokHandle() {
   return String(config.settings?.tiktokHandle || "").trim().replace(/^@/, "");
 }
 
+function getTikTokNicknameAliases() {
+  const aliases = config.settings?.tiktokNicknameAliases;
+  if (Array.isArray(aliases)) {
+    return aliases.map(alias => normalizeVerificationText(alias)).filter(Boolean);
+  }
+
+  if (typeof aliases === "string") {
+    return aliases
+      .split(/[\n,]+/)
+      .map(alias => normalizeVerificationText(alias))
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
 function getVerificationRoleId() {
   return config.settings?.verifiedRoleId || null;
 }
@@ -291,13 +308,22 @@ function matchesTikTokVerification(member) {
   const handle = normalizeVerificationText(getTikTokHandle());
   if (!handle) return false;
   const displayName = normalizeVerificationText(member?.displayName || member?.nickname || member?.user?.username || "");
-  return Boolean(displayName && displayName.includes(handle));
+  const aliases = getTikTokNicknameAliases();
+  return Boolean(
+    displayName &&
+    (
+      displayName.includes(handle) ||
+      aliases.some(alias => displayName.includes(alias))
+    )
+  );
 }
 
 function buildTikTokVerificationSummary() {
   const handle = getTikTokHandle();
+  const aliases = getTikTokNicknameAliases();
   return [
     `TikTok handle: ${handle ? `@${handle}` : "Not set"}`,
+    `Accepted nicknames: ${aliases.length ? aliases.slice(0, 5).map(alias => `@${alias}`).join(", ") : "None"}`,
     `Verified role: ${getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set"}`,
     `Unverified role: ${getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Not set"}`,
     `Mode: ${isTikTokVerificationEnabled() ? "Nickname gate" : "Disabled"}`
@@ -342,7 +368,7 @@ async function syncTikTokVerification(member, source = "manual") {
       changed: false,
       reason: matched
         ? "Nickname already matches the TikTok handle."
-        : `Change your nickname to match @${handle} to unlock the server.`
+        : `Change your nickname to match @${handle}${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""} to unlock the server.`
     };
   }
 
@@ -3313,11 +3339,12 @@ function buildTikTokVerifyEmbed() {
     title: "TikTok name verification",
     description:
       handle
-        ? `Set your server nickname to match **@${handle}** and press the button below or run \`/verify\` in ${getVerifyChannelMention()}.\n\nOnce it matches, the bot will remove the unverified role and grant access.`
+        ? `Set your server nickname to match **@${handle}**${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""} and press the button below or run \`/verify\` in ${getVerifyChannelMention()}.\n\nOnce it matches, the bot will remove the unverified role and grant access.`
         : `Set your server nickname to match the TikTok handle your staff configured, then press the button below or run \`/verify\` in ${getVerifyChannelMention()}.\n\nAsk staff if you are not sure what format they want.`,
     color: COLORS.pink,
     fields: [
       { name: "TikTok handle", value: handle ? `@${handle}` : "Not set", inline: true },
+      { name: "Accepted nicknames", value: getTikTokNicknameAliases().length ? getTikTokNicknameAliases().map(alias => `@${alias}`).join(", ").slice(0, 1024) : "None", inline: false },
       { name: "Verified role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
       { name: "Unverified role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Not set", inline: true },
       { name: "How it works", value: "Match your nickname, then press check. The bot will handle the roles automatically.", inline: false }
@@ -4414,6 +4441,9 @@ function buildWebConfigPayload() {
       automodLogChannelId: config.settings.automodLogChannelId || "",
       mutedRoleId: config.settings.mutedRoleId || "",
       tiktokHandle: config.settings.tiktokHandle || "",
+      tiktokNicknameAliases: Array.isArray(config.settings.tiktokNicknameAliases)
+        ? config.settings.tiktokNicknameAliases.join(", ")
+        : String(config.settings.tiktokNicknameAliases || ""),
       verifiedRoleId: config.settings.verifiedRoleId || "",
       unverifiedRoleId: config.settings.unverifiedRoleId || ""
     },
@@ -4438,6 +4468,7 @@ function updateWebSettings(auth, payload) {
     "automodLogChannelId",
     "mutedRoleId",
     "tiktokHandle",
+    "tiktokNicknameAliases",
     "verifiedRoleId",
     "unverifiedRoleId"
   ];
@@ -4446,6 +4477,11 @@ function updateWebSettings(auth, payload) {
     if (Object.prototype.hasOwnProperty.call(payload, key)) {
       if (key === "tiktokHandle") {
         config.settings[key] = String(payload[key] || "").trim().replace(/^@/, "");
+      } else if (key === "tiktokNicknameAliases") {
+        config.settings[key] = String(payload[key] || "")
+          .split(/[\n,]+/)
+          .map(alias => alias.trim().replace(/^@/, ""))
+          .filter(Boolean);
       } else {
         config.settings[key] = String(payload[key] || "").trim() || null;
       }
@@ -4463,6 +4499,7 @@ function updateWebSettings(auth, payload) {
     automodLogChannelId: config.settings.automodLogChannelId,
     mutedRoleId: config.settings.mutedRoleId,
     tiktokHandle: config.settings.tiktokHandle,
+    tiktokNicknameAliases: config.settings.tiktokNicknameAliases,
     verifiedRoleId: config.settings.verifiedRoleId,
     unverifiedRoleId: config.settings.unverifiedRoleId
   });
