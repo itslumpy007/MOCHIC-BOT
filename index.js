@@ -3487,7 +3487,7 @@ function getVerifiedVisibilityRoots(guild, scope, referenceChannel) {
     return [parent];
   }
 
-  return [];
+  return referenceChannel ? [referenceChannel] : [];
 }
 
 async function setVerifiedVisibility(channel, locked) {
@@ -4027,6 +4027,12 @@ function buildAdminPanelButtons(view, targetUserId = null) {
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setuptiktokverify", targetUserId)).setLabel("Post TikTok Verify").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setuprules", targetUserId)).setLabel("Post Rules").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "settings-view", targetUserId)).setLabel("View Settings").setStyle(ButtonStyle.Secondary)
+      ),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "lockverified-current", targetUserId)).setLabel("Lock Verified Here").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "unlockverified-current", targetUserId)).setLabel("Unlock Verified Here").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "lockverified-all", targetUserId)).setLabel("Lock Verified All").setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "unlockverified-all", targetUserId)).setLabel("Unlock Verified All").setStyle(ButtonStyle.Secondary)
       )
     );
   }
@@ -4228,7 +4234,14 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
         { name: "AutoMod Log", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
         { name: "Verify Channel", value: getVerifyChannelId() ? `<#${getVerifyChannelId()}>` : "Not set", inline: true },
         { name: "Rules Channel", value: getRulesChannelId() ? `<#${getRulesChannelId()}>` : "Not set", inline: true },
-        { name: "Muted Role", value: getMutedRoleId() ? `<@&${getMutedRoleId()}>` : "Not set", inline: true }
+        { name: "Muted Role", value: getMutedRoleId() ? `<@&${getMutedRoleId()}>` : "Not set", inline: true },
+        {
+          name: "Verified Visibility",
+          value: getVerificationRoleId()
+            ? "Use the buttons below to lock a category so only the verified role can view it."
+            : "Set the verified role first to enable visibility locks.",
+          inline: false
+        }
       ]
     });
   }
@@ -6072,7 +6085,7 @@ client.on("interactionCreate", async interaction => {
         kind === "selectrole" ||
         kind === "configmodal" ||
         kind === "exemptselect" ||
-        ["reload-config", "setupverify", "setuptiktokverify", "setuprules", "settings-view", "reset-mod-roles", "reset-admin-roles"].includes(action)
+        ["reload-config", "setupverify", "setuptiktokverify", "setuprules", "settings-view", "reset-mod-roles", "reset-admin-roles", "lockverified-current", "lockverified-all", "unlockverified-current", "unlockverified-all"].includes(action)
           ? "admin"
           : "mod";
 
@@ -6734,6 +6747,32 @@ client.on("interactionCreate", async interaction => {
           return interaction.update({
             embeds: [await buildAdminPanelEmbed("overview", interaction, targetUserId)],
             components: buildAdminPanelButtons("overview", targetUserId)
+          });
+        }
+
+        if (action === "lockverified-current" || action === "lockverified-all") {
+          const updated = await applyVerifiedVisibilityScope(
+            interaction.guild,
+            action === "lockverified-all" ? "all" : "current",
+            interaction.channel,
+            true
+          );
+          return interaction.reply({
+            content: `Locked verified visibility on ${updated} channel${updated === 1 ? "" : "s"}.`,
+            ephemeral: true
+          });
+        }
+
+        if (action === "unlockverified-current" || action === "unlockverified-all") {
+          const updated = await applyVerifiedVisibilityScope(
+            interaction.guild,
+            action === "unlockverified-all" ? "all" : "current",
+            interaction.channel,
+            false
+          );
+          return interaction.reply({
+            content: `Removed verified visibility locks from ${updated} channel${updated === 1 ? "" : "s"}.`,
+            ephemeral: true
           });
         }
 
