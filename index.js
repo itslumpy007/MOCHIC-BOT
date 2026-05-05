@@ -320,6 +320,12 @@ function getWelcomeChannelId() {
   return config.settings?.welcomeChannelId || null;
 }
 
+function assertDistinctVerificationChannels(nextVerifyChannelId, nextWelcomeChannelId) {
+  if (nextVerifyChannelId && nextWelcomeChannelId && String(nextVerifyChannelId) === String(nextWelcomeChannelId)) {
+    throw new Error("The verify channel and welcome channel must be different channels.");
+  }
+}
+
 function isTikTokVerificationEnabled() {
   return Boolean(getTikTokHandle() && getVerificationRoleId());
 }
@@ -4869,6 +4875,14 @@ function updateWebSettings(auth, payload) {
     : splitTikTokVerificationInput(Array.isArray(config.settings.tiktokNicknameAliases)
       ? config.settings.tiktokNicknameAliases.join(", ")
       : String(config.settings.tiktokNicknameAliases || ""));
+  const nextVerifyChannelId = Object.prototype.hasOwnProperty.call(payload, "verifyChannelId")
+    ? String(payload.verifyChannelId || "").trim() || null
+    : config.settings.verifyChannelId || null;
+  const nextWelcomeChannelId = Object.prototype.hasOwnProperty.call(payload, "welcomeChannelId")
+    ? String(payload.welcomeChannelId || "").trim() || null
+    : config.settings.welcomeChannelId || null;
+
+  assertDistinctVerificationChannels(nextVerifyChannelId, nextWelcomeChannelId);
 
   for (const key of allowed) {
     if (Object.prototype.hasOwnProperty.call(payload, key)) {
@@ -4876,8 +4890,6 @@ function updateWebSettings(auth, payload) {
         config.settings[key] = nextTikTokHandle[0] || "";
       } else if (key === "tiktokNicknameAliases") {
         config.settings[key] = [...new Set([...nextTikTokAliases, ...nextTikTokHandle.slice(1)])];
-      } else if (key === "welcomeChannelId") {
-        config.settings[key] = String(payload[key] || "").trim() || null;
       } else {
         config.settings[key] = String(payload[key] || "").trim() || null;
       }
@@ -9278,12 +9290,16 @@ client.on("interactionCreate", async interaction => {
       }
 
       if (subcommand === "verifychannel") {
-        config.settings.verifyChannelId = interaction.options.getChannel("channel").id;
+        const nextVerifyChannelId = interaction.options.getChannel("channel").id;
+        assertDistinctVerificationChannels(nextVerifyChannelId, config.settings.welcomeChannelId);
+        config.settings.verifyChannelId = nextVerifyChannelId;
         config.verifyMessageId = null;
       }
 
       if (subcommand === "welcomechannel") {
-        config.settings.welcomeChannelId = interaction.options.getChannel("channel").id;
+        const nextWelcomeChannelId = interaction.options.getChannel("channel").id;
+        assertDistinctVerificationChannels(config.settings.verifyChannelId, nextWelcomeChannelId);
+        config.settings.welcomeChannelId = nextWelcomeChannelId;
       }
 
       if (subcommand === "tiktokhandle") {
