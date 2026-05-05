@@ -319,6 +319,11 @@ function isTikTokVerificationEnabled() {
   return Boolean(getTikTokHandle() && getVerificationRoleId());
 }
 
+function getSelectedMochiRoleId(member) {
+  if (!member?.roles?.cache) return null;
+  return ALL_ROLES.find(roleId => roleId && member.roles.cache.has(roleId)) || null;
+}
+
 function getTikTokVerificationSetupIssues() {
   const issues = [];
   if (!getVerifyChannelId()) issues.push("verify channel");
@@ -349,7 +354,7 @@ function buildTikTokVerificationSummary() {
     `Accepted nicknames: ${aliases.length ? aliases.slice(0, 5).map(alias => `@${alias}`).join(", ") : "None"}`,
     `Verified role: ${getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set"}`,
     `Unverified role: ${getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Not set"}`,
-    `Mode: ${isTikTokVerificationEnabled() ? "Nickname gate" : "Disabled"}`
+    `Mode: ${isTikTokVerificationEnabled() ? "Reaction role + nickname gate" : "Disabled"}`
   ].join("\n");
 }
 
@@ -361,8 +366,47 @@ async function syncTikTokVerification(member, source = "manual") {
   const handle = getTikTokHandle();
   const verifiedRoleId = getVerificationRoleId();
   const unverifiedRoleId = getUnverifiedRoleId();
+  const selectedRoleId = getSelectedMochiRoleId(member);
   if (!handle || (!verifiedRoleId && !unverifiedRoleId)) {
     return { matched: false, changed: false, reason: "TikTok verification is not configured." };
+  }
+
+  if (!selectedRoleId) {
+    const rolesToAdd = [];
+    const rolesToRemove = [];
+
+    if (unverifiedRoleId && !member.roles.cache.has(unverifiedRoleId)) {
+      rolesToAdd.push(unverifiedRoleId);
+    }
+    if (verifiedRoleId && member.roles.cache.has(verifiedRoleId)) {
+      rolesToRemove.push(verifiedRoleId);
+    }
+
+    if (!rolesToAdd.length && !rolesToRemove.length) {
+      return {
+        matched: false,
+        changed: false,
+        reason: "Pick one reaction role first, then run verify again to unlock the server."
+      };
+    }
+
+    if (!member.manageable) {
+      throw new Error("I cannot manage that member's roles.");
+    }
+
+    if (rolesToRemove.length) {
+      await member.roles.remove(rolesToRemove, `TikTok verification sync (${source})`).catch(() => {});
+    }
+
+    if (rolesToAdd.length) {
+      await member.roles.add(rolesToAdd, `TikTok verification sync (${source})`).catch(() => {});
+    }
+
+    return {
+      matched: false,
+      changed: Boolean(rolesToAdd.length || rolesToRemove.length),
+      reason: "Pick one reaction role first, then run verify again to unlock the server."
+    };
   }
 
   const matched = matchesTikTokVerification(member);
@@ -3374,15 +3418,15 @@ function buildTikTokVerifyEmbed() {
     title: "TikTok name verification",
     description:
       handle
-        ? `Set your server nickname to match **@${handle}**${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""} and press the button below or run \`/verify\` in ${getVerifyChannelMention()}.\n\nOnce it matches, the bot will grant the verified role${getUnverifiedRoleId() ? " and remove the unverified role" : ""}.`
-        : `Set your server nickname to match the TikTok handle your staff configured, then press the button below or run \`/verify\` in ${getVerifyChannelMention()}.\n\nAsk staff if you are not sure what format they want.`,
+        ? `First pick one of the reaction roles in the server, then set your server nickname to match **@${handle}**${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""} and press the button below or run \`/verify\` in ${getVerifyChannelMention()}.\n\nOnce both steps are done, the bot will grant the verified role${getUnverifiedRoleId() ? " and remove the unverified role" : ""}.`
+        : `First pick one of the reaction roles in the server, then set your server nickname to match the TikTok handle your staff configured, then press the button below or run \`/verify\` in ${getVerifyChannelMention()}.\n\nAsk staff if you are not sure what format they want.`,
     color: COLORS.pink,
     fields: [
       { name: "TikTok handle", value: handle ? `@${handle}` : "Not set", inline: true },
       { name: "Accepted nicknames", value: getTikTokNicknameAliases().length ? getTikTokNicknameAliases().map(alias => `@${alias}`).join(", ").slice(0, 1024) : "None", inline: false },
       { name: "Verified role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
       { name: "Unverified role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Optional", inline: true },
-      { name: "How it works", value: "Match your nickname, then press check. The bot will handle the roles automatically.", inline: false }
+      { name: "How it works", value: "Pick a reaction role first, then match your nickname. The bot will handle the roles automatically.", inline: false }
     ]
   });
 }
@@ -5813,6 +5857,11 @@ client.on("messageReactionAdd", async (reaction, user) => {
     await member.roles.remove(ALL_ROLES.filter(id => id !== roleData.id));
     await member.roles.add(roleData.id);
 
+    await syncTikTokVerification(member, "reaction-role").catch(error => {
+      console.error("TikTok verification sync error:", error.message);
+      return null;
+    });
+
     await logEmbed(
       makeEmbed({
         title: "Role selected",
@@ -5841,6 +5890,10 @@ client.on("messageReactionRemove", async (reaction, user) => {
     if (!member.roles.cache.has(roleData.id)) return;
 
     await member.roles.remove(roleData.id);
+    await syncTikTokVerification(member, "reaction-role-remove").catch(error => {
+      console.error("TikTok verification sync error:", error.message);
+      return null;
+    });
     await logEmbed(
       makeEmbed({
         title: "Role removed",
@@ -6886,7 +6939,7 @@ client.on("interactionCreate", async interaction => {
           const verifyEmbed = makeEmbed({
             title: "welcome to the mochi garden",
             description:
-              "Pick one flavor role by reacting below to unlock your vibe.\n\n" +
+              "Pick one flavor role by reacting below. After that, complete TikTok nickname verification to unlock the server.\n\n" +
               "🌸 Sakura\n🍓 Strawberry Milk\n🍵 Matcha Dream\n🫐 Mystic Berry\n💜 Taro Cloud\n\n" +
               "You can switch your role anytime by changing your reaction.",
             color: COLORS.pink
@@ -7679,7 +7732,7 @@ client.on("interactionCreate", async interaction => {
         embeds: [makeEmbed({
           title: "welcome to the mochi garden",
           description:
-            "Pick one flavor role by reacting below to unlock your vibe.\n\n" +
+            "Pick one flavor role by reacting below. After that, complete TikTok nickname verification to unlock the server.\n\n" +
             "🌸 Sakura\n🍓 Strawberry Milk\n🍵 Matcha Dream\n🫐 Mystic Berry\n💜 Taro Cloud\n\n" +
             "You can switch your role anytime by changing your reaction.",
           color: COLORS.pink
@@ -9148,7 +9201,7 @@ client.on("guildMemberAdd", async member => {
           `Hi ${member.user.username}.\n\n` +
           `We are happy you joined.\n` +
           (isTikTokVerificationEnabled()
-            ? `Please set your server nickname to match **@${getTikTokHandle()}** and press **Check My Name** in ${getVerifyChannelMention()} or run \`/verify\`.\n\n`
+            ? `Please pick one reaction role first, then set your server nickname to match **@${getTikTokHandle()}** and press **Check My Name** in ${getVerifyChannelMention()} or run \`/verify\`.\n\n`
             : `Please head to ${getVerifyChannelMention()} to verify and unlock the server.\n\n`) +
           "Have fun and enjoy your stay.",
         color: COLORS.pink,
