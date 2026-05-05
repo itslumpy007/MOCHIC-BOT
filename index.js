@@ -1467,6 +1467,36 @@ const allCommands = [
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels),
 
   new SlashCommandBuilder()
+    .setName("lockverified")
+    .setDescription("Lock a category so only the verified role can see it")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+    .addStringOption(option =>
+      option
+        .setName("scope")
+        .setDescription("What to lock")
+        .addChoices(
+          { name: "Current category", value: "current" },
+          { name: "All categories", value: "all" }
+        )
+        .setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("unlockverified")
+    .setDescription("Remove verified-role visibility locks from categories")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+    .addStringOption(option =>
+      option
+        .setName("scope")
+        .setDescription("What to unlock")
+        .addChoices(
+          { name: "Current category", value: "current" },
+          { name: "All categories", value: "all" }
+        )
+        .setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
     .setName("announce")
     .setDescription("Send a styled announcement")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
@@ -3442,6 +3472,77 @@ function buildTikTokVerifyComponents() {
   ];
 }
 
+function getVerifiedVisibilityRoots(guild, scope, referenceChannel) {
+  const normalizedScope = String(scope || "current").toLowerCase();
+  if (normalizedScope === "all") {
+    return [...guild.channels.cache.values()].filter(channel => channel?.type === ChannelType.GuildCategory);
+  }
+
+  if (referenceChannel?.type === ChannelType.GuildCategory) {
+    return [referenceChannel];
+  }
+
+  const parent = referenceChannel?.parent;
+  if (parent?.type === ChannelType.GuildCategory) {
+    return [parent];
+  }
+
+  return [];
+}
+
+async function setVerifiedVisibility(channel, locked) {
+  if (!channel?.permissionOverwrites?.edit) return false;
+
+  const verifiedRoleId = getVerificationRoleId();
+  const unverifiedRoleId = getUnverifiedRoleId();
+
+  if (locked) {
+    await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { ViewChannel: false }).catch(() => {});
+    await channel.permissionOverwrites.edit(verifiedRoleId, { ViewChannel: true }).catch(() => {});
+    if (unverifiedRoleId) {
+      await channel.permissionOverwrites.edit(unverifiedRoleId, { ViewChannel: false }).catch(() => {});
+    }
+  } else {
+    await channel.permissionOverwrites.delete(channel.guild.roles.everyone).catch(() => {});
+    await channel.permissionOverwrites.delete(verifiedRoleId).catch(() => {});
+    if (unverifiedRoleId) {
+      await channel.permissionOverwrites.delete(unverifiedRoleId).catch(() => {});
+    }
+  }
+
+  return true;
+}
+
+async function applyVerifiedVisibilityScope(guild, scope, referenceChannel, locked) {
+  const verifiedRoleId = getVerificationRoleId();
+  if (!verifiedRoleId) {
+    throw new Error("Set the verified role first.");
+  }
+
+  const roots = getVerifiedVisibilityRoots(guild, scope, referenceChannel);
+  if (!roots.length) {
+    throw new Error("Pick a category channel or use the all categories option.");
+  }
+
+  let updated = 0;
+  for (const root of roots) {
+    const targets = [
+      root,
+      ...guild.channels.cache
+        .filter(channel => channel.parentId === root.id && !(typeof channel.isThread === "function" && channel.isThread()))
+        .values()
+    ];
+
+    for (const target of targets) {
+      if (await setVerifiedVisibility(target, locked)) {
+        updated += 1;
+      }
+    }
+  }
+
+  return updated;
+}
+
 async function postTikTokVerifyPanel(source = "manual") {
   const setupIssues = getTikTokVerificationSetupIssues();
   if (setupIssues.length) {
@@ -3496,7 +3597,7 @@ function buildHelpEmbed() {
     },
     {
       name: "Verification",
-      value: "`/verify`, `/setupverify`, `/setuptiktokverify`, `/settings`",
+      value: "`/verify`, `/setupverify`, `/setuptiktokverify`, `/lockverified`, `/unlockverified`, `/settings`",
       inline: false
     },
     {
@@ -3506,7 +3607,7 @@ function buildHelpEmbed() {
     },
     {
       name: "Server Tools",
-      value: "`/setupverify`, `/setuptiktokverify`, `/setuprules`, `/announce`, `/purge`, `/lockdown`, `/unlockdown`",
+      value: "`/setupverify`, `/setuptiktokverify`, `/setuprules`, `/announce`, `/purge`, `/lockdown`, `/unlockdown`, `/lockverified`, `/unlockverified`",
       inline: false
     },
     {
@@ -7807,6 +7908,24 @@ client.on("interactionCreate", async interaction => {
         ]
       });
       return interaction.reply({ content: "Channel unlocked.", ephemeral: true });
+    }
+
+    if (interaction.commandName === "lockverified") {
+      const scope = interaction.options.getString("scope") || "current";
+      const updated = await applyVerifiedVisibilityScope(interaction.guild, scope, interaction.channel, true);
+      return interaction.reply({
+        content: `Locked verified visibility on ${updated} channel${updated === 1 ? "" : "s"}.`,
+        ephemeral: true
+      });
+    }
+
+    if (interaction.commandName === "unlockverified") {
+      const scope = interaction.options.getString("scope") || "current";
+      const updated = await applyVerifiedVisibilityScope(interaction.guild, scope, interaction.channel, false);
+      return interaction.reply({
+        content: `Removed verified visibility locks from ${updated} channel${updated === 1 ? "" : "s"}.`,
+        ephemeral: true
+      });
     }
 
     if (interaction.commandName === "announce") {
