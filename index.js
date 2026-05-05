@@ -5735,6 +5735,37 @@ async function handleWebApi(req, res, pathname) {
       return sendWebJson(res, 200, { ok: true, settings, posted });
     }
 
+    if (req.method === "POST" && pathname === "/api/verified-visibility") {
+      if (!hasWebAccess(auth, "admin")) {
+        return sendWebJson(res, 403, { error: "Admin web access is required." });
+      }
+
+      const body = await readWebJsonBody(req);
+      const scope = String(body.scope || "current").toLowerCase();
+      const locked = Boolean(body.locked);
+      const verifyChannelId = getVerifyChannelId();
+      const verifyChannel = verifyChannelId ? await client.channels.fetch(verifyChannelId).catch(() => null) : null;
+      const referenceChannel = verifyChannel?.type === ChannelType.GuildCategory ? verifyChannel : verifyChannel?.parent || verifyChannel;
+      const guild = await client.guilds.fetch(GUILD_ID).catch(() => client.guilds.cache.get(GUILD_ID) || null);
+      if (!guild) {
+        return sendWebJson(res, 500, { error: "The Discord guild could not be loaded." });
+      }
+      const updated = await applyVerifiedVisibilityScope(guild, scope, referenceChannel, locked);
+
+      recordAuditLog(getWebModeratorTag(auth), locked ? "verified-visibility-locked" : "verified-visibility-unlocked", {
+        scope,
+        updated,
+        verifyChannelId
+      });
+
+      return sendWebJson(res, 200, {
+        ok: true,
+        updated,
+        scope,
+        locked
+      });
+    }
+
     if (req.method === "POST" && pathname === "/api/permissions") {
       if (!hasWebAccess(auth, "admin")) {
         return sendWebJson(res, 403, { error: "Admin web access is required." });

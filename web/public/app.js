@@ -1482,6 +1482,23 @@ async function saveAndPostTikTokVerify() {
   setAlert("TikTok verify panel saved and posted.");
 }
 
+async function setVerifiedVisibility(locked, scope) {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to change verified visibility.", "error");
+    return;
+  }
+
+  const result = await api("/api/verified-visibility", {
+    method: "POST",
+    body: JSON.stringify({ locked, scope })
+  });
+
+  await loadAll();
+  setAlert(result.locked
+    ? `Locked verified visibility on ${result.updated} channel${result.updated === 1 ? "" : "s"}.`
+    : `Removed verified visibility locks from ${result.updated} channel${result.updated === 1 ? "" : "s"}.`);
+}
+
 async function saveExemptions() {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change exemptions.", "error");
@@ -1608,6 +1625,10 @@ function bindEvents() {
   $("#saveAutomod").addEventListener("click", () => saveAutomod().catch(error => setAlert(error.message, "error")));
   $("#saveSettings").addEventListener("click", () => saveSettings().catch(error => setAlert(error.message, "error")));
   $("#saveAndPostTikTokVerify").addEventListener("click", () => saveAndPostTikTokVerify().catch(error => setAlert(error.message, "error")));
+  $("#lockVerifiedCurrent").addEventListener("click", () => setVerifiedVisibility(true, "current").catch(error => setAlert(error.message, "error")));
+  $("#unlockVerifiedCurrent").addEventListener("click", () => setVerifiedVisibility(false, "current").catch(error => setAlert(error.message, "error")));
+  $("#lockVerifiedAll").addEventListener("click", () => setVerifiedVisibility(true, "all").catch(error => setAlert(error.message, "error")));
+  $("#unlockVerifiedAll").addEventListener("click", () => setVerifiedVisibility(false, "all").catch(error => setAlert(error.message, "error")));
   $("#saveStaff").addEventListener("click", () => saveStaff().catch(error => setAlert(error.message, "error")));
   $("#saveExemptions").addEventListener("click", () => saveExemptions().catch(error => setAlert(error.message, "error")));
   $("#saveRuleActions").addEventListener("click", () => saveRuleActions().catch(error => setAlert(error.message, "error")));
