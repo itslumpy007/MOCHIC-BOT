@@ -274,7 +274,7 @@ function normalizeVerificationText(value) {
 
 function splitTikTokVerificationInput(value) {
   return String(value || "")
-    .split(/[\n,]+/)
+    .split(/[\s,\n]+/)
     .map(item => item.trim())
     .filter(Boolean)
     .map(item => item.replace(/^@/, ""));
