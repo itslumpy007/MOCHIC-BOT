@@ -137,6 +137,13 @@ const verificationSettingLabels = {
   unverifiedRoleId: "Unverified role ID"
 };
 
+const verificationSettingTypes = {
+  tiktokHandle: "input",
+  tiktokNicknameAliases: "textarea",
+  verifiedRoleId: "input",
+  unverifiedRoleId: "input"
+};
+
 const automodPresets = {
   light: {
     invites: true,
@@ -683,7 +690,9 @@ function renderSettings() {
   $("#verificationSettingsFields").innerHTML = Object.entries(verificationSettingLabels)
     .map(([key, label]) => `
       <label>${label}
-        <textarea data-setting="${key}" rows="${key === "tiktokNicknameAliases" ? "4" : "2"}" placeholder="${key === "tiktokNicknameAliases" ? "Name 1, Name 2, Name 3" : ""}">${escapeHtml(Array.isArray(settings[key]) ? settings[key].join(", ") : (settings[key] || ""))}</textarea>
+        ${verificationSettingTypes[key] === "textarea"
+          ? `<textarea data-setting="${key}" rows="4" placeholder="${key === "tiktokNicknameAliases" ? "Name 1, Name 2, Name 3" : ""}">${escapeHtml(Array.isArray(settings[key]) ? settings[key].join(", ") : (settings[key] || ""))}</textarea>`
+          : `<input data-setting="${key}" value="${escapeHtml(Array.isArray(settings[key]) ? settings[key].join(", ") : (settings[key] || ""))}" placeholder="${key === "tiktokHandle" ? "@yourhandle" : ""}">`}
       </label>
     `).join("");
 

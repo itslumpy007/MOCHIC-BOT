@@ -272,24 +272,31 @@ function normalizeVerificationText(value) {
     .replace(/[^a-z0-9]/g, "");
 }
 
+function splitTikTokVerificationInput(value) {
+  return String(value || "")
+    .split(/[\n,]+/)
+    .map(item => item.trim())
+    .filter(Boolean)
+    .map(item => item.replace(/^@/, ""));
+}
+
 function getTikTokHandle() {
-  return String(config.settings?.tiktokHandle || "").trim().replace(/^@/, "");
+  const [handle = ""] = splitTikTokVerificationInput(config.settings?.tiktokHandle || "");
+  return handle;
 }
 
 function getTikTokNicknameAliases() {
   const aliases = config.settings?.tiktokNicknameAliases;
-  if (Array.isArray(aliases)) {
-    return aliases.map(alias => normalizeVerificationText(alias)).filter(Boolean);
-  }
+  const aliasList = Array.isArray(aliases)
+    ? aliases
+    : typeof aliases === "string"
+      ? aliases.split(/[\n,]+/)
+      : [];
 
-  if (typeof aliases === "string") {
-    return aliases
-      .split(/[\n,]+/)
-      .map(alias => normalizeVerificationText(alias))
-      .filter(Boolean);
-  }
-
-  return [];
+  const handleExtras = splitTikTokVerificationInput(config.settings?.tiktokHandle || "").slice(1);
+  return [...aliasList, ...handleExtras]
+    .map(alias => normalizeVerificationText(alias))
+    .filter(Boolean);
 }
 
 function getVerificationRoleId() {
@@ -3390,6 +3397,16 @@ async function postTikTokVerifyPanel(source = "manual") {
     throw new Error("The verify channel could not be found.");
   }
 
+  const botMember = verifyChannel.guild?.members?.me || verifyChannel.guild?.members?.cache?.get(client.user.id) || null;
+  const requiredPermissions = ["ViewChannel", "SendMessages", "EmbedLinks"];
+  if (botMember && typeof verifyChannel.permissionsFor === "function") {
+    const permissions = verifyChannel.permissionsFor(botMember);
+    const missing = requiredPermissions.filter(permission => !permissions?.has(PermissionFlagsBits[permission]));
+    if (missing.length) {
+      throw new Error(`I am missing permissions in the verify channel: ${missing.join(", ")}.`);
+    }
+  }
+
   const sentMessage = await verifyChannel.send({
     embeds: [buildTikTokVerifyEmbed()],
     components: buildTikTokVerifyComponents()
@@ -4479,7 +4496,7 @@ function buildWebConfigPayload() {
       logChannelId: config.settings.logChannelId || "",
       automodLogChannelId: config.settings.automodLogChannelId || "",
       mutedRoleId: config.settings.mutedRoleId || "",
-      tiktokHandle: config.settings.tiktokHandle || "",
+      tiktokHandle: getTikTokHandle(),
       tiktokNicknameAliases: Array.isArray(config.settings.tiktokNicknameAliases)
         ? config.settings.tiktokNicknameAliases.join(", ")
         : String(config.settings.tiktokNicknameAliases || ""),
@@ -4512,15 +4529,21 @@ function updateWebSettings(auth, payload) {
     "unverifiedRoleId"
   ];
 
+  const nextTikTokHandle = Object.prototype.hasOwnProperty.call(payload, "tiktokHandle")
+    ? splitTikTokVerificationInput(payload.tiktokHandle)
+    : splitTikTokVerificationInput(config.settings.tiktokHandle || "");
+  const nextTikTokAliases = Object.prototype.hasOwnProperty.call(payload, "tiktokNicknameAliases")
+    ? splitTikTokVerificationInput(payload.tiktokNicknameAliases)
+    : splitTikTokVerificationInput(Array.isArray(config.settings.tiktokNicknameAliases)
+      ? config.settings.tiktokNicknameAliases.join(", ")
+      : String(config.settings.tiktokNicknameAliases || ""));
+
   for (const key of allowed) {
     if (Object.prototype.hasOwnProperty.call(payload, key)) {
       if (key === "tiktokHandle") {
-        config.settings[key] = String(payload[key] || "").trim().replace(/^@/, "");
+        config.settings[key] = nextTikTokHandle[0] || "";
       } else if (key === "tiktokNicknameAliases") {
-        config.settings[key] = String(payload[key] || "")
-          .split(/[\n,]+/)
-          .map(alias => alias.trim().replace(/^@/, ""))
-          .filter(Boolean);
+        config.settings[key] = [...new Set([...nextTikTokAliases, ...nextTikTokHandle.slice(1)])];
       } else {
         config.settings[key] = String(payload[key] || "").trim() || null;
       }
@@ -8822,15 +8845,11 @@ client.on("interactionCreate", async interaction => {
       }
 
       if (subcommand === "tiktokhandle") {
-        config.settings.tiktokHandle = interaction.options.getString("handle").trim().replace(/^@/, "");
+        config.settings.tiktokHandle = splitTikTokVerificationInput(interaction.options.getString("handle"))[0] || "";
       }
 
       if (subcommand === "tiktokaliases") {
-        config.settings.tiktokNicknameAliases = interaction.options.getString("aliases")
-          .split(/[\n,]+/)
-          .map(alias => alias.trim())
-          .filter(Boolean)
-          .map(alias => alias.replace(/^@/, ""));
+        config.settings.tiktokNicknameAliases = splitTikTokVerificationInput(interaction.options.getString("aliases"));
       }
 
       if (subcommand === "verifiedrole") {
