@@ -125,6 +125,7 @@ const listLabels = {
 const settingLabels = {
   verifyChannelId: "Verify channel ID",
   rulesChannelId: "Rules channel ID",
+  welcomeChannelId: "Welcome channel ID",
   logChannelId: "Log channel ID",
   automodLogChannelId: "AutoMod log channel ID",
   mutedRoleId: "Muted role ID"
@@ -692,7 +693,7 @@ function renderSettings() {
       <label>${label}
         ${verificationSettingTypes[key] === "textarea"
           ? `<textarea data-setting="${key}" rows="4" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="${key === "tiktokNicknameAliases" ? "Paste @name, tiktok.com/@name, or multiple names separated by commas or new lines" : ""}">${escapeHtml(Array.isArray(settings[key]) ? settings[key].join(", ") : (settings[key] || ""))}</textarea>`
-          : `<input data-setting="${key}" value="${escapeHtml(Array.isArray(settings[key]) ? settings[key].join(", ") : (settings[key] || ""))}" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="${key === "tiktokHandle" ? "Paste @yourhandle or tiktok.com/@yourhandle" : ""}">`}
+          : `<input data-setting="${key}" value="${escapeHtml(Array.isArray(settings[key]) ? settings[key].join(", ") : (settings[key] || ""))}" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="${key === "tiktokHandle" ? "Paste @yourhandle or tiktok.com/@yourhandle" : key === "welcomeChannelId" ? "Channel ID" : ""}">`}
       </label>
     `).join("");
 

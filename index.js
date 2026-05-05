@@ -248,6 +248,7 @@ function createDefaultConfig() {
     settings: {
       verifyChannelId: null,
       rulesChannelId: null,
+      welcomeChannelId: null,
       logChannelId: null,
       automodLogChannelId: null,
       mutedRoleId: null,
@@ -315,6 +316,10 @@ function getUnverifiedRoleId() {
   return config.settings?.unverifiedRoleId || null;
 }
 
+function getWelcomeChannelId() {
+  return config.settings?.welcomeChannelId || null;
+}
+
 function isTikTokVerificationEnabled() {
   return Boolean(getTikTokHandle() && getVerificationRoleId());
 }
@@ -354,6 +359,7 @@ function buildTikTokVerificationSummary() {
     `Accepted nicknames: ${aliases.length ? aliases.slice(0, 5).map(alias => `@${alias}`).join(", ") : "None"}`,
     `Verified role: ${getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set"}`,
     `Unverified role: ${getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Not set"}`,
+    `Welcome channel: ${getWelcomeChannelId() ? `<#${getWelcomeChannelId()}>` : "Not set"}`,
     `Mode: ${isTikTokVerificationEnabled() ? "Reaction role + nickname gate" : "Disabled"}`
   ].join("\n");
 }
@@ -2170,6 +2176,18 @@ const allCommands = [
     )
     .addSubcommand(subcommand =>
       subcommand
+        .setName("welcomechannel")
+        .setDescription("Set the welcome channel shown to unverified members")
+        .addChannelOption(option =>
+          option
+            .setName("channel")
+            .setDescription("Channel to use as the welcome channel")
+            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
         .setName("tiktokhandle")
         .setDescription("Set the TikTok handle used for nickname verification")
         .addStringOption(option =>
@@ -2232,6 +2250,7 @@ const allCommands = [
               { name: "automod log channel", value: "automodlogchannel" },
               { name: "muted role", value: "mutedrole" },
               { name: "verify channel", value: "verifychannel" },
+              { name: "welcome channel", value: "welcomechannel" },
               { name: "TikTok handle", value: "tiktokhandle" },
               { name: "TikTok aliases", value: "tiktokaliases" },
               { name: "verified role", value: "verifiedrole" },
@@ -3513,6 +3532,60 @@ async function setVerifiedVisibility(channel, locked) {
   return true;
 }
 
+async function setWelcomeVisibility(channel, locked) {
+  if (!channel?.permissionOverwrites?.edit) return false;
+
+  const verifiedRoleId = getVerificationRoleId();
+  const unverifiedRoleId = getUnverifiedRoleId();
+
+  if (locked) {
+    await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { ViewChannel: false }).catch(() => {});
+    if (verifiedRoleId) {
+      await channel.permissionOverwrites.edit(verifiedRoleId, { ViewChannel: false }).catch(() => {});
+    }
+    if (unverifiedRoleId) {
+      await channel.permissionOverwrites.edit(unverifiedRoleId, { ViewChannel: true }).catch(() => {});
+    }
+  } else {
+    await channel.permissionOverwrites.delete(channel.guild.roles.everyone).catch(() => {});
+    if (verifiedRoleId) {
+      await channel.permissionOverwrites.delete(verifiedRoleId).catch(() => {});
+    }
+    if (unverifiedRoleId) {
+      await channel.permissionOverwrites.delete(unverifiedRoleId).catch(() => {});
+    }
+  }
+
+  return true;
+}
+
+async function setVerifyChannelVisibility(channel, locked) {
+  if (!channel?.permissionOverwrites?.edit) return false;
+
+  const verifiedRoleId = getVerificationRoleId();
+  const unverifiedRoleId = getUnverifiedRoleId();
+
+  if (locked) {
+    await channel.permissionOverwrites.edit(channel.guild.roles.everyone, { ViewChannel: true }).catch(() => {});
+    if (verifiedRoleId) {
+      await channel.permissionOverwrites.edit(verifiedRoleId, { ViewChannel: true }).catch(() => {});
+    }
+    if (unverifiedRoleId) {
+      await channel.permissionOverwrites.edit(unverifiedRoleId, { ViewChannel: true }).catch(() => {});
+    }
+  } else {
+    await channel.permissionOverwrites.delete(channel.guild.roles.everyone).catch(() => {});
+    if (verifiedRoleId) {
+      await channel.permissionOverwrites.delete(verifiedRoleId).catch(() => {});
+    }
+    if (unverifiedRoleId) {
+      await channel.permissionOverwrites.delete(unverifiedRoleId).catch(() => {});
+    }
+  }
+
+  return true;
+}
+
 async function applyVerifiedVisibilityScope(guild, scope, referenceChannel, locked) {
   const verifiedRoleId = getVerificationRoleId();
   if (!verifiedRoleId) {
@@ -3537,6 +3610,22 @@ async function applyVerifiedVisibilityScope(guild, scope, referenceChannel, lock
       if (await setVerifiedVisibility(target, locked)) {
         updated += 1;
       }
+    }
+  }
+
+  const welcomeChannelId = getWelcomeChannelId();
+  if (welcomeChannelId) {
+    const welcomeChannel = await guild.channels.fetch(welcomeChannelId).catch(() => null);
+    if (welcomeChannel) {
+      await setWelcomeVisibility(welcomeChannel, locked);
+    }
+  }
+
+  const verifyChannelId = getVerifyChannelId();
+  if (verifyChannelId) {
+    const verifyChannel = await guild.channels.fetch(verifyChannelId).catch(() => null);
+    if (verifyChannel) {
+      await setVerifyChannelVisibility(verifyChannel, locked);
     }
   }
 
@@ -4734,6 +4823,7 @@ function buildWebConfigPayload() {
     settings: {
       verifyChannelId: config.settings.verifyChannelId || "",
       rulesChannelId: config.settings.rulesChannelId || "",
+      welcomeChannelId: getWelcomeChannelId() || "",
       logChannelId: config.settings.logChannelId || "",
       automodLogChannelId: config.settings.automodLogChannelId || "",
       mutedRoleId: config.settings.mutedRoleId || "",
@@ -4761,6 +4851,7 @@ function updateWebSettings(auth, payload) {
   const allowed = [
     "verifyChannelId",
     "rulesChannelId",
+    "welcomeChannelId",
     "logChannelId",
     "automodLogChannelId",
     "mutedRoleId",
@@ -4785,6 +4876,8 @@ function updateWebSettings(auth, payload) {
         config.settings[key] = nextTikTokHandle[0] || "";
       } else if (key === "tiktokNicknameAliases") {
         config.settings[key] = [...new Set([...nextTikTokAliases, ...nextTikTokHandle.slice(1)])];
+      } else if (key === "welcomeChannelId") {
+        config.settings[key] = String(payload[key] || "").trim() || null;
       } else {
         config.settings[key] = String(payload[key] || "").trim() || null;
       }
@@ -4798,6 +4891,7 @@ function updateWebSettings(auth, payload) {
   recordAuditLog(getWebModeratorTag(auth), "settings-updated", {
     verifyChannelId: config.settings.verifyChannelId,
     rulesChannelId: config.settings.rulesChannelId,
+    welcomeChannelId: config.settings.welcomeChannelId,
     logChannelId: config.settings.logChannelId,
     automodLogChannelId: config.settings.automodLogChannelId,
     mutedRoleId: config.settings.mutedRoleId,
@@ -9188,6 +9282,10 @@ client.on("interactionCreate", async interaction => {
         config.verifyMessageId = null;
       }
 
+      if (subcommand === "welcomechannel") {
+        config.settings.welcomeChannelId = interaction.options.getChannel("channel").id;
+      }
+
       if (subcommand === "tiktokhandle") {
         config.settings.tiktokHandle = splitTikTokVerificationInput(interaction.options.getString("handle"))[0] || "";
       }
@@ -9228,6 +9326,10 @@ client.on("interactionCreate", async interaction => {
           config.verifyMessageId = null;
         }
 
+        if (target === "welcomechannel") {
+          config.settings.welcomeChannelId = null;
+        }
+
         if (target === "tiktokhandle") {
           config.settings.tiktokHandle = "";
         }
@@ -9258,7 +9360,7 @@ client.on("interactionCreate", async interaction => {
         }
       }
 
-      if (["tiktokhandle", "tiktokaliases", "verifiedrole", "unverifiedrole", "verifychannel"].includes(subcommand)) {
+      if (["tiktokhandle", "tiktokaliases", "verifiedrole", "unverifiedrole", "verifychannel", "welcomechannel"].includes(subcommand)) {
         await resolveVerifyMessageId().catch(() => null);
       }
 
