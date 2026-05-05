@@ -272,12 +272,20 @@ function normalizeVerificationText(value) {
     .replace(/[^a-z0-9]/g, "");
 }
 
+function normalizeTikTokVerificationInputToken(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^https?:\/\/(?:www\.|m\.)?tiktok\.com\/@/i, "")
+    .replace(/^@+/, "")
+    .replace(/[?#].*$/, "")
+    .replace(/\/.*$/, "");
+}
+
 function splitTikTokVerificationInput(value) {
   return String(value || "")
-    .split(/[\s,\n]+/)
-    .map(item => item.trim())
-    .filter(Boolean)
-    .map(item => item.replace(/^@/, ""));
+    .split(/[\s,\n;]+/)
+    .map(item => normalizeTikTokVerificationInputToken(item))
+    .filter(Boolean);
 }
 
 function getTikTokHandle() {
