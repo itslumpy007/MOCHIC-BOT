@@ -3567,10 +3567,9 @@ async function markAllMembersUnverified(guild) {
   for (const member of members.values()) {
     if (member.user?.bot) continue;
 
-    const hasReactionRole = Boolean(getSelectedMochiRoleId(member));
     const hasVerified = member.roles.cache.has(verifiedRoleId);
     const hasUnverified = member.roles.cache.has(unverifiedRoleId);
-    const wantsUnverified = hasReactionRole && !hasVerified;
+    const wantsUnverified = !hasVerified;
 
     if (hasVerified && hasUnverified) {
       if (!member.manageable) {
