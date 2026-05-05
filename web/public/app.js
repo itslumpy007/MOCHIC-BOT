@@ -692,6 +692,14 @@ function renderSettings() {
   $("#exemptUserIds").value = (automod.exemptUserIds || []).join(", ");
 }
 
+function collectSettingsPayload() {
+  const payload = {};
+  document.querySelectorAll("[data-setting]").forEach(input => {
+    payload[input.dataset.setting] = input.value;
+  });
+  return payload;
+}
+
 function renderStaff() {
   const permissions = state.config?.permissions || {};
   const modRoleIds = permissions.modRoleIds || [];
@@ -1438,10 +1446,7 @@ async function saveSettings() {
     setAlert("Admin web access is required to change server settings.", "error");
     return;
   }
-  const payload = {};
-  document.querySelectorAll("[data-setting]").forEach(input => {
-    payload[input.dataset.setting] = input.value;
-  });
+  const payload = collectSettingsPayload();
 
   const result = await api("/api/settings", {
     method: "POST",
@@ -1449,6 +1454,23 @@ async function saveSettings() {
   });
   state.config.settings = result.settings;
   await loadAll();
+}
+
+async function saveAndPostTikTokVerify() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to change server settings.", "error");
+    return;
+  }
+
+  const payload = collectSettingsPayload();
+  const result = await api("/api/tiktok-verify-setup", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+
+  state.config.settings = result.settings;
+  await loadAll();
+  setAlert("TikTok verify panel saved and posted.");
 }
 
 async function saveExemptions() {
@@ -1576,6 +1598,7 @@ function bindEvents() {
   $("#refreshButton").addEventListener("click", loadAll);
   $("#saveAutomod").addEventListener("click", () => saveAutomod().catch(error => setAlert(error.message, "error")));
   $("#saveSettings").addEventListener("click", () => saveSettings().catch(error => setAlert(error.message, "error")));
+  $("#saveAndPostTikTokVerify").addEventListener("click", () => saveAndPostTikTokVerify().catch(error => setAlert(error.message, "error")));
   $("#saveStaff").addEventListener("click", () => saveStaff().catch(error => setAlert(error.message, "error")));
   $("#saveExemptions").addEventListener("click", () => saveExemptions().catch(error => setAlert(error.message, "error")));
   $("#saveRuleActions").addEventListener("click", () => saveRuleActions().catch(error => setAlert(error.message, "error")));

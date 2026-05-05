@@ -3375,6 +3375,33 @@ function buildTikTokVerifyComponents() {
   ];
 }
 
+async function postTikTokVerifyPanel(source = "manual") {
+  if (!isTikTokVerificationEnabled()) {
+    throw new Error("Set the TikTok handle and verified role first.");
+  }
+
+  const verifyChannelId = getVerifyChannelId();
+  if (!verifyChannelId) {
+    throw new Error("Set a verify channel first.");
+  }
+
+  const verifyChannel = await client.channels.fetch(verifyChannelId).catch(() => null);
+  if (!verifyChannel || typeof verifyChannel.send !== "function") {
+    throw new Error("The verify channel could not be found.");
+  }
+
+  const sentMessage = await verifyChannel.send({
+    embeds: [buildTikTokVerifyEmbed()],
+    components: buildTikTokVerifyComponents()
+  });
+
+  return {
+    channelId: verifyChannelId,
+    messageId: sentMessage.id,
+    source
+  };
+}
+
 function buildHelpEmbed() {
   const fields = [
     {
@@ -5484,18 +5511,36 @@ async function handleWebApi(req, res, pathname) {
     return sendWebJson(res, 200, { ok: true, ...result, aiReviews: config.aiReviews || {} });
   }
 
-  if (req.method === "POST" && pathname === "/api/settings") {
-    if (!hasWebAccess(auth, "admin")) {
-      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    if (req.method === "POST" && pathname === "/api/settings") {
+      if (!hasWebAccess(auth, "admin")) {
+        return sendWebJson(res, 403, { error: "Admin web access is required." });
+      }
+      const body = await readWebJsonBody(req);
+      return sendWebJson(res, 200, { settings: updateWebSettings(auth, body) });
     }
-    const body = await readWebJsonBody(req);
-    return sendWebJson(res, 200, { settings: updateWebSettings(auth, body) });
-  }
 
-  if (req.method === "POST" && pathname === "/api/permissions") {
-    if (!hasWebAccess(auth, "admin")) {
-      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    if (req.method === "POST" && pathname === "/api/tiktok-verify-setup") {
+      if (!hasWebAccess(auth, "admin")) {
+        return sendWebJson(res, 403, { error: "Admin web access is required." });
+      }
+      const body = await readWebJsonBody(req);
+      const settings = updateWebSettings(auth, body);
+      const posted = await postTikTokVerifyPanel("web");
+      recordAuditLog(getWebModeratorTag(auth), "tiktok-verify-posted", {
+        channelId: posted.channelId,
+        messageId: posted.messageId,
+        tiktokHandle: config.settings.tiktokHandle,
+        verifiedRoleId: config.settings.verifiedRoleId,
+        unverifiedRoleId: config.settings.unverifiedRoleId,
+        aliases: config.settings.tiktokNicknameAliases
+      });
+      return sendWebJson(res, 200, { ok: true, settings, posted });
     }
+
+    if (req.method === "POST" && pathname === "/api/permissions") {
+      if (!hasWebAccess(auth, "admin")) {
+        return sendWebJson(res, 403, { error: "Admin web access is required." });
+      }
     const body = await readWebJsonBody(req);
     return sendWebJson(res, 200, { permissions: updateWebPermissions(auth, body) });
   }
@@ -6818,20 +6863,12 @@ client.on("interactionCreate", async interaction => {
         }
 
         if (action === "setuptiktokverify") {
-          if (!isTikTokVerificationEnabled()) {
-            return interaction.reply({ content: "Set the TikTok handle and verification roles first.", ephemeral: true });
+          try {
+            await postTikTokVerifyPanel("adminpanel");
+            return interaction.reply({ content: "TikTok verify panel posted.", ephemeral: true });
+          } catch (error) {
+            return interaction.reply({ content: error.message || "TikTok verify panel could not be posted.", ephemeral: true });
           }
-          const verifyChannelId = getVerifyChannelId();
-          if (!verifyChannelId) {
-            return interaction.reply({ content: "Set a verify channel first.", ephemeral: true });
-          }
-          const verifyChannel = await client.channels.fetch(verifyChannelId);
-          await verifyChannel.send({
-            embeds: [buildTikTokVerifyEmbed()],
-            components: buildTikTokVerifyComponents()
-          });
-
-          return interaction.reply({ content: "TikTok verify panel posted.", ephemeral: true });
         }
         if (action === "setuprules") {
           const rulesChannel = await client.channels.fetch(getRulesChannelId());
@@ -7620,20 +7657,12 @@ client.on("interactionCreate", async interaction => {
 
     if (interaction.commandName === "setuptiktokverify") {
       await interaction.deferReply({ ephemeral: true });
-      if (!isTikTokVerificationEnabled()) {
-        return interaction.editReply("Set the TikTok handle and verification roles first.");
+      try {
+        await postTikTokVerifyPanel("slash");
+        return interaction.editReply("TikTok verify menu created.");
+      } catch (error) {
+        return interaction.editReply(error.message || "TikTok verify panel could not be posted.");
       }
-      const verifyChannelId = getVerifyChannelId();
-      if (!verifyChannelId) {
-        return interaction.editReply("Set a verify channel first.");
-      }
-      const verifyChannel = await client.channels.fetch(verifyChannelId);
-      await verifyChannel.send({
-        embeds: [buildTikTokVerifyEmbed()],
-        components: buildTikTokVerifyComponents()
-      });
-
-      return interaction.editReply("TikTok verify menu created.");
     }
 
     if (interaction.commandName === "setuprules") {
