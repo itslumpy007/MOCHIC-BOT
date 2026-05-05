@@ -402,7 +402,7 @@ async function syncTikTokVerification(member, source = "manual") {
       changed: false,
       reason: matched
         ? "Nickname already matches the TikTok handle."
-        : `Change your nickname to match @${handle}${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""} to unlock the garden. Reaction roles are optional.`
+        : `Use Set My Name and type @${handle}${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""} to unlock the garden. Reaction roles are optional.`
     };
   }
 
@@ -423,7 +423,7 @@ async function syncTikTokVerification(member, source = "manual") {
     changed: Boolean(rolesToAdd.length || rolesToRemove.length),
     reason: matched
       ? `Verified as @${handle}.`
-      : `Change your nickname to match @${handle} and use /verify again. Reaction roles are optional.`
+      : `Use Set My Name and type @${handle} again. Reaction roles are optional.`
   };
 }
 
@@ -3428,17 +3428,34 @@ function buildTikTokVerifyEmbed() {
     title: "TikTok name verification",
     description:
       handle
-        ? `Welcome to the mochi garden. Set your server nickname to match **@${handle}**${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""}, then press the button below or run \`/verify\` in ${getVerifyChannelMention()}.\n\nOnce it matches, I’ll hand you the verified role so you can wander the rest of the server. Flavor roles are just for fun.`
-        : `Welcome to the mochi garden. Set your server nickname to match the TikTok handle your staff configured, then press the button below or run \`/verify\` in ${getVerifyChannelMention()}.\n\nAsk staff if you are not sure what format they want.`,
+        ? `Welcome to the mochi garden. Tap the button below, type your TikTok username, and I’ll set your Discord nickname for you.\n\nIf it matches **@${handle}**${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""}, I’ll hand you the verified role and let you wander the rest of the server. Flavor roles are just for fun.`
+        : `Welcome to the mochi garden. Tap the button below, type your TikTok username, and I’ll set your Discord nickname for you.\n\nAsk staff if you are not sure what format they want.`,
     color: COLORS.pink,
     fields: [
       { name: "🌸 TikTok handle", value: handle ? `@${handle}` : "Not set", inline: true },
       { name: "🍡 Accepted nicknames", value: getTikTokNicknameAliases().length ? getTikTokNicknameAliases().map(alias => `@${alias}`).join(", ").slice(0, 1024) : "None", inline: false },
       { name: "✨ Verified role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
       { name: "🫧 Unverified role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Optional", inline: true },
-      { name: "How it works", value: "1. Match your nickname\n2. Tap Check My Name\n3. Enjoy the garden", inline: false }
+      { name: "How it works", value: "1. Tap Set My Name\n2. Type your TikTok username\n3. Enjoy the garden", inline: false }
     ]
   });
+}
+
+function buildTikTokNameModal() {
+  const modal = new ModalBuilder()
+    .setCustomId("verify:tiktok-name")
+    .setTitle("Set your TikTok name");
+
+  const input = new TextInputBuilder()
+    .setCustomId("tiktokName")
+    .setLabel("TikTok username")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setPlaceholder("@yourname or tiktok.com/@yourname")
+    .setMaxLength(100);
+
+  modal.addComponents(new ActionRowBuilder().addComponents(input));
+  return modal;
 }
 
 function buildTikTokVerifyComponents() {
@@ -3446,7 +3463,7 @@ function buildTikTokVerifyComponents() {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId("verify:tiktok-check")
-        .setLabel("Check My Name")
+        .setLabel("Set My Name")
         .setStyle(ButtonStyle.Primary)
     )
   ];
@@ -6230,26 +6247,11 @@ client.on("interactionCreate", async interaction => {
           return interaction.reply({ content: "Verification is disabled on this deployment.", ephemeral: true });
         }
 
-        await interaction.deferReply({ ephemeral: true });
-        const member = interaction.member || await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-        if (!member) {
-          return interaction.editReply("I could not find your server membership.");
-        }
-
         if (!isTikTokVerificationEnabled()) {
-          return interaction.editReply("TikTok verification is not configured yet. Ask staff to set the handle and roles.");
+          return interaction.reply({ content: "TikTok verification is not configured yet. Ask staff to set the handle and roles.", ephemeral: true });
         }
 
-        try {
-          const result = await syncTikTokVerification(member, "button");
-          return interaction.editReply(
-            result.matched
-              ? `Verified. ${result.reason}`
-              : result.reason
-          );
-        } catch (error) {
-          return interaction.editReply(error.message || "Verification failed.");
-        }
+        return interaction.showModal(buildTikTokNameModal());
       }
 
       if (!interaction.customId.startsWith("adminpanel:")) return;
@@ -7258,7 +7260,7 @@ client.on("interactionCreate", async interaction => {
           const verifyEmbed = makeEmbed({
             title: "welcome to the mochi garden",
             description:
-              "Pick any flavor role you want by reacting below. Then complete TikTok nickname verification to unlock the garden.\n\n" +
+              "Pick any flavor role you want by reacting below. Then tap Set My Name to finish TikTok nickname verification.\n\n" +
               "🌸 Sakura\n🍓 Strawberry Milk\n🍵 Matcha Dream\n🫐 Mystic Berry\n💜 Taro Cloud\n\n" +
               "You can switch your role anytime by changing your reaction.",
             color: COLORS.pink
@@ -7417,6 +7419,50 @@ client.on("interactionCreate", async interaction => {
     }
 
     if (interaction.isModalSubmit()) {
+      if (interaction.customId === "verify:tiktok-name") {
+        if (!ENABLE_CORE_BOT) {
+          return interaction.reply({ content: "Verification is disabled on this deployment.", ephemeral: true });
+        }
+
+        await interaction.deferReply({ ephemeral: true });
+
+        const member = interaction.member || await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+        if (!member) {
+          return interaction.editReply("I could not find your server membership.");
+        }
+
+        if (!isTikTokVerificationEnabled()) {
+          return interaction.editReply("TikTok verification is not configured yet. Ask staff to set the handle and roles.");
+        }
+
+        const botMember = interaction.guild.members.me || await interaction.guild.members.fetchMe().catch(() => null);
+        if (!botMember?.permissions?.has(PermissionFlagsBits.ManageNicknames)) {
+          return interaction.editReply("I need the Manage Nicknames permission before I can update your name.");
+        }
+
+        const enteredName = splitTikTokVerificationInput(interaction.fields.getTextInputValue("tiktokName"))[0] || "";
+        if (!enteredName) {
+          return interaction.editReply("Please type your TikTok username.");
+        }
+
+        if (enteredName.length > 32) {
+          return interaction.editReply("That nickname is too long for Discord. Try a shorter TikTok username.");
+        }
+
+        if (!member.manageable) {
+          return interaction.editReply("I cannot change your nickname.");
+        }
+
+        try {
+          await member.setNickname(enteredName, "TikTok name verification");
+          const result = await syncTikTokVerification(member, "modal");
+          const prefix = result.matched ? "Verified" : "Name updated";
+          return interaction.editReply(`${prefix}. ${result.reason}`);
+        } catch (error) {
+          return interaction.editReply(error.message || "Verification failed.");
+        }
+      }
+
       if (!interaction.customId.startsWith("adminpanel:")) return;
       if (!ENABLE_CORE_BOT) {
         return interaction.reply({ content: "Admin controls are disabled on this deployment.", ephemeral: true });
@@ -9548,7 +9594,7 @@ client.on("guildMemberAdd", async member => {
           `Hi ${member.user.username}.\n\n` +
           `We are happy you joined.\n` +
           (isTikTokVerificationEnabled()
-            ? `If you want a flavor role, pick one by reacting below. Then set your server nickname to match **@${getTikTokHandle()}** and press **Check My Name** in ${getVerifyChannelMention()} or run \`/verify\`.\n\n`
+            ? `If you want a flavor role, pick one by reacting below. Then tap **Set My Name** in ${getVerifyChannelMention()} and type your TikTok username.\n\n`
             : `Please head to ${getVerifyChannelMention()} to verify and unlock the garden.\n\n`) +
           "Have fun and enjoy your stay.",
         color: COLORS.pink,
