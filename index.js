@@ -6629,11 +6629,6 @@ client.on("messageReactionAdd", async (reaction, user) => {
     await member.roles.remove(ALL_ROLES.filter(id => id !== roleData.id));
     await member.roles.add(roleData.id);
 
-    await syncTikTokVerification(member, "reaction-role").catch(error => {
-      console.error("TikTok verification sync error:", error.message);
-      return null;
-    });
-
     await logEmbed(
       makeEmbed({
         title: "Role selected",
@@ -6662,10 +6657,6 @@ client.on("messageReactionRemove", async (reaction, user) => {
     if (!member.roles.cache.has(roleData.id)) return;
 
     await member.roles.remove(roleData.id);
-    await syncTikTokVerification(member, "reaction-role-remove").catch(error => {
-      console.error("TikTok verification sync error:", error.message);
-      return null;
-    });
     await logEmbed(
       makeEmbed({
         title: "Role removed",
