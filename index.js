@@ -2223,7 +2223,7 @@ const allCommands = [
 
   new SlashCommandBuilder()
     .setName("verify")
-    .setDescription("Check your TikTok nickname verification")
+    .setDescription("Open TikTok name verification")
     .setDMPermission(false),
 
   new SlashCommandBuilder()
@@ -2277,7 +2277,7 @@ const allCommands = [
 const commands = allCommands.map(command => command.toJSON());
 const startedAt = Date.now();
 
-function makeEmbed({ title, description, color = COLORS.pink, fields = [], thumbnail = null }) {
+function makeEmbed({ title, description, color = COLORS.pink, fields = [], thumbnail = null, image = null }) {
   const embed = new EmbedBuilder()
     .setColor(color)
     .setTitle(title)
@@ -2287,6 +2287,7 @@ function makeEmbed({ title, description, color = COLORS.pink, fields = [], thumb
 
   if (fields.length) embed.addFields(fields);
   if (thumbnail) embed.setThumbnail(thumbnail);
+  if (image) embed.setImage(image.url);
 
   return embed;
 }
@@ -3428,9 +3429,10 @@ function buildTikTokVerifyEmbed() {
     title: "TikTok name verification",
     description:
       handle
-        ? `Welcome to the mochi garden. Tap the button below, type your TikTok username, and I’ll set your Discord nickname for you.\n\nIf it matches **@${handle}**${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""}, I’ll hand you the verified role and let you wander the rest of the server. Flavor roles are just for fun.`
+        ? `Welcome to the mochi garden. Tap the button below, type your TikTok username, and I’ll set your Discord nickname for you.\n\nIf it matches **@${handle}**${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""}, I’ll hand you the verified role and let you wander the rest of the server.`
         : `Welcome to the mochi garden. Tap the button below, type your TikTok username, and I’ll set your Discord nickname for you.\n\nAsk staff if you are not sure what format they want.`,
     color: COLORS.pink,
+    image: { url: "attachment://tiktok-verify-card.png" },
     fields: [
       { name: "🌸 TikTok handle", value: handle ? `@${handle}` : "Not set", inline: true },
       { name: "🍡 Accepted nicknames", value: getTikTokNicknameAliases().length ? getTikTokNicknameAliases().map(alias => `@${alias}`).join(", ").slice(0, 1024) : "None", inline: false },
@@ -3439,6 +3441,13 @@ function buildTikTokVerifyEmbed() {
       { name: "How it works", value: "1. Tap Set My Name\n2. Type your TikTok username\n3. Enjoy the garden", inline: false }
     ]
   });
+}
+
+function buildTikTokVerifyCardAttachment() {
+  return {
+    attachment: fs.readFileSync(path.join(__dirname, "assets", "tiktok-verify-card.png")),
+    name: "tiktok-verify-card.png"
+  };
 }
 
 function buildTikTokNameModal() {
@@ -3464,6 +3473,7 @@ function buildTikTokVerifyComponents() {
       new ButtonBuilder()
         .setCustomId("verify:tiktok-check")
         .setLabel("Set My Name")
+        .setEmoji("🌸")
         .setStyle(ButtonStyle.Primary)
     )
   ];
@@ -3708,6 +3718,7 @@ async function postTikTokVerifyPanel(source = "manual") {
 
   const sentMessage = await verifyChannel.send({
     embeds: [buildTikTokVerifyEmbed()],
+    files: [buildTikTokVerifyCardAttachment()],
     components: buildTikTokVerifyComponents()
   });
 
@@ -7456,8 +7467,20 @@ client.on("interactionCreate", async interaction => {
         try {
           await member.setNickname(enteredName, "TikTok name verification");
           const result = await syncTikTokVerification(member, "modal");
-          const prefix = result.matched ? "Verified" : "Name updated";
-          return interaction.editReply(`${prefix}. ${result.reason}`);
+          const replyEmbed = makeEmbed({
+            title: result.matched ? "Nickname updated" : "Name updated",
+            description: result.matched
+              ? `Verified as @${getTikTokHandle()}. Enjoy the garden!`
+              : `I set your nickname to @${enteredName}, but it does not match the configured TikTok handle yet.`,
+            color: result.matched ? COLORS.mint : COLORS.yellow,
+            fields: [
+              { name: "🌸 TikTok username", value: `@${enteredName}`, inline: true },
+              { name: "✨ Verification", value: result.matched ? `Verified as @${getTikTokHandle()}` : "Still unverified", inline: true },
+              { name: "How it works", value: result.matched ? "You’re all set. Enjoy the garden!" : "Update your TikTok name to match the handle and try again.", inline: false }
+            ]
+          });
+
+          return interaction.editReply({ embeds: [replyEmbed], content: "" });
         } catch (error) {
           return interaction.editReply(error.message || "Verification failed.");
         }
@@ -8066,24 +8089,11 @@ client.on("interactionCreate", async interaction => {
         return interaction.reply({ content: "Verification is disabled on this deployment.", ephemeral: true });
       }
 
-      const member = interaction.member || await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-      if (!member) {
-        return interaction.reply({ content: "I could not find your server membership.", ephemeral: true });
-      }
-
       if (!isTikTokVerificationEnabled()) {
         return interaction.reply({ content: "TikTok verification is not configured yet. Ask staff to set the handle and roles.", ephemeral: true });
       }
 
-      try {
-        const result = await syncTikTokVerification(member, "slash");
-        return interaction.reply({
-          content: result.matched ? `Verified. ${result.reason}` : result.reason,
-          ephemeral: true
-        });
-      } catch (error) {
-        return interaction.reply({ content: error.message || "Verification failed.", ephemeral: true });
-      }
+      return interaction.showModal(buildTikTokNameModal());
     }
 
     if (interaction.commandName === "setupverify") {
