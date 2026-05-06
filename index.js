@@ -26,6 +26,7 @@ const {
   TextInputStyle,
   UserSelectMenuBuilder
 } = require("discord.js");
+const { createCanvas } = require("@napi-rs/canvas");
 
 const {
   TOKEN,
@@ -3447,6 +3448,150 @@ function buildTikTokVerifyCardAttachment() {
   return {
     attachment: fs.readFileSync(path.join(__dirname, "assets", "tiktok-verify-card.png")),
     name: "tiktok-verify-card.png"
+  };
+}
+
+function buildTikTokSuccessCardAttachment(enteredName) {
+  const username = String(enteredName || "").replace(/^@+/, "").trim() || "username";
+  const canvas = createCanvas(1280, 520);
+  const ctx = canvas.getContext("2d");
+
+  const rr = (x, y, w, h, r) => {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  };
+
+  const fillRR = (x, y, w, h, r, fill) => {
+    ctx.save();
+    rr(x, y, w, h, r);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.restore();
+  };
+
+  const strokeRR = (x, y, w, h, r, stroke, lw = 2) => {
+    ctx.save();
+    rr(x, y, w, h, r);
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = stroke;
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  const bg = ctx.createLinearGradient(0, 0, 1280, 520);
+  bg.addColorStop(0, "#eff8ef");
+  bg.addColorStop(1, "#dff0df");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, 1280, 520);
+
+  ctx.globalAlpha = 0.22;
+  ctx.fillStyle = "#ffffff";
+  for (const [x, y, r] of [[110, 110, 90], [1160, 90, 130], [1040, 430, 100], [240, 420, 110]]) {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  fillRR(60, 40, 1160, 440, 32, "rgba(27, 32, 40, 0.78)");
+  strokeRR(60, 40, 1160, 440, 32, "rgba(126, 190, 132, 0.75)", 3);
+
+  const panel = ctx.createLinearGradient(120, 100, 1180, 430);
+  panel.addColorStop(0, "rgba(39, 46, 54, 0.96)");
+  panel.addColorStop(1, "rgba(31, 37, 44, 0.94)");
+  fillRR(120, 80, 1040, 360, 28, panel);
+  strokeRR(120, 80, 1040, 360, 28, "rgba(141, 212, 149, 0.65)", 2);
+
+  ctx.save();
+  ctx.translate(210, 230);
+  ctx.fillStyle = "#78c27a";
+  ctx.beginPath();
+  ctx.arc(0, 0, 74, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.2)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.strokeStyle = "#f5fff5";
+  ctx.lineWidth = 14;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-28, 2);
+  ctx.lineTo(-7, 24);
+  ctx.lineTo(34, -22);
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.fillStyle = "#d8f7d8";
+  ctx.font = "bold 54px sans-serif";
+  ctx.fillText("Nickname updated", 320, 165);
+  ctx.fillStyle = "#a9d8a5";
+  ctx.font = "24px sans-serif";
+  ctx.fillText(`Verified as @${username}`, 320, 222);
+  ctx.fillStyle = "#cfe7cc";
+  ctx.font = "22px sans-serif";
+  ctx.fillText("Enjoy the garden!", 320, 270);
+
+  ctx.strokeStyle = "rgba(217, 243, 214, 0.45)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(320, 252);
+  ctx.lineTo(560, 252);
+  ctx.stroke();
+
+  ctx.save();
+  ctx.translate(980, 220);
+  ctx.fillStyle = "#3d4740";
+  ctx.beginPath();
+  ctx.arc(0, 0, 102, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#f6f7ee";
+  ctx.beginPath();
+  ctx.arc(0, 0, 84, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#f3a7c0";
+  ctx.beginPath();
+  ctx.arc(0, 0, 88, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(255,255,255,0.5)";
+  ctx.lineWidth = 5;
+  ctx.stroke();
+  ctx.fillStyle = "#fff9fc";
+  ctx.beginPath();
+  ctx.arc(0, 0, 78, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#2f2732";
+  ctx.beginPath();
+  ctx.arc(-28, -7, 10, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(28, -7, 10, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#d98aa2";
+  ctx.lineWidth = 5;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.arc(0, 16, 17, 0.15 * Math.PI, 0.85 * Math.PI);
+  ctx.stroke();
+  ctx.fillStyle = "#f7c6d7";
+  ctx.beginPath();
+  ctx.arc(-35, 15, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(35, 15, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.fillStyle = "#7c6e84";
+  ctx.font = "20px sans-serif";
+  ctx.fillText("You’re all set. Enjoy the garden!", 150, 850);
+
+  return {
+    attachment: canvas.toBuffer("image/png"),
+    name: "tiktok-success-card.png"
   };
 }
 
@@ -7479,6 +7624,15 @@ client.on("interactionCreate", async interaction => {
               { name: "How it works", value: result.matched ? "You’re all set. Enjoy the garden!" : "Update your TikTok name to match the handle and try again.", inline: false }
             ]
           });
+
+          if (result.matched) {
+            replyEmbed.setImage("attachment://tiktok-success-card.png");
+            return interaction.editReply({
+              embeds: [replyEmbed],
+              files: [buildTikTokSuccessCardAttachment(enteredName)],
+              content: ""
+            });
+          }
 
           return interaction.editReply({ embeds: [replyEmbed], content: "" });
         } catch (error) {
