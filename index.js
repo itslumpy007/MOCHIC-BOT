@@ -4015,6 +4015,27 @@ async function setWelcomeVisibility(channel, locked) {
   return true;
 }
 
+async function enforceFlavorRoleVisibility(guild) {
+  if (!guild?.channels?.cache) return 0;
+
+  let updated = 0;
+  for (const channel of guild.channels.cache.values()) {
+    if (!channel?.permissionOverwrites?.edit) continue;
+
+    for (const roleId of ALL_ROLES) {
+      if (!roleId) continue;
+      try {
+        await channel.permissionOverwrites.edit(roleId, { ViewChannel: false });
+        updated += 1;
+      } catch {
+        // Ignore channels the bot cannot edit.
+      }
+    }
+  }
+
+  return updated;
+}
+
 async function setVerifyChannelVisibility(channel, locked) {
   if (!channel?.permissionOverwrites?.edit) return false;
 
@@ -6615,6 +6636,7 @@ client.once("clientReady", async () => {
 
     if (ENABLE_CORE_BOT) {
       await resolveVerifyMessageId();
+      await enforceFlavorRoleVisibility(client.guilds.cache.get(GUILD_ID)).catch(() => null);
       await processExpiredTempBans();
 
       if (tempBanInterval) {
@@ -9924,6 +9946,10 @@ client.on("interactionCreate", async interaction => {
       }
 
       saveConfig();
+
+      if (["verifiedrole", "unverifiedrole", "verifychannel", "welcomechannel", "reset"].includes(subcommand)) {
+        await enforceFlavorRoleVisibility(guild).catch(() => null);
+      }
 
       if (subcommand === "mutedrole") {
         const mutedRole = await guild.roles.fetch(config.settings.mutedRoleId).catch(() => null);
