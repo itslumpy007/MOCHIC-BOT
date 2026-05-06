@@ -3739,6 +3739,151 @@ function buildTikTokPendingCardAttachment(enteredName) {
   };
 }
 
+function buildTikTokErrorCardAttachment(reason, enteredName) {
+  const username = String(enteredName || "").replace(/^@+/, "").trim() || "username";
+  const message = String(reason || "Something went wrong.").trim() || "Something went wrong.";
+  const canvas = createCanvas(1280, 520);
+  const ctx = canvas.getContext("2d");
+
+  const rr = (x, y, w, h, r) => {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  };
+
+  const fillRR = (x, y, w, h, r, fill) => {
+    ctx.save();
+    rr(x, y, w, h, r);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.restore();
+  };
+
+  const strokeRR = (x, y, w, h, r, stroke, lw = 2) => {
+    ctx.save();
+    rr(x, y, w, h, r);
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = stroke;
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  const bg = ctx.createLinearGradient(0, 0, 1280, 520);
+  bg.addColorStop(0, "#ffe9ea");
+  bg.addColorStop(1, "#f3d4d7");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, 1280, 520);
+
+  ctx.globalAlpha = 0.2;
+  ctx.fillStyle = "#ffffff";
+  for (const [x, y, r] of [[110, 110, 90], [1160, 90, 130], [1040, 430, 100], [240, 420, 110]]) {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  fillRR(60, 40, 1160, 440, 32, "rgba(55, 30, 34, 0.8)");
+  strokeRR(60, 40, 1160, 440, 32, "rgba(238, 151, 162, 0.78)", 3);
+
+  const panel = ctx.createLinearGradient(120, 100, 1180, 430);
+  panel.addColorStop(0, "rgba(42, 27, 30, 0.97)");
+  panel.addColorStop(1, "rgba(31, 21, 25, 0.95)");
+  fillRR(120, 80, 1040, 360, 28, panel);
+  strokeRR(120, 80, 1040, 360, 28, "rgba(239, 165, 175, 0.68)", 2);
+
+  ctx.save();
+  ctx.translate(210, 230);
+  ctx.fillStyle = "#f09ea9";
+  ctx.beginPath();
+  ctx.arc(0, 0, 74, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.2)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.strokeStyle = "#fff1f2";
+  ctx.lineWidth = 14;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-28, 2);
+  ctx.lineTo(-7, 24);
+  ctx.lineTo(34, -22);
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.fillStyle = "#ffd9df";
+  ctx.font = "bold 54px sans-serif";
+  ctx.fillText("Try again", 320, 165);
+  ctx.fillStyle = "#e9b9bf";
+  ctx.font = "24px sans-serif";
+  ctx.fillText(message, 320, 222);
+  ctx.fillStyle = "#f0cdd1";
+  ctx.font = "22px sans-serif";
+  ctx.fillText(`We saw @${username} on this try.`, 320, 270);
+
+  ctx.strokeStyle = "rgba(244, 198, 205, 0.4)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(320, 252);
+  ctx.lineTo(560, 252);
+  ctx.stroke();
+
+  ctx.save();
+  ctx.translate(980, 220);
+  ctx.fillStyle = "#5a2d36";
+  ctx.beginPath();
+  ctx.arc(0, 0, 102, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#fff7f8";
+  ctx.beginPath();
+  ctx.arc(0, 0, 84, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#f5c4cb";
+  ctx.beginPath();
+  ctx.arc(0, 0, 88, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(255,255,255,0.5)";
+  ctx.lineWidth = 5;
+  ctx.stroke();
+  ctx.fillStyle = "#fff9fb";
+  ctx.beginPath();
+  ctx.arc(0, 0, 78, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#2f2732";
+  ctx.beginPath();
+  ctx.arc(-28, -7, 10, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(28, -7, 10, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#c97b8d";
+  ctx.lineWidth = 5;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.arc(0, 18, 17, 0.15 * Math.PI, 0.85 * Math.PI);
+  ctx.stroke();
+  ctx.fillStyle = "#f7c6d7";
+  ctx.beginPath();
+  ctx.arc(-35, 15, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(35, 15, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.fillStyle = "#7c6e84";
+  ctx.font = "20px sans-serif";
+  ctx.fillText("Set it to match the handle and tap Set My Name again.", 150, 850);
+
+  return {
+    attachment: canvas.toBuffer("image/png"),
+    name: "tiktok-error-card.png"
+  };
+}
+
 function buildTikTokNameModal() {
   const modal = new ModalBuilder()
     .setCustomId("verify:tiktok-name")
@@ -6548,7 +6693,18 @@ client.on("interactionCreate", async interaction => {
         }
 
         if (!isTikTokVerificationEnabled()) {
-          return interaction.reply({ content: "TikTok verification is not configured yet. Ask staff to set the handle and roles.", ephemeral: true });
+          const setupError = "TikTok verification is not configured yet. Ask staff to set the handle and roles.";
+          const setupEmbed = makeEmbed({
+            title: "Try again",
+            description: setupError,
+            color: COLORS.red,
+            image: { url: "attachment://tiktok-error-card.png" }
+          });
+          return interaction.reply({
+            embeds: [setupEmbed],
+            files: [buildTikTokErrorCardAttachment(setupError, "username")],
+            ephemeral: true
+          });
         }
 
         return interaction.showModal(buildTikTokNameModal());
@@ -7728,29 +7884,89 @@ client.on("interactionCreate", async interaction => {
 
         const member = interaction.member || await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
         if (!member) {
-          return interaction.editReply("I could not find your server membership.");
+          const errorEmbed = makeEmbed({
+            title: "Try again",
+            description: "I could not find your server membership.",
+            color: COLORS.red,
+            image: { url: "attachment://tiktok-error-card.png" }
+          });
+          return interaction.editReply({
+            embeds: [errorEmbed],
+            files: [buildTikTokErrorCardAttachment("I could not find your server membership.", "username")],
+            content: ""
+          });
         }
 
         if (!isTikTokVerificationEnabled()) {
-          return interaction.editReply("TikTok verification is not configured yet. Ask staff to set the handle and roles.");
+          const errorEmbed = makeEmbed({
+            title: "Try again",
+            description: "TikTok verification is not configured yet. Ask staff to set the handle and roles.",
+            color: COLORS.red,
+            image: { url: "attachment://tiktok-error-card.png" }
+          });
+          return interaction.editReply({
+            embeds: [errorEmbed],
+            files: [buildTikTokErrorCardAttachment("TikTok verification is not configured yet. Ask staff to set the handle and roles.", "username")],
+            content: ""
+          });
         }
 
         const botMember = interaction.guild.members.me || await interaction.guild.members.fetchMe().catch(() => null);
         if (!botMember?.permissions?.has(PermissionFlagsBits.ManageNicknames)) {
-          return interaction.editReply("I need the Manage Nicknames permission before I can update your name.");
+          const errorEmbed = makeEmbed({
+            title: "Try again",
+            description: "I need the Manage Nicknames permission before I can update your name.",
+            color: COLORS.red,
+            image: { url: "attachment://tiktok-error-card.png" }
+          });
+          return interaction.editReply({
+            embeds: [errorEmbed],
+            files: [buildTikTokErrorCardAttachment("I need the Manage Nicknames permission before I can update your name.", "username")],
+            content: ""
+          });
         }
 
         const enteredName = splitTikTokVerificationInput(interaction.fields.getTextInputValue("tiktokName"))[0] || "";
         if (!enteredName) {
-          return interaction.editReply("Please type your TikTok username.");
+          const errorEmbed = makeEmbed({
+            title: "Try again",
+            description: "Please type your TikTok username.",
+            color: COLORS.red,
+            image: { url: "attachment://tiktok-error-card.png" }
+          });
+          return interaction.editReply({
+            embeds: [errorEmbed],
+            files: [buildTikTokErrorCardAttachment("Please type your TikTok username.", "username")],
+            content: ""
+          });
         }
 
         if (enteredName.length > 32) {
-          return interaction.editReply("That nickname is too long for Discord. Try a shorter TikTok username.");
+          const errorEmbed = makeEmbed({
+            title: "Try again",
+            description: "That nickname is too long for Discord. Try a shorter TikTok username.",
+            color: COLORS.red,
+            image: { url: "attachment://tiktok-error-card.png" }
+          });
+          return interaction.editReply({
+            embeds: [errorEmbed],
+            files: [buildTikTokErrorCardAttachment("That nickname is too long for Discord. Try a shorter TikTok username.", enteredName)],
+            content: ""
+          });
         }
 
         if (!member.manageable) {
-          return interaction.editReply("I cannot change your nickname.");
+          const errorEmbed = makeEmbed({
+            title: "Try again",
+            description: "I cannot change your nickname.",
+            color: COLORS.red,
+            image: { url: "attachment://tiktok-error-card.png" }
+          });
+          return interaction.editReply({
+            embeds: [errorEmbed],
+            files: [buildTikTokErrorCardAttachment("I cannot change your nickname.", enteredName)],
+            content: ""
+          });
         }
 
         try {
@@ -7789,7 +8005,18 @@ client.on("interactionCreate", async interaction => {
 
           return interaction.editReply({ embeds: [replyEmbed], content: "" });
         } catch (error) {
-          return interaction.editReply(error.message || "Verification failed.");
+          const reason = error.message || "Verification failed.";
+          const errorEmbed = makeEmbed({
+            title: "Try again",
+            description: reason,
+            color: COLORS.red,
+            image: { url: "attachment://tiktok-error-card.png" }
+          });
+          return interaction.editReply({
+            embeds: [errorEmbed],
+            files: [buildTikTokErrorCardAttachment(reason, enteredName)],
+            content: ""
+          });
         }
       }
 
@@ -8397,7 +8624,18 @@ client.on("interactionCreate", async interaction => {
       }
 
       if (!isTikTokVerificationEnabled()) {
-        return interaction.reply({ content: "TikTok verification is not configured yet. Ask staff to set the handle and roles.", ephemeral: true });
+        const setupError = "TikTok verification is not configured yet. Ask staff to set the handle and roles.";
+        const setupEmbed = makeEmbed({
+          title: "Try again",
+          description: setupError,
+          color: COLORS.red,
+          image: { url: "attachment://tiktok-error-card.png" }
+        });
+        return interaction.reply({
+          embeds: [setupEmbed],
+          files: [buildTikTokErrorCardAttachment(setupError, "username")],
+          ephemeral: true
+        });
       }
 
       return interaction.showModal(buildTikTokNameModal());
