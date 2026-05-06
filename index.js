@@ -3595,6 +3595,150 @@ function buildTikTokSuccessCardAttachment(enteredName) {
   };
 }
 
+function buildTikTokPendingCardAttachment(enteredName) {
+  const username = String(enteredName || "").replace(/^@+/, "").trim() || "username";
+  const canvas = createCanvas(1280, 520);
+  const ctx = canvas.getContext("2d");
+
+  const rr = (x, y, w, h, r) => {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  };
+
+  const fillRR = (x, y, w, h, r, fill) => {
+    ctx.save();
+    rr(x, y, w, h, r);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.restore();
+  };
+
+  const strokeRR = (x, y, w, h, r, stroke, lw = 2) => {
+    ctx.save();
+    rr(x, y, w, h, r);
+    ctx.lineWidth = lw;
+    ctx.strokeStyle = stroke;
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  const bg = ctx.createLinearGradient(0, 0, 1280, 520);
+  bg.addColorStop(0, "#fff5df");
+  bg.addColorStop(1, "#f4e7bf");
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, 1280, 520);
+
+  ctx.globalAlpha = 0.2;
+  ctx.fillStyle = "#ffffff";
+  for (const [x, y, r] of [[120, 105, 88], [1110, 110, 120], [1060, 425, 108], [260, 420, 112]]) {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  fillRR(60, 40, 1160, 440, 32, "rgba(55, 43, 28, 0.78)");
+  strokeRR(60, 40, 1160, 440, 32, "rgba(232, 198, 112, 0.75)", 3);
+
+  const panel = ctx.createLinearGradient(120, 100, 1180, 430);
+  panel.addColorStop(0, "rgba(50, 42, 30, 0.96)");
+  panel.addColorStop(1, "rgba(38, 33, 26, 0.95)");
+  fillRR(120, 80, 1040, 360, 28, panel);
+  strokeRR(120, 80, 1040, 360, 28, "rgba(241, 207, 122, 0.65)", 2);
+
+  ctx.save();
+  ctx.translate(210, 230);
+  ctx.fillStyle = "#dfbf58";
+  ctx.beginPath();
+  ctx.arc(0, 0, 74, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.2)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.strokeStyle = "#fff5d9";
+  ctx.lineWidth = 14;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-28, 2);
+  ctx.lineTo(-7, 24);
+  ctx.lineTo(34, -22);
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.fillStyle = "#fff2ba";
+  ctx.font = "bold 54px sans-serif";
+  ctx.fillText("Name saved", 320, 165);
+  ctx.fillStyle = "#f3d98f";
+  ctx.font = "24px sans-serif";
+  ctx.fillText(`Waiting for @${username}`, 320, 222);
+  ctx.fillStyle = "#f6e2b7";
+  ctx.font = "22px sans-serif";
+  ctx.fillText("Try again once it matches the handle.", 320, 270);
+
+  ctx.strokeStyle = "rgba(246, 225, 173, 0.45)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(320, 252);
+  ctx.lineTo(560, 252);
+  ctx.stroke();
+
+  ctx.save();
+  ctx.translate(980, 220);
+  ctx.fillStyle = "#5b5146";
+  ctx.beginPath();
+  ctx.arc(0, 0, 102, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#fff8e8";
+  ctx.beginPath();
+  ctx.arc(0, 0, 84, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#f0cc7c";
+  ctx.beginPath();
+  ctx.arc(0, 0, 88, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(255,255,255,0.5)";
+  ctx.lineWidth = 5;
+  ctx.stroke();
+  ctx.fillStyle = "#fffdf5";
+  ctx.beginPath();
+  ctx.arc(0, 0, 78, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#2f2732";
+  ctx.beginPath();
+  ctx.arc(-28, -7, 10, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(28, -7, 10, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#d7ae4d";
+  ctx.lineWidth = 5;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.arc(0, 18, 17, 0.15 * Math.PI, 0.85 * Math.PI);
+  ctx.stroke();
+  ctx.fillStyle = "#efd38a";
+  ctx.beginPath();
+  ctx.arc(-35, 15, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(35, 15, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  ctx.fillStyle = "#7c6e84";
+  ctx.font = "20px sans-serif";
+  ctx.fillText("Set it to match the handle and tap Set My Name again.", 150, 850);
+
+  return {
+    attachment: canvas.toBuffer("image/png"),
+    name: "tiktok-pending-card.png"
+  };
+}
+
 function buildTikTokNameModal() {
   const modal = new ModalBuilder()
     .setCustomId("verify:tiktok-name")
@@ -7630,6 +7774,15 @@ client.on("interactionCreate", async interaction => {
             return interaction.editReply({
               embeds: [replyEmbed],
               files: [buildTikTokSuccessCardAttachment(enteredName)],
+              content: ""
+            });
+          }
+
+          if (!result.matched) {
+            replyEmbed.setImage("attachment://tiktok-pending-card.png");
+            return interaction.editReply({
+              embeds: [replyEmbed],
+              files: [buildTikTokPendingCardAttachment(enteredName)],
               content: ""
             });
           }
