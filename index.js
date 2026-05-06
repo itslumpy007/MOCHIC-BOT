@@ -3430,8 +3430,8 @@ function buildTikTokVerifyEmbed() {
     title: "TikTok name verification",
     description:
       handle
-        ? `Welcome to the mochi garden. Tap the button below, type your TikTok username, and I’ll set your Discord nickname for you.\n\nIf it matches **@${handle}**${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""}, I’ll hand you the verified role and let you wander the rest of the server.`
-        : `Welcome to the mochi garden. Tap the button below, type your TikTok username, and I’ll set your Discord nickname for you.\n\nAsk staff if you are not sure what format they want.`,
+        ? `Welcome to the mochi garden. Pick a flavor role by reacting below, then tap the button and type your TikTok username.\n\nIf it matches **@${handle}**${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""}, I’ll hand you the verified role and let you wander the rest of the server.`
+        : `Welcome to the mochi garden. Pick a flavor role by reacting below, then tap the button and type your TikTok username.\n\nAsk staff if you are not sure what format they want.`,
     color: COLORS.pink,
     image: { url: "attachment://tiktok-verify-card.png" },
     fields: [
@@ -3439,6 +3439,7 @@ function buildTikTokVerifyEmbed() {
       { name: "🍡 Accepted nicknames", value: getTikTokNicknameAliases().length ? getTikTokNicknameAliases().map(alias => `@${alias}`).join(", ").slice(0, 1024) : "None", inline: false },
       { name: "✨ Verified role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
       { name: "🫧 Unverified role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Optional", inline: true },
+      { name: "🍥 Flavor roles", value: "React below to pick a flavor role before or after verifying.", inline: false },
       { name: "How it works", value: "1. Tap Set My Name\n2. Type your TikTok username\n3. Enjoy the garden", inline: false }
     ]
   });
@@ -3449,6 +3450,12 @@ function buildTikTokVerifyCardAttachment() {
     attachment: fs.readFileSync(path.join(__dirname, "assets", "tiktok-verify-card.png")),
     name: "tiktok-verify-card.png"
   };
+}
+
+async function addMochiRoleReactions(message) {
+  for (const emoji of Object.keys(MOCHI_ROLES)) {
+    await message.react(emoji).catch(() => {});
+  }
 }
 
 function buildTikTokSuccessCardAttachment(finalNickname) {
@@ -4162,6 +4169,8 @@ async function postTikTokVerifyPanel(source = "manual") {
     files: [buildTikTokVerifyCardAttachment()],
     components: buildTikTokVerifyComponents()
   });
+
+  await addMochiRoleReactions(sentMessage);
 
   return {
     channelId: verifyChannelId,
