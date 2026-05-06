@@ -357,7 +357,7 @@ function buildTikTokVerificationSummary() {
   const aliases = getTikTokNicknameAliases();
   return [
     `TikTok handle: ${handle ? `@${handle}` : "Not set"}`,
-    `Accepted nicknames: ${aliases.length ? aliases.slice(0, 5).map(alias => `@${alias}`).join(", ") : "None"}`,
+    `Saved nicknames: ${aliases.length}`,
     `Verified role: ${getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set"}`,
     `Unverified role: ${getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Not set"}`,
     `Welcome channel: ${getWelcomeChannelId() ? `<#${getWelcomeChannelId()}>` : "Not set"}`,
@@ -403,7 +403,7 @@ async function syncTikTokVerification(member, source = "manual") {
       changed: false,
       reason: matched
         ? "Nickname already matches the TikTok handle."
-        : `Use Set My Name and type @${handle}${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""} to unlock the garden. Reaction roles are optional.`
+        : `Use Set My Name and type @${handle} again. Reaction roles are optional.`
     };
   }
 
@@ -3427,22 +3427,19 @@ function buildSettingsSummary() {
 function buildTikTokVerifyEmbed() {
   const handle = getTikTokHandle();
   const aliases = getTikTokNicknameAliases();
-  const acceptedNicknames = aliases.length
-    ? `${aliases.slice(0, 5).map(alias => `@${alias}`).join(", ")}${aliases.length > 5 ? ` +${aliases.length - 5} more` : ""}`
-    : "None";
   return makeEmbed({
     title: "TikTok name verification",
     description:
       handle
-        ? `Welcome to the mochi garden. Pick a flavor role by reacting below, then tap the button and type your TikTok username.\n\nIf it matches **@${handle}**${aliases.length ? " or one of the accepted nicknames" : ""}, I’ll hand you the verified role and let you wander the rest of the server.`
+        ? `Welcome to the mochi garden. Pick a flavor role below, then tap **Set My Name** and type your TikTok username.\n\nI’ll match it against **@${handle}** and any saved nicknames, then hand you the verified role.`
         : `Welcome to the mochi garden. Pick a flavor role by reacting below, then tap the button and type your TikTok username.\n\nAsk staff if you are not sure what format they want.`,
     color: COLORS.pink,
     fields: [
       { name: "🌸 TikTok handle", value: handle ? `@${handle}` : "Not set", inline: true },
-      { name: "🍡 Accepted nicknames", value: acceptedNicknames, inline: false },
       { name: "✨ Verified role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
       { name: "🫧 Unverified role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Optional", inline: true },
-      { name: "🍥 Flavor roles", value: "React below to pick a flavor role before or after verifying.", inline: false },
+      { name: "🍡 Saved nicknames", value: aliases.length ? `${aliases.length} saved` : "None saved", inline: false },
+      { name: "🍥 Flavor roles", value: "React below if you want a flavor role. They are optional.", inline: false },
       { name: "How it works", value: "1. Tap Set My Name\n2. Type your TikTok username\n3. Enjoy the garden", inline: false }
     ]
   });
