@@ -3451,8 +3451,8 @@ function buildTikTokVerifyCardAttachment() {
   };
 }
 
-function buildTikTokSuccessCardAttachment(enteredName) {
-  const username = String(enteredName || "").replace(/^@+/, "").trim() || "username";
+function buildTikTokSuccessCardAttachment(finalNickname) {
+  const nickname = String(finalNickname || "").replace(/^@+/, "").trim() || "username";
   const canvas = createCanvas(1280, 520);
   const ctx = canvas.getContext("2d");
 
@@ -3531,7 +3531,7 @@ function buildTikTokSuccessCardAttachment(enteredName) {
   ctx.fillText("Nickname updated", 320, 165);
   ctx.fillStyle = "#a9d8a5";
   ctx.font = "24px sans-serif";
-  ctx.fillText(`Verified as @${username}`, 320, 222);
+  ctx.fillText(`Final nickname: @${nickname}`, 320, 222);
   ctx.fillStyle = "#cfe7cc";
   ctx.font = "22px sans-serif";
   ctx.fillText("Enjoy the garden!", 320, 270);
@@ -7978,15 +7978,16 @@ client.on("interactionCreate", async interaction => {
 
         try {
           await member.setNickname(enteredName, "TikTok name verification");
+          const finalNickname = member.displayName || enteredName;
           const result = await syncTikTokVerification(member, "modal");
           const replyEmbed = makeEmbed({
             title: result.matched ? "Nickname updated" : "Name updated",
             description: result.matched
-              ? `Verified as @${getTikTokHandle()}. Enjoy the garden!`
+              ? `Your final nickname is @${finalNickname}. Enjoy the garden!`
               : `I set your nickname to @${enteredName}, but it does not match the configured TikTok handle yet.`,
             color: result.matched ? COLORS.mint : COLORS.yellow,
             fields: [
-              { name: "🌸 TikTok username", value: `@${enteredName}`, inline: true },
+              { name: "🌸 Final nickname", value: `@${finalNickname}`, inline: true },
               { name: "✨ Verification", value: result.matched ? `Verified as @${getTikTokHandle()}` : "Still unverified", inline: true },
               { name: "How it works", value: result.matched ? "You’re all set. Enjoy the garden!" : "Update your TikTok name to match the handle and try again.", inline: false }
             ]
@@ -7996,7 +7997,7 @@ client.on("interactionCreate", async interaction => {
             replyEmbed.setImage("attachment://tiktok-success-card.png");
             return interaction.editReply({
               embeds: [replyEmbed],
-              files: [buildTikTokSuccessCardAttachment(enteredName)],
+              files: [buildTikTokSuccessCardAttachment(finalNickname)],
               content: ""
             });
           }
