@@ -10155,7 +10155,12 @@ client.on("guildMemberAdd", async member => {
       })
     );
 
-    if (isTikTokVerificationEnabled()) {
+    const unverifiedRoleId = getUnverifiedRoleId();
+    if (!member.user.bot && unverifiedRoleId) {
+      await member.roles.add(unverifiedRoleId, "TikTok verification: join default unverified role").catch(() => {});
+    }
+
+    if (getTikTokHandle() && (getVerificationRoleId() || unverifiedRoleId)) {
       const verificationResult = await syncTikTokVerification(member, "join").catch(error => {
         console.error("TikTok verification sync error:", error.message);
         return null;
