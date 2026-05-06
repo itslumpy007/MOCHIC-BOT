@@ -3957,11 +3957,21 @@ async function setVerifiedVisibility(channel, locked) {
     if (unverifiedRoleId) {
       await channel.permissionOverwrites.edit(unverifiedRoleId, { ViewChannel: false }).catch(() => {});
     }
+    for (const roleId of ALL_ROLES) {
+      if (roleId) {
+        await channel.permissionOverwrites.edit(roleId, { ViewChannel: false }).catch(() => {});
+      }
+    }
   } else {
     await channel.permissionOverwrites.delete(channel.guild.roles.everyone).catch(() => {});
     await channel.permissionOverwrites.delete(verifiedRoleId).catch(() => {});
     if (unverifiedRoleId) {
       await channel.permissionOverwrites.delete(unverifiedRoleId).catch(() => {});
+    }
+    for (const roleId of ALL_ROLES) {
+      if (roleId) {
+        await channel.permissionOverwrites.delete(roleId).catch(() => {});
+      }
     }
   }
 
@@ -3982,6 +3992,11 @@ async function setWelcomeVisibility(channel, locked) {
     if (unverifiedRoleId) {
       await channel.permissionOverwrites.edit(unverifiedRoleId, { ViewChannel: true }).catch(() => {});
     }
+    for (const roleId of ALL_ROLES) {
+      if (roleId) {
+        await channel.permissionOverwrites.edit(roleId, { ViewChannel: false }).catch(() => {});
+      }
+    }
   } else {
     await channel.permissionOverwrites.delete(channel.guild.roles.everyone).catch(() => {});
     if (verifiedRoleId) {
@@ -3989,6 +4004,11 @@ async function setWelcomeVisibility(channel, locked) {
     }
     if (unverifiedRoleId) {
       await channel.permissionOverwrites.delete(unverifiedRoleId).catch(() => {});
+    }
+    for (const roleId of ALL_ROLES) {
+      if (roleId) {
+        await channel.permissionOverwrites.delete(roleId).catch(() => {});
+      }
     }
   }
 
