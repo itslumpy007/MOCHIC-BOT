@@ -3426,17 +3426,20 @@ function buildSettingsSummary() {
 
 function buildTikTokVerifyEmbed() {
   const handle = getTikTokHandle();
+  const aliases = getTikTokNicknameAliases();
+  const acceptedNicknames = aliases.length
+    ? `${aliases.slice(0, 5).map(alias => `@${alias}`).join(", ")}${aliases.length > 5 ? ` +${aliases.length - 5} more` : ""}`
+    : "None";
   return makeEmbed({
     title: "TikTok name verification",
     description:
       handle
-        ? `Welcome to the mochi garden. Pick a flavor role by reacting below, then tap the button and type your TikTok username.\n\nIf it matches **@${handle}**${getTikTokNicknameAliases().length ? " or one of the accepted nicknames" : ""}, I’ll hand you the verified role and let you wander the rest of the server.`
+        ? `Welcome to the mochi garden. Pick a flavor role by reacting below, then tap the button and type your TikTok username.\n\nIf it matches **@${handle}**${aliases.length ? " or one of the accepted nicknames" : ""}, I’ll hand you the verified role and let you wander the rest of the server.`
         : `Welcome to the mochi garden. Pick a flavor role by reacting below, then tap the button and type your TikTok username.\n\nAsk staff if you are not sure what format they want.`,
     color: COLORS.pink,
-    image: { url: "attachment://tiktok-verify-card.png" },
     fields: [
       { name: "🌸 TikTok handle", value: handle ? `@${handle}` : "Not set", inline: true },
-      { name: "🍡 Accepted nicknames", value: getTikTokNicknameAliases().length ? getTikTokNicknameAliases().map(alias => `@${alias}`).join(", ").slice(0, 1024) : "None", inline: false },
+      { name: "🍡 Accepted nicknames", value: acceptedNicknames, inline: false },
       { name: "✨ Verified role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
       { name: "🫧 Unverified role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Optional", inline: true },
       { name: "🍥 Flavor roles", value: "React below to pick a flavor role before or after verifying.", inline: false },
@@ -4166,7 +4169,6 @@ async function postTikTokVerifyPanel(source = "manual") {
 
   const sentMessage = await verifyChannel.send({
     embeds: [buildTikTokVerifyEmbed()],
-    files: [buildTikTokVerifyCardAttachment()],
     components: buildTikTokVerifyComponents()
   });
 
