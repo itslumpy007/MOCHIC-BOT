@@ -1411,12 +1411,12 @@ const allCommands = [
 
   new SlashCommandBuilder()
     .setName("setupverify")
-    .setDescription("Create the verify menu")
+    .setDescription("Create the onboarding panel")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   new SlashCommandBuilder()
     .setName("setuptiktokverify")
-    .setDescription("Create the TikTok nickname verify menu")
+    .setDescription("Create the TikTok onboarding panel")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   new SlashCommandBuilder()
@@ -4171,6 +4171,8 @@ async function postTikTokVerifyPanel(source = "manual") {
   });
 
   await addMochiRoleReactions(sentMessage);
+  config.verifyMessageId = sentMessage.id;
+  saveConfig();
 
   return {
     channelId: verifyChannelId,
@@ -4621,8 +4623,8 @@ function buildAdminPanelButtons(view, targetUserId = null) {
   if (view === "setup") {
     rows.push(
       new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setupverify", targetUserId)).setLabel("Post Reaction Verify").setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setuptiktokverify", targetUserId)).setLabel("Post TikTok Verify").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setupverify", targetUserId)).setLabel("Post Onboarding Panel").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setuptiktokverify", targetUserId)).setLabel("Post TikTok Panel").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setuprules", targetUserId)).setLabel("Post Rules").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "settings-view", targetUserId)).setLabel("View Settings").setStyle(ButtonStyle.Secondary)
       ),
@@ -7728,32 +7730,20 @@ client.on("interactionCreate", async interaction => {
         }
 
         if (action === "setupverify") {
-          const verifyChannel = await client.channels.fetch(getVerifyChannelId());
-          const verifyEmbed = makeEmbed({
-            title: "welcome to the mochi garden",
-            description:
-              "Pick any flavor role you want by reacting below. Then tap Set My Name to finish TikTok nickname verification.\n\n" +
-              "🌸 Sakura\n🍓 Strawberry Milk\n🍵 Matcha Dream\n🫐 Mystic Berry\n💜 Taro Cloud\n\n" +
-              "You can switch your role anytime by changing your reaction.",
-            color: COLORS.pink
-          });
-
-          const sentMessage = await verifyChannel.send({ embeds: [verifyEmbed] });
-          for (const emoji of Object.keys(MOCHI_ROLES)) {
-            await sentMessage.react(emoji);
+          try {
+            await postTikTokVerifyPanel("adminpanel");
+            return interaction.reply({ content: "Onboarding panel posted.", ephemeral: true });
+          } catch (error) {
+            return interaction.reply({ content: error.message || "Onboarding panel could not be posted.", ephemeral: true });
           }
-
-          config.verifyMessageId = sentMessage.id;
-          saveConfig();
-          return interaction.reply({ content: "Verify panel posted.", ephemeral: true });
         }
 
         if (action === "setuptiktokverify") {
           try {
             await postTikTokVerifyPanel("adminpanel");
-            return interaction.reply({ content: "TikTok verify panel posted.", ephemeral: true });
+            return interaction.reply({ content: "TikTok onboarding panel posted.", ephemeral: true });
           } catch (error) {
-            return interaction.reply({ content: error.message || "TikTok verify panel could not be posted.", ephemeral: true });
+            return interaction.reply({ content: error.message || "TikTok onboarding panel could not be posted.", ephemeral: true });
           }
         }
         if (action === "setuprules") {
@@ -8660,38 +8650,21 @@ client.on("interactionCreate", async interaction => {
 
     if (interaction.commandName === "setupverify") {
       await interaction.deferReply({ ephemeral: true });
-      const verifyChannelId = getVerifyChannelId();
-      if (!verifyChannelId) {
-        return interaction.editReply("Set a verify channel first.");
+      try {
+        await postTikTokVerifyPanel("slash");
+        return interaction.editReply("Onboarding panel created.");
+      } catch (error) {
+        return interaction.editReply(error.message || "Onboarding panel could not be created.");
       }
-      const verifyChannel = await client.channels.fetch(verifyChannelId);
-          const sentMessage = await verifyChannel.send({
-            embeds: [makeEmbed({
-              title: "welcome to the mochi garden",
-              description:
-            "Pick any flavor role you want by reacting below. Then complete TikTok nickname verification to unlock the garden.\n\n" +
-              "🌸 Sakura\n🍓 Strawberry Milk\n🍵 Matcha Dream\n🫐 Mystic Berry\n💜 Taro Cloud\n\n" +
-              "You can switch your role anytime by changing your reaction.",
-            color: COLORS.pink
-          })]
-        });
-
-      for (const emoji of Object.keys(MOCHI_ROLES)) {
-        await sentMessage.react(emoji);
-      }
-
-      config.verifyMessageId = sentMessage.id;
-      saveConfig();
-      return interaction.editReply("Reaction verify menu created.");
     }
 
     if (interaction.commandName === "setuptiktokverify") {
       await interaction.deferReply({ ephemeral: true });
       try {
         await postTikTokVerifyPanel("slash");
-        return interaction.editReply("TikTok verify menu created.");
+        return interaction.editReply("TikTok onboarding panel created.");
       } catch (error) {
-        return interaction.editReply(error.message || "TikTok verify panel could not be posted.");
+        return interaction.editReply(error.message || "TikTok onboarding panel could not be posted.");
       }
     }
 
