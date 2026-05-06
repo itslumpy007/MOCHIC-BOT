@@ -3739,7 +3739,7 @@ function buildTikTokPendingCardAttachment(enteredName) {
   };
 }
 
-function buildTikTokErrorCardAttachment(reason, enteredName) {
+function buildTikTokErrorCardAttachment(reason, enteredName, mode = "generic") {
   const username = String(enteredName || "").replace(/^@+/, "").trim() || "username";
   const message = String(reason || "Something went wrong.").trim() || "Something went wrong.";
   const canvas = createCanvas(1280, 520);
@@ -3772,9 +3772,10 @@ function buildTikTokErrorCardAttachment(reason, enteredName) {
     ctx.restore();
   };
 
+  const isPermission = mode === "permission";
   const bg = ctx.createLinearGradient(0, 0, 1280, 520);
-  bg.addColorStop(0, "#ffe9ea");
-  bg.addColorStop(1, "#f3d4d7");
+  bg.addColorStop(0, isPermission ? "#fff0df" : "#ffe9ea");
+  bg.addColorStop(1, isPermission ? "#f3deb7" : "#f3d4d7");
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, 1280, 520);
 
@@ -3787,25 +3788,25 @@ function buildTikTokErrorCardAttachment(reason, enteredName) {
   }
   ctx.globalAlpha = 1;
 
-  fillRR(60, 40, 1160, 440, 32, "rgba(55, 30, 34, 0.8)");
-  strokeRR(60, 40, 1160, 440, 32, "rgba(238, 151, 162, 0.78)", 3);
+  fillRR(60, 40, 1160, 440, 32, isPermission ? "rgba(57, 38, 25, 0.8)" : "rgba(55, 30, 34, 0.8)");
+  strokeRR(60, 40, 1160, 440, 32, isPermission ? "rgba(240, 194, 111, 0.78)" : "rgba(238, 151, 162, 0.78)", 3);
 
   const panel = ctx.createLinearGradient(120, 100, 1180, 430);
-  panel.addColorStop(0, "rgba(42, 27, 30, 0.97)");
-  panel.addColorStop(1, "rgba(31, 21, 25, 0.95)");
+  panel.addColorStop(0, isPermission ? "rgba(49, 36, 22, 0.97)" : "rgba(42, 27, 30, 0.97)");
+  panel.addColorStop(1, isPermission ? "rgba(36, 27, 18, 0.95)" : "rgba(31, 21, 25, 0.95)");
   fillRR(120, 80, 1040, 360, 28, panel);
-  strokeRR(120, 80, 1040, 360, 28, "rgba(239, 165, 175, 0.68)", 2);
+  strokeRR(120, 80, 1040, 360, 28, isPermission ? "rgba(242, 208, 133, 0.68)" : "rgba(239, 165, 175, 0.68)", 2);
 
   ctx.save();
   ctx.translate(210, 230);
-  ctx.fillStyle = "#f09ea9";
+  ctx.fillStyle = isPermission ? "#e6bf56" : "#f09ea9";
   ctx.beginPath();
   ctx.arc(0, 0, 74, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = "rgba(255,255,255,0.2)";
   ctx.lineWidth = 2;
   ctx.stroke();
-  ctx.strokeStyle = "#fff1f2";
+  ctx.strokeStyle = isPermission ? "#fff7da" : "#fff1f2";
   ctx.lineWidth = 14;
   ctx.lineCap = "round";
   ctx.beginPath();
@@ -3815,17 +3816,17 @@ function buildTikTokErrorCardAttachment(reason, enteredName) {
   ctx.stroke();
   ctx.restore();
 
-  ctx.fillStyle = "#ffd9df";
+  ctx.fillStyle = isPermission ? "#fff0b8" : "#ffd9df";
   ctx.font = "bold 54px sans-serif";
-  ctx.fillText("Try again", 320, 165);
-  ctx.fillStyle = "#e9b9bf";
+  ctx.fillText(isPermission ? "Needs staff help" : "Try again", 320, 165);
+  ctx.fillStyle = isPermission ? "#f1d08a" : "#e9b9bf";
   ctx.font = "24px sans-serif";
   ctx.fillText(message, 320, 222);
-  ctx.fillStyle = "#f0cdd1";
+  ctx.fillStyle = isPermission ? "#f8e8bf" : "#f0cdd1";
   ctx.font = "22px sans-serif";
-  ctx.fillText(`We saw @${username} on this try.`, 320, 270);
+  ctx.fillText(isPermission ? `Staff may need to update permissions.` : `We saw @${username} on this try.`, 320, 270);
 
-  ctx.strokeStyle = "rgba(244, 198, 205, 0.4)";
+  ctx.strokeStyle = isPermission ? "rgba(244, 220, 173, 0.4)" : "rgba(244, 198, 205, 0.4)";
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(320, 252);
@@ -3834,15 +3835,15 @@ function buildTikTokErrorCardAttachment(reason, enteredName) {
 
   ctx.save();
   ctx.translate(980, 220);
-  ctx.fillStyle = "#5a2d36";
+  ctx.fillStyle = isPermission ? "#6a5431" : "#5a2d36";
   ctx.beginPath();
   ctx.arc(0, 0, 102, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#fff7f8";
+  ctx.fillStyle = isPermission ? "#fff8e4" : "#fff7f8";
   ctx.beginPath();
   ctx.arc(0, 0, 84, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = "#f5c4cb";
+  ctx.fillStyle = isPermission ? "#efcf84" : "#f5c4cb";
   ctx.beginPath();
   ctx.arc(0, 0, 88, 0, Math.PI * 2);
   ctx.strokeStyle = "rgba(255,255,255,0.5)";
@@ -3859,13 +3860,13 @@ function buildTikTokErrorCardAttachment(reason, enteredName) {
   ctx.beginPath();
   ctx.arc(28, -7, 10, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = "#c97b8d";
+  ctx.strokeStyle = isPermission ? "#c89a46" : "#c97b8d";
   ctx.lineWidth = 5;
   ctx.lineCap = "round";
   ctx.beginPath();
   ctx.arc(0, 18, 17, 0.15 * Math.PI, 0.85 * Math.PI);
   ctx.stroke();
-  ctx.fillStyle = "#f7c6d7";
+  ctx.fillStyle = isPermission ? "#f3d88b" : "#f7c6d7";
   ctx.beginPath();
   ctx.arc(-35, 15, 7, 0, Math.PI * 2);
   ctx.fill();
@@ -3876,7 +3877,13 @@ function buildTikTokErrorCardAttachment(reason, enteredName) {
 
   ctx.fillStyle = "#7c6e84";
   ctx.font = "20px sans-serif";
-  ctx.fillText("Set it to match the handle and tap Set My Name again.", 150, 850);
+  ctx.fillText(
+    isPermission
+      ? "Ask staff to fix the setup, then try Set My Name again."
+      : "Set it to match the handle and tap Set My Name again.",
+    150,
+    850
+  );
 
   return {
     attachment: canvas.toBuffer("image/png"),
@@ -6702,7 +6709,7 @@ client.on("interactionCreate", async interaction => {
           });
           return interaction.reply({
             embeds: [setupEmbed],
-            files: [buildTikTokErrorCardAttachment(setupError, "username")],
+            files: [buildTikTokErrorCardAttachment(setupError, "username", "permission")],
             ephemeral: true
           });
         }
@@ -7892,7 +7899,7 @@ client.on("interactionCreate", async interaction => {
           });
           return interaction.editReply({
             embeds: [errorEmbed],
-            files: [buildTikTokErrorCardAttachment("I could not find your server membership.", "username")],
+            files: [buildTikTokErrorCardAttachment("I could not find your server membership.", "username", "permission")],
             content: ""
           });
         }
@@ -7906,7 +7913,7 @@ client.on("interactionCreate", async interaction => {
           });
           return interaction.editReply({
             embeds: [errorEmbed],
-            files: [buildTikTokErrorCardAttachment("TikTok verification is not configured yet. Ask staff to set the handle and roles.", "username")],
+            files: [buildTikTokErrorCardAttachment("TikTok verification is not configured yet. Ask staff to set the handle and roles.", "username", "permission")],
             content: ""
           });
         }
@@ -7921,7 +7928,7 @@ client.on("interactionCreate", async interaction => {
           });
           return interaction.editReply({
             embeds: [errorEmbed],
-            files: [buildTikTokErrorCardAttachment("I need the Manage Nicknames permission before I can update your name.", "username")],
+            files: [buildTikTokErrorCardAttachment("I need the Manage Nicknames permission before I can update your name.", "username", "permission")],
             content: ""
           });
         }
@@ -7936,7 +7943,7 @@ client.on("interactionCreate", async interaction => {
           });
           return interaction.editReply({
             embeds: [errorEmbed],
-            files: [buildTikTokErrorCardAttachment("Please type your TikTok username.", "username")],
+            files: [buildTikTokErrorCardAttachment("Please type your TikTok username.", "username", "generic")],
             content: ""
           });
         }
@@ -7950,7 +7957,7 @@ client.on("interactionCreate", async interaction => {
           });
           return interaction.editReply({
             embeds: [errorEmbed],
-            files: [buildTikTokErrorCardAttachment("That nickname is too long for Discord. Try a shorter TikTok username.", enteredName)],
+            files: [buildTikTokErrorCardAttachment("That nickname is too long for Discord. Try a shorter TikTok username.", enteredName, "generic")],
             content: ""
           });
         }
@@ -7964,7 +7971,7 @@ client.on("interactionCreate", async interaction => {
           });
           return interaction.editReply({
             embeds: [errorEmbed],
-            files: [buildTikTokErrorCardAttachment("I cannot change your nickname.", enteredName)],
+            files: [buildTikTokErrorCardAttachment("I cannot change your nickname.", enteredName, "permission")],
             content: ""
           });
         }
@@ -8014,7 +8021,7 @@ client.on("interactionCreate", async interaction => {
           });
           return interaction.editReply({
             embeds: [errorEmbed],
-            files: [buildTikTokErrorCardAttachment(reason, enteredName)],
+            files: [buildTikTokErrorCardAttachment(reason, enteredName, "generic")],
             content: ""
           });
         }
@@ -8633,7 +8640,7 @@ client.on("interactionCreate", async interaction => {
         });
         return interaction.reply({
           embeds: [setupEmbed],
-          files: [buildTikTokErrorCardAttachment(setupError, "username")],
+          files: [buildTikTokErrorCardAttachment(setupError, "username", "permission")],
           ephemeral: true
         });
       }
