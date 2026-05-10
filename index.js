@@ -1485,10 +1485,26 @@ const allCommands = [
 
   new SlashCommandBuilder()
     .setName("purge")
-    .setDescription("Delete messages in bulk")
+    .setDescription("Delete messages in bulk or clear a channel")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addIntegerOption(option =>
-      option.setName("amount").setDescription("How many messages to delete").setRequired(true)
+      option
+        .setName("amount")
+        .setDescription("How many recent messages to delete")
+        .setRequired(false)
+    )
+    .addChannelOption(option =>
+      option
+        .setName("channel")
+        .setDescription("Channel to clear instead of the current one")
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+        .setRequired(false)
+    )
+    .addBooleanOption(option =>
+      option
+        .setName("all")
+        .setDescription("Delete the whole channel history")
+        .setRequired(false)
     ),
 
   new SlashCommandBuilder()
@@ -4459,6 +4475,60 @@ async function getRecentMessagesForUser(channel, userId, limit = 5) {
       const content = (message.content || "*No text content*").replace(/\n/g, " ").slice(0, 120);
       return `<t:${Math.floor(message.createdTimestamp / 1000)}:R> - ${content}`;
     });
+}
+
+async function purgeChannelMessages(channel, amount, deleteAll = false) {
+  if (!channel?.messages?.fetch) return 0;
+
+  if (!deleteAll) {
+    const deleted = await channel.bulkDelete(amount, true).catch(() => null);
+    return deleted?.size || 0;
+  }
+
+  let deletedCount = 0;
+  let before;
+  const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
+
+  while (true) {
+    const messages = await channel.messages.fetch({
+      limit: 100,
+      ...(before ? { before } : {})
+    });
+
+    if (!messages.size) break;
+
+    const now = Date.now();
+    const recentMessages = [];
+    const oldMessages = [];
+
+    messages.forEach(message => {
+      if (now - message.createdTimestamp < fourteenDaysMs) {
+        recentMessages.push(message);
+      } else {
+        oldMessages.push(message);
+      }
+    });
+
+    if (recentMessages.length) {
+      const deletedRecent = await channel.bulkDelete(recentMessages, true).catch(() => null);
+      deletedCount += deletedRecent?.size || 0;
+    }
+
+    if (oldMessages.length) {
+      const results = await Promise.allSettled(oldMessages.map(message => message.delete()));
+      deletedCount += results.filter(result => result.status === "fulfilled").length;
+    }
+
+    const oldestMessage = [...messages.values()].reduce((oldest, message) => {
+      if (!oldest) return message;
+      return message.createdTimestamp < oldest.createdTimestamp ? message : oldest;
+    }, null);
+
+    if (!oldestMessage || messages.size < 100) break;
+    before = oldestMessage.id;
+  }
+
+  return deletedCount;
 }
 
 function clearPendingPanelAction(userId) {
@@ -8801,12 +8871,22 @@ client.on("interactionCreate", async interaction => {
 
     if (interaction.commandName === "purge") {
       const amount = interaction.options.getInteger("amount");
-      if (amount < 1 || amount > 100) {
-        return interaction.reply({ content: "Choose a number from 1 to 100.", ephemeral: true });
+      const deleteAll = interaction.options.getBoolean("all") || false;
+      const targetChannel = interaction.options.getChannel("channel") || channel;
+      await interaction.deferReply({ ephemeral: true });
+
+      if (!targetChannel || typeof targetChannel.bulkDelete !== "function") {
+        return interaction.editReply({ content: "That channel type cannot be purged." });
       }
 
-      await channel.bulkDelete(amount, true);
-      return interaction.reply({ content: `Deleted ${amount} message(s).`, ephemeral: true });
+      if (!deleteAll && (amount == null || amount < 1 || amount > 100)) {
+        return interaction.editReply({ content: "Choose a number from 1 to 100, or turn on `all` to clear the whole channel." });
+      }
+
+      const deletedCount = await purgeChannelMessages(targetChannel, amount, deleteAll);
+      const channelLabel = targetChannel.id === channel.id ? "this channel" : `<#${targetChannel.id}>`;
+      const scopeLabel = deleteAll ? "the whole channel history" : `${deletedCount} message(s)`;
+      return interaction.editReply({ content: `Deleted ${scopeLabel} from ${channelLabel}.` });
     }
 
     if (interaction.commandName === "userinfo") {
