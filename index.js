@@ -1490,13 +1490,6 @@ const allCommands = [
     ),
 
   new SlashCommandBuilder()
-    .setName("affirm")
-    .setDescription("Send an anonymous affirmation to the affirmations chat")
-    .addStringOption(option =>
-      option.setName("message").setDescription("Your encouraging message").setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
     .setName("purge")
     .setDescription("Delete messages in bulk or clear a channel")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
@@ -3526,7 +3519,7 @@ async function sendAnonymousAffirmation(author, message) {
         description: content,
         color: COLORS.pink,
         footer: {
-          text: "Sent anonymously through /affirm"
+          text: "Sent anonymously through the affirmations button"
         }
       })
     ]
@@ -4039,6 +4032,71 @@ function buildTikTokVerifyComponents() {
   ];
 }
 
+function buildAnonymousAffirmationsEmbed() {
+  return makeEmbed({
+    title: "Anonymous affirmations",
+    description: "Press the button below to share a kind note anonymously with the server.",
+    color: COLORS.pink,
+    fields: [
+      { name: "How it works", value: "Tap the button, write your message, and I’ll post it anonymously.", inline: false },
+      { name: "Tips", value: "Keep it short, positive, and supportive.", inline: false }
+    ]
+  });
+}
+
+function buildAnonymousAffirmationsComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("affirmations:open")
+        .setLabel("Share an affirmation")
+        .setEmoji("💌")
+        .setStyle(ButtonStyle.Primary)
+    )
+  ];
+}
+
+function buildAnonymousAffirmationModal() {
+  const modal = new ModalBuilder()
+    .setCustomId("affirmations:submit")
+    .setTitle("Share an affirmation anonymously");
+
+  const input = new TextInputBuilder()
+    .setCustomId("affirmation")
+    .setLabel("Your affirmation")
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(true)
+    .setPlaceholder("Write something kind, supportive, or encouraging.")
+    .setMaxLength(1500);
+
+  modal.addComponents(new ActionRowBuilder().addComponents(input));
+  return modal;
+}
+
+async function postAnonymousAffirmationsPanel(source = "manual") {
+  const channelId = getAnonymousAffirmationsChannelId();
+  if (!channelId) {
+    throw new Error("Set an affirmations channel first.");
+  }
+
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel?.send) {
+    throw new Error("The affirmations channel could not be found or cannot send messages.");
+  }
+
+  const message = await channel.send({
+    embeds: [buildAnonymousAffirmationsEmbed()],
+    components: buildAnonymousAffirmationsComponents()
+  });
+
+  recordAuditLog(source, "affirmations-panel-posted", {
+    channelId,
+    messageId: message.id
+  });
+
+  return message;
+}
+
 function getVerifiedVisibilityRoots(guild, scope, referenceChannel) {
   const normalizedScope = String(scope || "current").toLowerCase();
   if (normalizedScope === "all") {
@@ -4359,7 +4417,7 @@ function buildHelpEmbed() {
     },
     {
       name: "Server Tools",
-      value: "`/setupverify`, `/setuptiktokverify`, `/setuprules`, `/announce`, `/purge`, `/lockdown`, `/unlockdown`, `/lockverified`, `/unlockverified`",
+      value: "`/setupverify`, `/setuptiktokverify`, `/setuprules`, `/announce`, `/purge`, `/lockdown`, `/unlockdown`, `/lockverified`, `/unlockverified`\nAnonymous affirmations: use the button in the affirmations channel after `/settings affirmchannel`.",
       inline: false
     },
     {
@@ -5551,6 +5609,7 @@ function updateWebSettings(auth, payload) {
     verifyChannelId: config.settings.verifyChannelId,
     rulesChannelId: config.settings.rulesChannelId,
     welcomeChannelId: config.settings.welcomeChannelId,
+    anonymousAffirmationsChannelId: config.settings.anonymousAffirmationsChannelId,
     logChannelId: config.settings.logChannelId,
     automodLogChannelId: config.settings.automodLogChannelId,
     mutedRoleId: config.settings.mutedRoleId,
@@ -5559,6 +5618,11 @@ function updateWebSettings(auth, payload) {
     verifiedRoleId: config.settings.verifiedRoleId,
     unverifiedRoleId: config.settings.unverifiedRoleId
   });
+  if (Object.prototype.hasOwnProperty.call(payload, "anonymousAffirmationsChannelId")) {
+    postAnonymousAffirmationsPanel("web").catch(error => {
+      console.error("Anonymous affirmations panel error:", error.message);
+    });
+  }
   return buildWebConfigPayload().settings;
 }
 
@@ -7004,6 +7068,18 @@ client.on("interactionCreate", async interaction => {
         return interaction.showModal(buildTikTokNameModal());
       }
 
+      if (interaction.customId === "affirmations:open") {
+        if (!ENABLE_CORE_BOT) {
+          return interaction.reply({ content: "Anonymous affirmations are disabled on this deployment.", ephemeral: true });
+        }
+
+        if (!getAnonymousAffirmationsChannelId()) {
+          return interaction.reply({ content: "Set an affirmations channel first.", ephemeral: true });
+        }
+
+        return interaction.showModal(buildAnonymousAffirmationModal());
+      }
+
       if (!interaction.customId.startsWith("adminpanel:")) return;
       if (!ENABLE_CORE_BOT) {
         return interaction.reply({ content: "Admin controls are disabled on this deployment.", ephemeral: true });
@@ -8157,6 +8233,19 @@ client.on("interactionCreate", async interaction => {
     }
 
     if (interaction.isModalSubmit()) {
+      if (interaction.customId === "affirmations:submit") {
+        if (!ENABLE_CORE_BOT) {
+          return interaction.reply({ content: "Anonymous affirmations are disabled on this deployment.", ephemeral: true });
+        }
+
+        await interaction.deferReply({ ephemeral: true });
+        const message = interaction.fields.getTextInputValue("affirmation");
+        const result = await sendAnonymousAffirmation(interaction.user, message);
+        return interaction.editReply({
+          content: `Your affirmation was posted anonymously to <#${result.channelId}>.`
+        });
+      }
+
       if (interaction.customId === "verify:tiktok-name") {
         if (!ENABLE_CORE_BOT) {
           return interaction.reply({ content: "Verification is disabled on this deployment.", ephemeral: true });
@@ -9025,15 +9114,6 @@ client.on("interactionCreate", async interaction => {
         ]
       });
       return interaction.reply({ content: "Announcement sent.", ephemeral: true });
-    }
-
-    if (interaction.commandName === "affirm") {
-      const message = interaction.options.getString("message");
-      const result = await sendAnonymousAffirmation(interaction.user, message);
-      return interaction.reply({
-        content: `Your affirmation was posted anonymously to <#${result.channelId}>.`,
-        ephemeral: true
-      });
     }
 
     if (interaction.commandName === "dm") {
@@ -10232,6 +10312,12 @@ client.on("interactionCreate", async interaction => {
 
       if (["tiktokhandle", "tiktokaliases", "verifiedrole", "unverifiedrole", "verifychannel", "welcomechannel", "affirmchannel"].includes(subcommand)) {
         await resolveVerifyMessageId().catch(() => null);
+      }
+
+      if (subcommand === "affirmchannel") {
+        await postAnonymousAffirmationsPanel("settings").catch(error => {
+          console.error("Anonymous affirmations panel error:", error.message);
+        });
       }
 
       return interaction.reply({
