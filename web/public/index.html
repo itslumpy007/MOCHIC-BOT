@@ -41,14 +41,21 @@
           </div>
         </div>
 
+        <p class="sidebar-note">Basic tools stay visible first. Open advanced tools only when you need them.</p>
+
         <nav class="tabs" aria-label="Dashboard sections">
           <button class="tab is-active" data-view="overview" type="button">Overview</button>
           <button class="tab" data-view="members" type="button">Members</button>
-          <button class="tab" data-view="automod" type="button">AutoMod</button>
-          <button class="tab" data-view="settings" data-required-access="admin" type="button">Settings</button>
-          <button class="tab" data-view="staff" data-required-access="admin" type="button">Staff</button>
-          <button class="tab" data-view="ops" data-required-access="admin" type="button">Ops</button>
           <button class="tab" data-view="records" type="button">Records</button>
+        </nav>
+
+        <button class="advanced-toggle" id="advancedToggle" type="button" aria-expanded="false">Show advanced tools</button>
+
+        <nav class="tabs hidden" id="advancedTabs" aria-label="Advanced dashboard sections">
+          <button class="tab" data-view="automod" data-advanced="true" type="button">AutoMod</button>
+          <button class="tab" data-view="settings" data-required-access="admin" data-advanced="true" type="button">Settings</button>
+          <button class="tab" data-view="staff" data-required-access="admin" data-advanced="true" type="button">Staff</button>
+          <button class="tab" data-view="ops" data-required-access="admin" data-advanced="true" type="button">Ops</button>
         </nav>
 
         <div class="auth-panel" id="authPanel">
@@ -92,7 +99,7 @@
         <section id="membersView" class="view">
           <section class="panel">
             <div class="panel-header">
-              <h3>Member Search</h3>
+              <h3>Find Member</h3>
             </div>
             <div class="search-row">
               <input id="memberSearchInput" placeholder="Discord ID, mention, or username">
@@ -106,12 +113,12 @@
                 <h3>Profile</h3>
                 <button id="memberAiSummaryButton" class="ghost-button" type="button">AI Summary</button>
               </div>
-              <div id="memberProfile" class="profile-empty">Search for a member to load their moderation profile.</div>
+              <div id="memberProfile" class="profile-empty">Search a member to view profile details.</div>
               <div id="memberAiSummary" class="event-list"></div>
             </section>
             <section class="panel">
               <div class="panel-header">
-                <h3>Moderation Actions</h3>
+                <h3>Quick Actions</h3>
               </div>
               <div class="action-form">
                 <div class="button-row">
@@ -157,13 +164,13 @@
           <div class="split">
             <section class="panel">
               <div class="panel-header">
-                <h3>Member Cases</h3>
+                <h3>Recent Cases</h3>
               </div>
               <div id="memberCases" class="event-list"></div>
             </section>
             <section class="panel">
               <div class="panel-header">
-                <h3>Warnings & Notes</h3>
+                <h3>Flags</h3>
               </div>
               <div id="memberSignals" class="event-list"></div>
             </section>
@@ -297,7 +304,7 @@
               <h3>Server Settings</h3>
               <button class="save-button" id="saveSettings" type="button">Save</button>
             </div>
-            <p class="panel-note">Set the welcome channel here if you want a shared little entryway for new members, or use a separate channel if you want a dedicated welcome nook. You can reuse the same channel for both if that fits your setup.</p>
+            <p class="panel-note">Set the main server channels here.</p>
             <div class="form-grid" id="generalSettingsFields"></div>
           </section>
 
@@ -306,14 +313,14 @@
               <h3>Verification</h3>
               <button class="save-button" id="saveAndPostTikTokVerify" type="button">Save &amp; Post TikTok Verify</button>
             </div>
-            <p class="panel-note">Use this section to set the TikTok handle, accepted nickname aliases, and the roles used for the nickname gate. You can paste a TikTok username or profile link into the handle field, and paste additional names into the aliases box separated by commas or new lines.</p>
+            <p class="panel-note">Set the verify channel, roles, and TikTok details.</p>
             <div class="button-row" style="margin-bottom: 12px;">
               <button class="ghost-button" id="lockVerifiedCurrent" type="button">Lock Verified Here</button>
               <button class="ghost-button" id="unlockVerifiedCurrent" type="button">Unlock Verified Here</button>
               <button class="ghost-button" id="lockVerifiedAll" type="button">Lock Verified All</button>
               <button class="ghost-button" id="unlockVerifiedAll" type="button">Unlock Verified All</button>
             </div>
-            <p class="panel-note">Bulk sync: mark every member without the verified role as unverified, and clear the unverified role from members who are already verified.</p>
+            <p class="panel-note">Bulk sync updates verified and unverified roles across the server.</p>
             <div class="button-row" style="margin-bottom: 12px;">
               <button class="save-button" id="markAllUnverified" type="button">Mark All Unverified</button>
             </div>

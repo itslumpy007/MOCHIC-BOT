@@ -28,6 +28,7 @@ const titles = {
 
 const storageKeys = {
   activeView: "mochiActiveView",
+  advancedToolsVisible: "mochiAdvancedToolsVisible",
   caseFilters: "mochiCaseFilters",
   lastMemberSearch: "mochiLastMemberSearch",
   memberAction: "mochiMemberAction",
@@ -36,6 +37,8 @@ const storageKeys = {
   auditFilter: "mochiAuditFilter",
   appealFilter: "mochiAppealFilter"
 };
+
+const advancedViews = new Set(["automod", "settings", "staff", "ops"]);
 
 const automodSwitchLabels = {
   invites: "Invite links",
@@ -348,9 +351,36 @@ function isViewAllowed(view) {
   return hasPanelAccess("mod");
 }
 
+function isAdvancedToolsVisible() {
+  return localStorage.getItem(storageKeys.advancedToolsVisible) === "true";
+}
+
+function setAdvancedToolsVisible(visible) {
+  localStorage.setItem(storageKeys.advancedToolsVisible, visible ? "true" : "false");
+  updateAdvancedToolsVisibility();
+
+  if (!visible && advancedViews.has(localStorage.getItem(storageKeys.activeView))) {
+    setActiveView(getDefaultView());
+  }
+}
+
+function updateAdvancedToolsVisibility() {
+  const visible = isAdvancedToolsVisible();
+  const toggle = $("#advancedToggle");
+  const advancedTabs = $("#advancedTabs");
+  if (toggle) {
+    toggle.textContent = visible ? "Hide advanced tools" : "Show advanced tools";
+    toggle.setAttribute("aria-expanded", visible ? "true" : "false");
+  }
+  if (advancedTabs) advancedTabs.classList.toggle("hidden", !visible);
+}
+
 function setActiveView(view) {
   const requestedView = titles[view] ? view : getDefaultView();
-  const nextView = isViewAllowed(requestedView) ? requestedView : getDefaultView();
+  const advancedVisible = isAdvancedToolsVisible();
+  const nextView = isViewAllowed(requestedView) && (!advancedViews.has(requestedView) || advancedVisible)
+    ? requestedView
+    : getDefaultView();
   document.querySelectorAll(".tab").forEach(tab => {
     tab.classList.toggle("is-active", tab.dataset.view === nextView);
   });
@@ -364,6 +394,7 @@ function setActiveView(view) {
 function applyAccessRestrictions() {
   const isAdmin = hasPanelAccess("admin");
   const isMod = hasPanelAccess("mod");
+  const advancedVisible = isAdvancedToolsVisible();
 
   document.querySelectorAll("[data-required-access]").forEach(element => {
     const allowed = hasPanelAccess(element.dataset.requiredAccess);
@@ -374,12 +405,19 @@ function applyAccessRestrictions() {
   });
 
   document.querySelectorAll(".tab").forEach(tab => {
-    const allowed = tab.dataset.requiredAccess ? hasPanelAccess(tab.dataset.requiredAccess) : isMod;
+    const advancedAllowed = tab.dataset.advanced !== "true" || advancedVisible;
+    const allowed = (tab.dataset.requiredAccess ? hasPanelAccess(tab.dataset.requiredAccess) : isMod) && advancedAllowed;
     tab.classList.toggle("hidden", !allowed);
     tab.disabled = !allowed;
   });
 
+  updateAdvancedToolsVisibility();
+
   if (!isAdmin && ["settings", "staff", "ops"].includes(localStorage.getItem(storageKeys.activeView))) {
+    localStorage.setItem(storageKeys.activeView, getDefaultView());
+  }
+
+  if (!advancedVisible && advancedViews.has(localStorage.getItem(storageKeys.activeView))) {
     localStorage.setItem(storageKeys.activeView, getDefaultView());
   }
 }
@@ -393,6 +431,7 @@ function restorePanelMemory() {
   $("#memberAction").value = localStorage.getItem(storageKeys.memberAction) || "warn";
   $("#memberActionDuration").value = localStorage.getItem(storageKeys.memberDuration) || "";
   $("#timelineSearchInput").value = localStorage.getItem(storageKeys.timelineSearch) || "";
+  updateAdvancedToolsVisibility();
   setActiveView(localStorage.getItem(storageKeys.activeView) || "overview");
 }
 
@@ -1742,6 +1781,9 @@ function bindEvents() {
     const button = event.target.closest("[data-appeal-status]");
     if (!button) return;
     updateAppealStatus(button.dataset.appealId, button.dataset.appealStatus).catch(error => setAlert(error.message, "error"));
+  });
+  $("#advancedToggle").addEventListener("click", () => {
+    setAdvancedToolsVisible(!isAdvancedToolsVisible());
   });
 
   document.querySelectorAll(".tab").forEach(button => {
