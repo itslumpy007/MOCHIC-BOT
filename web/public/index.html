@@ -72,6 +72,7 @@
           </div>
           <div class="topbar-actions">
             <span class="pill" id="apiState">Locked</span>
+            <button id="commandPaletteButton" class="icon-button" type="button" title="Command palette">Commands</button>
             <button id="refreshButton" class="icon-button" type="button" title="Refresh">Refresh</button>
           </div>
         </header>
@@ -85,6 +86,12 @@
               <h3>Quick Actions</h3>
             </div>
             <div class="quick-actions" id="quickActions"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-header">
+              <h3>My Workload</h3>
+            </div>
+            <div id="workloadSummary" class="summary-grid"></div>
           </section>
           <div class="split">
             <section class="panel">
@@ -477,6 +484,10 @@
             <div class="form-grid">
               <label>Timeline search<input id="timelineSearchInput" placeholder="search across cases, warnings, and notes"></label>
             </div>
+            <div class="button-row">
+              <button class="ghost-button" id="saveCaseFilterButton" type="button">Save Filter</button>
+            </div>
+            <div id="savedCaseFilters" class="filter-chip-row"></div>
           </section>
           <div class="split">
             <section class="panel">
@@ -513,6 +524,14 @@
           </section>
         </section>
       </main>
+    </div>
+
+    <div id="commandPalette" class="command-palette hidden" role="dialog" aria-modal="true" aria-label="Command palette">
+      <div class="command-palette-backdrop" data-close-palette="true"></div>
+      <div class="command-palette-card">
+        <input id="commandPaletteInput" type="text" placeholder="Search pages, actions, templates, and filters" autocomplete="off">
+        <div id="commandPaletteList" class="command-palette-list"></div>
+      </div>
     </div>
 
     <script src="/app.js"></script>

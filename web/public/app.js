@@ -32,6 +32,7 @@ const storageKeys = {
   activeView: "mochiActiveView",
   advancedToolsVisible: "mochiAdvancedToolsVisible",
   caseFilters: "mochiCaseFilters",
+  savedCaseFilters: "mochiSavedCaseFilters",
   lastMemberSearch: "mochiLastMemberSearch",
   memberAction: "mochiMemberAction",
   memberDuration: "mochiMemberDuration",
@@ -39,7 +40,8 @@ const storageKeys = {
   auditFilter: "mochiAuditFilter",
   appealFilter: "mochiAppealFilter",
   recentActions: "mochiRecentActions",
-  templateEditorIndex: "mochiTemplateEditorIndex"
+  templateEditorIndex: "mochiTemplateEditorIndex",
+  commandPaletteOpen: "mochiCommandPaletteOpen"
 };
 
 const advancedViews = new Set(["automod", "settings", "staff", "ops"]);
@@ -360,6 +362,32 @@ const quickActions = [
   }
 ];
 
+const templateCategories = [
+  { value: "general", label: "General" },
+  { value: "spam", label: "Spam" },
+  { value: "scam", label: "Scam" },
+  { value: "harassment", label: "Harassment" },
+  { value: "raid", label: "Raid" },
+  { value: "other", label: "Other" }
+];
+
+const commandPaletteEntries = [
+  { kind: "view", label: "Overview", value: "overview" },
+  { kind: "view", label: "Members", value: "members" },
+  { kind: "view", label: "Records", value: "records" },
+  { kind: "view", label: "AutoMod", value: "automod", advanced: true },
+  { kind: "view", label: "Settings", value: "settings", advanced: true, adminOnly: true },
+  { kind: "view", label: "Staff", value: "staff", advanced: true, adminOnly: true },
+  { kind: "view", label: "Ops", value: "ops", advanced: true, adminOnly: true },
+  { kind: "action", label: "Search member", value: "search-member" },
+  { kind: "action", label: "New template", value: "new-template", advanced: true, adminOnly: true },
+  { kind: "action", label: "Save filter", value: "save-filter" },
+  { kind: "action", label: "Clear recent actions", value: "clear-recent-actions" },
+  { kind: "action", label: "Open quick action: First offense", value: "preset:firstOffense" },
+  { kind: "action", label: "Open quick action: Spam raid", value: "preset:spamRaid" },
+  { kind: "action", label: "Open quick action: Scam link", value: "preset:scamLink" }
+];
+
 const automodTestSamples = {
   spam: "Join my server now join my server now join my server now",
   invite: "discord.gg/example",
@@ -393,11 +421,25 @@ function confirmDangerousAction(action, target, details = "") {
 }
 
 function parseTemplateLine(line) {
-  const [label, action, duration, ...reasonParts] = String(line || "").split("|").map(part => part.trim());
+  const parts = String(line || "").split("|").map(part => part.trim());
+  if (parts.length < 4) return null;
+  let label = "";
+  let category = "general";
+  let action = "warn";
+  let duration = "";
+  let reasonParts = [];
+
+  if (parts.length >= 5) {
+    [label, category, action, duration, ...reasonParts] = parts;
+  } else {
+    [label, action, duration, ...reasonParts] = parts;
+  }
+
   const reason = reasonParts.join("|").trim();
   if (!label || !action || !reason) return null;
   return {
     label: label.slice(0, 80),
+    category: String(category || "general").trim().toLowerCase().slice(0, 40),
     action: action.toLowerCase().slice(0, 30),
     duration: duration || "",
     reason: reason.slice(0, 500)
@@ -406,7 +448,7 @@ function parseTemplateLine(line) {
 
 function serializeTemplates(templates = []) {
   return templates
-    .map(template => `${template.label || ""} | ${template.action || "warn"} | ${template.duration || ""} | ${template.reason || ""}`)
+    .map(template => `${template.label || ""} | ${template.category || "general"} | ${template.action || "warn"} | ${template.duration || ""} | ${template.reason || ""}`)
     .join("\n");
 }
 
@@ -414,6 +456,7 @@ function normalizeTemplates(templates = []) {
   return templates
     .map(template => ({
       label: String(template.label || "").trim().slice(0, 80),
+      category: String(template.category || "general").trim().toLowerCase().slice(0, 40),
       action: String(template.action || "warn").trim().toLowerCase().slice(0, 30),
       duration: String(template.duration || "").trim(),
       reason: String(template.reason || "").trim().slice(0, 500)
@@ -446,6 +489,7 @@ function recordRecentAction(action) {
   ].slice(0, 8);
   setRecentActions(next);
   renderRecentActions();
+  renderWorkloadSummary();
 }
 
 function readStoredJson(key, fallback) {
@@ -701,6 +745,149 @@ function renderQuickActions() {
       <span>${escapeHtml(action.description)}</span>
     </button>
   `).join("");
+}
+
+function renderWorkloadSummary() {
+  const openAiReviews = (state.cases || []).filter(entry => entry.action === "automod:ai-review" && !state.aiReviews[String(entry.id)]).length;
+  const openAppeals = (state.ops?.appeals || []).filter(appeal => ["open", "reviewed"].includes(String(appeal.status || "open").toLowerCase())).length;
+  const recentActions = getRecentActions().length;
+  const savedFilters = readStoredJson(storageKeys.savedCaseFilters, []).length;
+
+  $("#workloadSummary").innerHTML = [
+    ["Open AI Reviews", openAiReviews],
+    ["Open Appeals", openAppeals],
+    ["Recent Actions", recentActions],
+    ["Saved Filters", savedFilters],
+    ["Selected Member", state.selectedMember ? state.selectedMember.tag : "None"],
+    ["Quick Templates", (state.ops?.templates || []).length]
+  ]
+    .map(([label, value]) => `<article class="summary-item"><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`)
+    .join("");
+}
+
+function renderSavedCaseFilters() {
+  const filters = readStoredJson(storageKeys.savedCaseFilters, []);
+  $("#savedCaseFilters").innerHTML = filters.length
+    ? filters.map((filter, index) => `
+      <button class="filter-chip" type="button" data-saved-filter-index="${index}">
+        <strong>${escapeHtml(filter.name || `Filter ${index + 1}`)}</strong>
+        <span>${escapeHtml([filter.user || "", filter.action || "", filter.moderator || ""].filter(Boolean).join(" · ") || "Saved filter")}</span>
+      </button>
+    `).join("")
+    : renderEmptyState("No saved filters", "Save a records filter to reopen it later.");
+}
+
+function saveCurrentCaseFilter() {
+  const current = {
+    name: window.prompt("Name this filter", "Current filter"),
+    user: $("#caseFilterUser").value.trim(),
+    action: $("#caseFilterAction").value.trim(),
+    moderator: $("#caseFilterModerator").value.trim()
+  };
+  if (!current.name) return;
+
+  const filters = readStoredJson(storageKeys.savedCaseFilters, []);
+  const next = [current, ...filters.filter(filter => filter.name !== current.name)].slice(0, 8);
+  writeStoredJson(storageKeys.savedCaseFilters, next);
+  renderSavedCaseFilters();
+  renderWorkloadSummary();
+}
+
+function applySavedCaseFilter(index) {
+  const filters = readStoredJson(storageKeys.savedCaseFilters, []);
+  const filter = filters[index];
+  if (!filter) return;
+  $("#caseFilterUser").value = filter.user || "";
+  $("#caseFilterAction").value = filter.action || "";
+  $("#caseFilterModerator").value = filter.moderator || "";
+  persistCaseFilters();
+  renderRecords();
+  setActiveView("records");
+}
+
+function renderCommandPaletteList(query = "") {
+  const term = query.trim().toLowerCase();
+  const templates = (state.ops?.templates || []).map((template, index) => ({
+    kind: "template",
+    label: `Template: ${template.label || `Template ${index + 1}`}`,
+    value: `template:${index}`,
+    advanced: true,
+    adminOnly: true
+  }));
+  const savedFilters = readStoredJson(storageKeys.savedCaseFilters, []).map((filter, index) => ({
+    kind: "filter",
+    label: `Saved filter: ${filter.name || `Filter ${index + 1}`}`,
+    value: `filter:${index}`
+  }));
+  const recentActions = getRecentActions().slice(0, 5).map((action, index) => ({
+    kind: "recent",
+    label: `Recent action: ${action.action} ${action.userTag || action.userId || ""}`.trim(),
+    value: `recent:${index}`
+  }));
+
+  const items = [...commandPaletteEntries, ...templates, ...savedFilters, ...recentActions].filter(entry => {
+    if (entry.adminOnly && !hasPanelAccess("admin")) return false;
+    if (entry.advanced && !isAdvancedToolsVisible()) return false;
+    if (!term) return true;
+    return [entry.label, entry.kind, entry.value].join(" ").toLowerCase().includes(term);
+  });
+
+  $("#commandPaletteList").innerHTML = items.length
+    ? items.map(entry => `
+      <button class="command-item" type="button" data-command-kind="${escapeHtml(entry.kind)}" data-command-value="${escapeHtml(entry.value)}">
+        <strong>${escapeHtml(entry.label)}</strong>
+        <span>${escapeHtml(entry.kind === "view" ? "Navigate" : "Action")}</span>
+      </button>
+    `).join("")
+    : renderEmptyState("No matches", "Try a different search.");
+}
+
+function openCommandPalette() {
+  $("#commandPalette").classList.remove("hidden");
+  const input = $("#commandPaletteInput");
+  input.value = "";
+  renderCommandPaletteList("");
+  input.focus();
+}
+
+function closeCommandPalette() {
+  $("#commandPalette").classList.add("hidden");
+}
+
+function runPaletteCommand(kind, value) {
+  if (kind === "view") {
+    setActiveView(value);
+  } else if (value === "search-member") {
+    setActiveView("members");
+    $("#memberSearchInput").focus();
+  } else if (value === "new-template") {
+    setActiveView("ops");
+    if (!state.templateEditorDrafts.length) addTemplateDraft();
+  } else if (value === "save-filter") {
+    saveCurrentCaseFilter();
+    setActiveView("records");
+  } else if (value === "clear-recent-actions") {
+    clearRecentActions();
+  } else if (value.startsWith("preset:")) {
+    setActiveView("members");
+    applyMemberPreset(value.split(":")[1]);
+  } else if (value.startsWith("template:")) {
+    setActiveView("ops");
+    selectTemplateEditorIndex(Number(value.split(":")[1]));
+  } else if (value.startsWith("filter:")) {
+    setActiveView("records");
+    applySavedCaseFilter(Number(value.split(":")[1]));
+  } else if (value.startsWith("recent:")) {
+    const action = getRecentActions()[Number(value.split(":")[1])];
+    if (!action) return closeCommandPalette();
+    setActiveView("members");
+    $("#memberAction").value = action.action || "warn";
+    $("#memberActionReason").value = action.reason || "";
+    $("#memberActionDuration").value = action.duration || "";
+    localStorage.setItem(storageKeys.memberAction, $("#memberAction").value);
+    localStorage.setItem(storageKeys.memberDuration, $("#memberActionDuration").value);
+  }
+  closeCommandPalette();
 }
 
 function renderAutomod() {
@@ -1006,7 +1193,7 @@ function selectTemplateEditorIndex(index) {
 function addTemplateDraft() {
   state.templateEditorDrafts = [
     ...state.templateEditorDrafts,
-    { label: "New template", action: "warn", duration: "", reason: "" }
+    { label: "New template", category: "general", action: "warn", duration: "", reason: "" }
   ];
   selectTemplateEditorIndex(state.templateEditorDrafts.length - 1);
   syncTemplateEditorTextarea();
@@ -1021,13 +1208,24 @@ function deleteTemplateDraft() {
   renderTemplateEditor();
 }
 
+function duplicateTemplateDraft() {
+  const template = getSelectedTemplateDraft();
+  if (!template) return;
+  state.templateEditorDrafts = [
+    ...state.templateEditorDrafts,
+    { ...template, label: `${template.label || "Template"} copy` }
+  ];
+  selectTemplateEditorIndex(state.templateEditorDrafts.length - 1);
+  syncTemplateEditorTextarea();
+}
+
 function renderTemplateEditor() {
   const templates = state.templateEditorDrafts || [];
   $("#templateList").innerHTML = templates.length
     ? templates.map((template, index) => `
       <button class="template-item ${index === state.templateEditorIndex ? "is-active" : ""}" type="button" data-template-edit-index="${index}">
         <strong>${escapeHtml(template.label || `Template ${index + 1}`)}</strong>
-        <span>${escapeHtml(template.action || "warn")} ${escapeHtml(template.duration || "")}</span>
+        <span>${escapeHtml(template.category || "general")} · ${escapeHtml(template.action || "warn")} ${escapeHtml(template.duration || "")}</span>
       </button>
     `).join("")
     : renderEmptyState("No templates", "Add one to create a reusable moderation shortcut.");
@@ -1037,6 +1235,11 @@ function renderTemplateEditor() {
     <div class="template-fields">
       <label>Label
         <input data-template-field="label" value="${escapeHtml(template.label || "")}" placeholder="Spam raid">
+      </label>
+      <label>Category
+        <select data-template-field="category">
+          ${templateCategories.map(category => `<option value="${category.value}" ${template.category === category.value ? "selected" : ""}>${escapeHtml(category.label)}</option>`).join("")}
+        </select>
       </label>
       <label>Action
         <select data-template-field="action">
@@ -1055,6 +1258,9 @@ function renderTemplateEditor() {
       <label>Reason
         <textarea data-template-field="reason" rows="5" placeholder="Moderation reason">${escapeHtml(template.reason || "")}</textarea>
       </label>
+      <div class="button-row">
+        <button class="ghost-button" type="button" data-template-action="duplicate">Duplicate</button>
+      </div>
       <p class="panel-note">Changes save into the operations template list when you click Save.</p>
     </div>
   ` : renderEmptyState("Select a template", "Pick one from the list or add a new template.");
@@ -1078,12 +1284,13 @@ function renderRecentActions() {
 function clearRecentActions() {
   localStorage.removeItem(storageKeys.recentActions);
   renderRecentActions();
+  renderWorkloadSummary();
 }
 
 function renderTemplates() {
   const templates = state.ops?.templates || [];
   $("#memberTemplate").innerHTML = `<option value="">No template</option>` + templates.map((item, index) =>
-    `<option value="${index}">${escapeHtml(item.label || `Template ${index + 1}`)}</option>`
+    `<option value="${index}">${escapeHtml(item.label || `Template ${index + 1}`)}${item.category ? ` (${escapeHtml(item.category)})` : ""}</option>`
   ).join("");
 }
 
@@ -1312,7 +1519,7 @@ function renderMemberProfile() {
           ${templates.length ? templates.map((item, index) => `
             <button class="quick-action template-action" type="button" data-template-index="${escapeHtml(index)}">
               <strong>${escapeHtml(item.label || `Template ${index + 1}`)}</strong>
-              <span>${escapeHtml(item.action || "warn")} ${escapeHtml(item.duration || "")}</span>
+              <span>${escapeHtml(item.category || "general")} · ${escapeHtml(item.action || "warn")} ${escapeHtml(item.duration || "")}</span>
             </button>
           `).join("") : `<span class="badge">Use Ops to add templates.</span>`}
         </div>
@@ -1628,6 +1835,7 @@ function renderEmptyState(title, description) {
 function renderAll() {
   renderMetrics();
   renderQuickActions();
+  renderWorkloadSummary();
   renderRuntime();
   renderRecentViolations();
   renderAutomod();
@@ -1636,6 +1844,7 @@ function renderAll() {
   renderStaff();
   renderOps();
   renderTemplates();
+  renderSavedCaseFilters();
   renderRecords();
   renderRecentActions();
   if (state.selectedMember) renderMemberProfile();
@@ -2005,10 +2214,16 @@ function bindEvents() {
   $("#saveOps").addEventListener("click", () => saveOps().catch(error => setAlert(error.message, "error")));
   $("#addTemplateButton").addEventListener("click", () => addTemplateDraft());
   $("#deleteTemplateButton").addEventListener("click", () => deleteTemplateDraft());
+  $("#saveCaseFilterButton").addEventListener("click", () => saveCurrentCaseFilter());
   $("#runPreview").addEventListener("click", () => runAutomodPreview().catch(error => setAlert(error.message, "error")));
   $("#downloadBackup").addEventListener("click", () => downloadBackup().catch(error => setAlert(error.message, "error")));
   $("#restoreBackup").addEventListener("click", () => restoreBackup().catch(error => setAlert(error.message, "error")));
   $("#createAppeal").addEventListener("click", () => createAppeal().catch(error => setAlert(error.message, "error")));
+  $("#savedCaseFilters").addEventListener("click", event => {
+    const button = event.target.closest("[data-saved-filter-index]");
+    if (!button) return;
+    applySavedCaseFilter(Number(button.dataset.savedFilterIndex));
+  });
   $("#previewChannelId").addEventListener("input", () => {
     state.previewChannelId = $("#previewChannelId").value;
   });
@@ -2096,6 +2311,12 @@ function bindEvents() {
     const field = event.target.closest("[data-template-field]");
     if (!field) return;
     updateSelectedTemplateDraft(field.dataset.templateField, field.value);
+    renderTemplateEditor();
+  });
+  $("#templateEditorFields").addEventListener("click", event => {
+    const button = event.target.closest("[data-template-action]");
+    if (!button) return;
+    if (button.dataset.templateAction === "duplicate") duplicateTemplateDraft();
   });
   $("#timelineSearchInput").addEventListener("input", () => {
     localStorage.setItem(storageKeys.timelineSearch, $("#timelineSearchInput").value);
@@ -2139,6 +2360,27 @@ function bindEvents() {
     if (!button) return;
     updateAppealStatus(button.dataset.appealId, button.dataset.appealStatus).catch(error => setAlert(error.message, "error"));
   });
+  $("#commandPalette").addEventListener("click", event => {
+    if (event.target.closest("[data-close-palette]")) closeCommandPalette();
+  });
+  $("#commandPaletteInput").addEventListener("input", () => {
+    renderCommandPaletteList($("#commandPaletteInput").value);
+  });
+  $("#commandPaletteInput").addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const firstCommand = $("#commandPaletteList [data-command-kind]");
+      if (firstCommand) {
+        runPaletteCommand(firstCommand.dataset.commandKind, firstCommand.dataset.commandValue);
+      }
+    }
+  });
+  $("#commandPaletteList").addEventListener("click", event => {
+    const button = event.target.closest("[data-command-kind]");
+    if (!button) return;
+    runPaletteCommand(button.dataset.commandKind, button.dataset.commandValue);
+  });
+  $("#commandPaletteButton").addEventListener("click", openCommandPalette);
   $("#advancedToggle").addEventListener("click", () => {
     setAdvancedToolsVisible(!isAdvancedToolsVisible());
   });
@@ -2162,6 +2404,22 @@ function bindEvents() {
 
   document.querySelectorAll(".tab").forEach(button => {
     button.addEventListener("click", () => setActiveView(button.dataset.view));
+  });
+
+  document.addEventListener("keydown", event => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      if ($("#commandPalette").classList.contains("hidden")) {
+        openCommandPalette();
+      } else {
+        closeCommandPalette();
+      }
+      return;
+    }
+
+    if (event.key === "Escape" && !$("#commandPalette").classList.contains("hidden")) {
+      closeCommandPalette();
+    }
   });
 }
 

@@ -160,9 +160,9 @@ function createDefaultConfig() {
     nextAppealId: 1,
     auditLog: [],
     modTemplates: [
-      { label: "Spam", action: "warn", duration: "", reason: "Please stop spamming or repeating messages." },
-      { label: "Harassment", action: "warn", duration: "", reason: "Harassment or targeted insults are not allowed." },
-      { label: "Scam link", action: "timeout", duration: "1h", reason: "Suspicious or scam links are not allowed." }
+      { label: "Spam", category: "spam", action: "warn", duration: "", reason: "Please stop spamming or repeating messages." },
+      { label: "Harassment", category: "harassment", action: "warn", duration: "", reason: "Harassment or targeted insults are not allowed." },
+      { label: "Scam link", category: "scam", action: "timeout", duration: "1h", reason: "Suspicious or scam links are not allowed." }
     ],
     channelProfiles: "",
     reportSettings: {
@@ -5656,13 +5656,27 @@ function parseTemplatesInput(value) {
   return String(value || "")
     .split("\n")
     .map(line => {
-      const [label, action, duration, ...reasonParts] = line.split("|").map(part => part.trim());
+      const parts = line.split("|").map(part => part.trim());
+      if (parts.length < 4) return null;
+      const label = parts[0];
+      let category = "general";
+      let action = "warn";
+      let duration = "";
+      let reasonParts = [];
+
+      if (parts.length >= 5) {
+        [label, category, action, duration, ...reasonParts] = parts;
+      } else {
+        [label, action, duration, ...reasonParts] = parts;
+      }
+
       const reason = reasonParts.join("|").trim();
       if (!label || !action || !reason) return null;
       return {
         label: label.slice(0, 80),
-        action: action.toLowerCase().slice(0, 30),
-        duration: duration || "",
+        category: String(category || "general").trim().toLowerCase().slice(0, 40),
+        action: String(action || "warn").trim().toLowerCase().slice(0, 30),
+        duration: String(duration || "").trim(),
         reason: reason.slice(0, 500)
       };
     })
@@ -5681,8 +5695,14 @@ function updateWebOpsConfig(auth, payload) {
       : "daily",
     lastSentAt: config.reportSettings?.lastSentAt || null
   };
+  const templateCategories = config.modTemplates.reduce((acc, template) => {
+    const key = String(template.category || "general").toLowerCase();
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
   recordAuditLog(getWebModeratorTag(auth), "ops-config-updated", {
     templates: config.modTemplates.length,
+    templateCategories,
     reports: config.reportSettings.enabled
   });
   return buildWebOpsPayload(true);
