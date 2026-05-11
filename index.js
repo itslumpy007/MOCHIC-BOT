@@ -141,6 +141,7 @@ const SUSPICIOUS_SCAM_DOMAINS = [
 ];
 const spamTracker = new Map();
 const joinTracker = new Map();
+const anonymousAffirmationCooldowns = new Map();
 const pendingPanelActions = new Map();
 const webSessions = new Map();
 const webOauthStates = new Map();
@@ -250,6 +251,7 @@ function createDefaultConfig() {
       verifyChannelId: null,
       rulesChannelId: null,
       welcomeChannelId: null,
+      anonymousAffirmationsChannelId: null,
       logChannelId: null,
       automodLogChannelId: null,
       mutedRoleId: null,
@@ -319,6 +321,10 @@ function getUnverifiedRoleId() {
 
 function getWelcomeChannelId() {
   return config.settings?.welcomeChannelId || null;
+}
+
+function getAnonymousAffirmationsChannelId() {
+  return config.settings?.anonymousAffirmationsChannelId || null;
 }
 
 function isTikTokVerificationEnabled() {
@@ -1484,6 +1490,13 @@ const allCommands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("affirm")
+    .setDescription("Send an anonymous affirmation to the affirmations chat")
+    .addStringOption(option =>
+      option.setName("message").setDescription("Your encouraging message").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
     .setName("purge")
     .setDescription("Delete messages in bulk or clear a channel")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
@@ -2166,6 +2179,18 @@ const allCommands = [
     )
     .addSubcommand(subcommand =>
       subcommand
+        .setName("affirmchannel")
+        .setDescription("Set the anonymous affirmations channel")
+        .addChannelOption(option =>
+          option
+            .setName("channel")
+            .setDescription("Channel to use for anonymous affirmations")
+            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
         .setName("tiktokhandle")
         .setDescription("Set the TikTok handle used for nickname verification")
         .addStringOption(option =>
@@ -2229,6 +2254,7 @@ const allCommands = [
               { name: "muted role", value: "mutedrole" },
               { name: "verify channel", value: "verifychannel" },
               { name: "welcome channel", value: "welcomechannel" },
+              { name: "affirmations channel", value: "affirmchannel" },
               { name: "TikTok handle", value: "tiktokhandle" },
               { name: "TikTok aliases", value: "tiktokaliases" },
               { name: "verified role", value: "verifiedrole" },
@@ -3463,9 +3489,51 @@ function buildSettingsSummary() {
     `Log channel: ${getLogChannelId() ? `<#${getLogChannelId()}>` : "Not set"}`,
     `Verify channel: ${getVerifyChannelId() ? `<#${getVerifyChannelId()}>` : "Not set"}`,
     `Rules channel: ${getRulesChannelId() ? `<#${getRulesChannelId()}>` : "Not set"}`,
+    `Affirmations channel: ${getAnonymousAffirmationsChannelId() ? `<#${getAnonymousAffirmationsChannelId()}>` : "Not set"}`,
     `Muted role: ${getMutedRoleId() ? `<@&${getMutedRoleId()}>` : "Not set"}`,
     buildTikTokVerificationSummary()
   ].join("\n");
+}
+
+async function sendAnonymousAffirmation(author, message) {
+  const channelId = getAnonymousAffirmationsChannelId();
+  if (!channelId) {
+    throw new Error("Set an affirmations channel first.");
+  }
+
+  const lastSentAt = anonymousAffirmationCooldowns.get(author.id) || 0;
+  const cooldownMs = 60 * 1000;
+  const elapsed = Date.now() - lastSentAt;
+  if (elapsed < cooldownMs) {
+    const remainingSeconds = Math.ceil((cooldownMs - elapsed) / 1000);
+    throw new Error(`Please wait ${remainingSeconds}s before sending another affirmation.`);
+  }
+
+  const content = String(message || "").trim().slice(0, 1500);
+  if (!content) {
+    throw new Error("Write an affirmation before sending it.");
+  }
+
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel?.send) {
+    throw new Error("The affirmations channel could not be found or cannot send messages.");
+  }
+
+  await channel.send({
+    embeds: [
+      makeEmbed({
+        title: "Anonymous affirmation",
+        description: content,
+        color: COLORS.pink,
+        footer: {
+          text: "Sent anonymously through /affirm"
+        }
+      })
+    ]
+  });
+
+  anonymousAffirmationCooldowns.set(author.id, Date.now());
+  return { channelId };
 }
 
 function buildTikTokVerifyEmbed() {
@@ -5370,6 +5438,7 @@ function buildWebDashboardPayload() {
     channels: {
       verify: getVerifyChannelId(),
       rules: getRulesChannelId(),
+      affirmations: getAnonymousAffirmationsChannelId(),
       log: getLogChannelId(),
       automodLog: getAutoModLogChannelId()
     },
@@ -5408,6 +5477,7 @@ function buildWebConfigPayload() {
       verifyChannelId: config.settings.verifyChannelId || "",
       rulesChannelId: config.settings.rulesChannelId || "",
       welcomeChannelId: getWelcomeChannelId() || "",
+      anonymousAffirmationsChannelId: getAnonymousAffirmationsChannelId() || "",
       logChannelId: config.settings.logChannelId || "",
       automodLogChannelId: config.settings.automodLogChannelId || "",
       mutedRoleId: config.settings.mutedRoleId || "",
@@ -5436,6 +5506,7 @@ function updateWebSettings(auth, payload) {
     "verifyChannelId",
     "rulesChannelId",
     "welcomeChannelId",
+    "anonymousAffirmationsChannelId",
     "logChannelId",
     "automodLogChannelId",
     "mutedRoleId",
@@ -8956,6 +9027,15 @@ client.on("interactionCreate", async interaction => {
       return interaction.reply({ content: "Announcement sent.", ephemeral: true });
     }
 
+    if (interaction.commandName === "affirm") {
+      const message = interaction.options.getString("message");
+      const result = await sendAnonymousAffirmation(interaction.user, message);
+      return interaction.reply({
+        content: `Your affirmation was posted anonymously to <#${result.channelId}>.`,
+        ephemeral: true
+      });
+    }
+
     if (interaction.commandName === "dm") {
       const user = interaction.options.getUser("user");
       const message = interaction.options.getString("message");
@@ -10063,6 +10143,11 @@ client.on("interactionCreate", async interaction => {
         config.settings.welcomeChannelId = nextWelcomeChannelId;
       }
 
+      if (subcommand === "affirmchannel") {
+        const nextAffirmationsChannelId = interaction.options.getChannel("channel").id;
+        config.settings.anonymousAffirmationsChannelId = nextAffirmationsChannelId;
+      }
+
       if (subcommand === "tiktokhandle") {
         config.settings.tiktokHandle = splitTikTokVerificationInput(interaction.options.getString("handle"))[0] || "";
       }
@@ -10107,6 +10192,10 @@ client.on("interactionCreate", async interaction => {
           config.settings.welcomeChannelId = null;
         }
 
+        if (target === "affirmchannel") {
+          config.settings.anonymousAffirmationsChannelId = null;
+        }
+
         if (target === "tiktokhandle") {
           config.settings.tiktokHandle = "";
         }
@@ -10130,7 +10219,7 @@ client.on("interactionCreate", async interaction => {
 
       saveConfig();
 
-      if (["verifiedrole", "unverifiedrole", "verifychannel", "welcomechannel", "reset"].includes(subcommand)) {
+      if (["verifiedrole", "unverifiedrole", "verifychannel", "welcomechannel", "affirmchannel", "reset"].includes(subcommand)) {
         await enforceFlavorRoleVisibility(guild).catch(() => null);
       }
 
@@ -10141,7 +10230,7 @@ client.on("interactionCreate", async interaction => {
         }
       }
 
-      if (["tiktokhandle", "tiktokaliases", "verifiedrole", "unverifiedrole", "verifychannel", "welcomechannel"].includes(subcommand)) {
+      if (["tiktokhandle", "tiktokaliases", "verifiedrole", "unverifiedrole", "verifychannel", "welcomechannel", "affirmchannel"].includes(subcommand)) {
         await resolveVerifyMessageId().catch(() => null);
       }
 
