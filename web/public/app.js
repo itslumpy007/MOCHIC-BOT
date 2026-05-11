@@ -13,7 +13,9 @@ const state = {
   timelineSearch: "",
   cases: [],
   warnings: {},
-  notes: {}
+  notes: {},
+  templateEditorDrafts: [],
+  templateEditorIndex: 0
 };
 
 const titles = {
@@ -35,7 +37,9 @@ const storageKeys = {
   memberDuration: "mochiMemberDuration",
   timelineSearch: "mochiTimelineSearch",
   auditFilter: "mochiAuditFilter",
-  appealFilter: "mochiAppealFilter"
+  appealFilter: "mochiAppealFilter",
+  recentActions: "mochiRecentActions",
+  templateEditorIndex: "mochiTemplateEditorIndex"
 };
 
 const advancedViews = new Set(["automod", "settings", "staff", "ops"]);
@@ -386,6 +390,62 @@ function setAlert(message, kind = "info") {
 
 function confirmDangerousAction(action, target, details = "") {
   return window.confirm([action, target, details].filter(Boolean).join("\n"));
+}
+
+function parseTemplateLine(line) {
+  const [label, action, duration, ...reasonParts] = String(line || "").split("|").map(part => part.trim());
+  const reason = reasonParts.join("|").trim();
+  if (!label || !action || !reason) return null;
+  return {
+    label: label.slice(0, 80),
+    action: action.toLowerCase().slice(0, 30),
+    duration: duration || "",
+    reason: reason.slice(0, 500)
+  };
+}
+
+function serializeTemplates(templates = []) {
+  return templates
+    .map(template => `${template.label || ""} | ${template.action || "warn"} | ${template.duration || ""} | ${template.reason || ""}`)
+    .join("\n");
+}
+
+function normalizeTemplates(templates = []) {
+  return templates
+    .map(template => ({
+      label: String(template.label || "").trim().slice(0, 80),
+      action: String(template.action || "warn").trim().toLowerCase().slice(0, 30),
+      duration: String(template.duration || "").trim(),
+      reason: String(template.reason || "").trim().slice(0, 500)
+    }))
+    .filter(template => template.label && template.action && template.reason);
+}
+
+function getRecentActions() {
+  return readStoredJson(storageKeys.recentActions, []);
+}
+
+function setRecentActions(items) {
+  writeStoredJson(storageKeys.recentActions, items.slice(0, 8));
+}
+
+function recordRecentAction(action) {
+  const next = [
+    {
+      ...action,
+      createdAt: action.createdAt || new Date().toISOString()
+    },
+    ...getRecentActions().filter(item => {
+      return !(
+        item.action === action.action &&
+        item.userId === action.userId &&
+        item.reason === action.reason &&
+        item.duration === action.duration
+      );
+    })
+  ].slice(0, 8);
+  setRecentActions(next);
+  renderRecentActions();
 }
 
 function readStoredJson(key, fallback) {
@@ -857,9 +917,16 @@ function renderStaff() {
 function renderOps() {
   const ops = state.ops || {};
   const templates = ops.templates || [];
-  $("#modTemplates").value = templates.map(item =>
-    `${item.label || ""} | ${item.action || "warn"} | ${item.duration || ""} | ${item.reason || ""}`
-  ).join("\n");
+  state.templateEditorDrafts = normalizeTemplates(templates);
+  if (!state.templateEditorDrafts.length) {
+    state.templateEditorDrafts = [];
+  }
+  state.templateEditorIndex = Math.min(
+    Number(localStorage.getItem(storageKeys.templateEditorIndex) || 0),
+    Math.max(0, state.templateEditorDrafts.length - 1)
+  );
+  syncTemplateEditorTextarea();
+  renderTemplateEditor();
   $("#channelProfiles").value = ops.channelProfiles || "";
   $("#reportEnabled").value = ops.reportSettings?.enabled ? "true" : "false";
   $("#reportChannelId").value = ops.reportSettings?.channelId || "";
@@ -912,6 +979,105 @@ function renderOps() {
       </article>
     `).join("")
     : renderEmptyState("No audit events", "No audit events match this filter.");
+}
+
+function syncTemplateEditorTextarea() {
+  $("#modTemplates").value = serializeTemplates(state.templateEditorDrafts);
+}
+
+function getSelectedTemplateDraft() {
+  return state.templateEditorDrafts[state.templateEditorIndex] || null;
+}
+
+function updateSelectedTemplateDraft(field, value) {
+  const template = getSelectedTemplateDraft();
+  if (!template) return;
+  template[field] = value;
+  state.templateEditorDrafts = [...state.templateEditorDrafts];
+  syncTemplateEditorTextarea();
+}
+
+function selectTemplateEditorIndex(index) {
+  state.templateEditorIndex = Math.max(0, Math.min(index, Math.max(0, state.templateEditorDrafts.length - 1)));
+  localStorage.setItem(storageKeys.templateEditorIndex, String(state.templateEditorIndex));
+  renderTemplateEditor();
+}
+
+function addTemplateDraft() {
+  state.templateEditorDrafts = [
+    ...state.templateEditorDrafts,
+    { label: "New template", action: "warn", duration: "", reason: "" }
+  ];
+  selectTemplateEditorIndex(state.templateEditorDrafts.length - 1);
+  syncTemplateEditorTextarea();
+}
+
+function deleteTemplateDraft() {
+  if (!state.templateEditorDrafts.length) return;
+  state.templateEditorDrafts = state.templateEditorDrafts.filter((_, index) => index !== state.templateEditorIndex);
+  state.templateEditorIndex = Math.max(0, Math.min(state.templateEditorIndex, state.templateEditorDrafts.length - 1));
+  localStorage.setItem(storageKeys.templateEditorIndex, String(state.templateEditorIndex));
+  syncTemplateEditorTextarea();
+  renderTemplateEditor();
+}
+
+function renderTemplateEditor() {
+  const templates = state.templateEditorDrafts || [];
+  $("#templateList").innerHTML = templates.length
+    ? templates.map((template, index) => `
+      <button class="template-item ${index === state.templateEditorIndex ? "is-active" : ""}" type="button" data-template-edit-index="${index}">
+        <strong>${escapeHtml(template.label || `Template ${index + 1}`)}</strong>
+        <span>${escapeHtml(template.action || "warn")} ${escapeHtml(template.duration || "")}</span>
+      </button>
+    `).join("")
+    : renderEmptyState("No templates", "Add one to create a reusable moderation shortcut.");
+
+  const template = getSelectedTemplateDraft();
+  $("#templateEditorFields").innerHTML = template ? `
+    <div class="template-fields">
+      <label>Label
+        <input data-template-field="label" value="${escapeHtml(template.label || "")}" placeholder="Spam raid">
+      </label>
+      <label>Action
+        <select data-template-field="action">
+          <option value="warn" ${template.action === "warn" ? "selected" : ""}>Warn</option>
+          <option value="note" ${template.action === "note" ? "selected" : ""}>Note</option>
+          <option value="timeout" ${template.action === "timeout" ? "selected" : ""}>Timeout</option>
+          <option value="mute" ${template.action === "mute" ? "selected" : ""}>Mute</option>
+          <option value="kick" ${template.action === "kick" ? "selected" : ""}>Kick</option>
+          <option value="ban" ${template.action === "ban" ? "selected" : ""}>Ban</option>
+          <option value="tempban" ${template.action === "tempban" ? "selected" : ""}>Tempban</option>
+        </select>
+      </label>
+      <label>Duration
+        <input data-template-field="duration" value="${escapeHtml(template.duration || "")}" placeholder="10m, 2h, 1d">
+      </label>
+      <label>Reason
+        <textarea data-template-field="reason" rows="5" placeholder="Moderation reason">${escapeHtml(template.reason || "")}</textarea>
+      </label>
+      <p class="panel-note">Changes save into the operations template list when you click Save.</p>
+    </div>
+  ` : renderEmptyState("Select a template", "Pick one from the list or add a new template.");
+}
+
+function renderRecentActions() {
+  const actions = getRecentActions();
+  $("#recentActionsList").innerHTML = actions.length
+    ? actions.map(action => `
+      <article class="event">
+        <strong>${escapeHtml(action.action)} <span class="badge">${escapeHtml(action.userTag || action.userId || "Unknown")}</span></strong>
+        <p>${escapeHtml(action.reason || "No reason")}<br>${escapeHtml(action.duration || "No duration")}<br>${escapeHtml(formatDate(action.createdAt))}</p>
+        <div class="button-row">
+          <button class="ghost-button" type="button" data-recent-action-load="${escapeHtml(action.action)}" data-recent-action-id="${escapeHtml(action.userId || "")}" data-recent-action-reason="${escapeHtml(action.reason || "")}" data-recent-action-duration="${escapeHtml(action.duration || "")}">Load</button>
+        </div>
+      </article>
+    `).join("")
+    : renderEmptyState("No recent actions", "Applied moderation actions will appear here for quick reuse.");
+}
+
+function clearRecentActions() {
+  localStorage.removeItem(storageKeys.recentActions);
+  renderRecentActions();
 }
 
 function renderTemplates() {
@@ -1425,6 +1591,13 @@ async function applyMemberAction() {
   renderMemberProfile();
   $("#memberActionReason").value = "";
   await loadAll();
+  recordRecentAction({
+    action,
+    userId: state.selectedMember.id,
+    userTag: state.selectedMember.tag,
+    reason,
+    duration
+  });
   setAlert(`Applied ${action} to ${state.selectedMember.tag}.`);
 }
 
@@ -1464,6 +1637,7 @@ function renderAll() {
   renderOps();
   renderTemplates();
   renderRecords();
+  renderRecentActions();
   if (state.selectedMember) renderMemberProfile();
 }
 
@@ -1732,6 +1906,7 @@ async function saveOps() {
     setAlert("Admin web access is required to change operations settings.", "error");
     return;
   }
+  syncTemplateEditorTextarea();
   state.ops = await api("/api/ops", {
     method: "POST",
     body: JSON.stringify({
@@ -1828,6 +2003,8 @@ function bindEvents() {
   $("#saveExemptions").addEventListener("click", () => saveExemptions().catch(error => setAlert(error.message, "error")));
   $("#saveRuleActions").addEventListener("click", () => saveRuleActions().catch(error => setAlert(error.message, "error")));
   $("#saveOps").addEventListener("click", () => saveOps().catch(error => setAlert(error.message, "error")));
+  $("#addTemplateButton").addEventListener("click", () => addTemplateDraft());
+  $("#deleteTemplateButton").addEventListener("click", () => deleteTemplateDraft());
   $("#runPreview").addEventListener("click", () => runAutomodPreview().catch(error => setAlert(error.message, "error")));
   $("#downloadBackup").addEventListener("click", () => downloadBackup().catch(error => setAlert(error.message, "error")));
   $("#restoreBackup").addEventListener("click", () => restoreBackup().catch(error => setAlert(error.message, "error")));
@@ -1877,6 +2054,18 @@ function bindEvents() {
   document.querySelectorAll("[data-member-preset]").forEach(button => {
     button.addEventListener("click", () => applyMemberPreset(button.dataset.memberPreset));
   });
+  $("#recentActionsList").addEventListener("click", event => {
+    const button = event.target.closest("[data-recent-action-load]");
+    if (!button) return;
+    $("#memberAction").value = button.dataset.recentActionLoad || "warn";
+    $("#memberActionReason").value = button.dataset.recentActionReason || "";
+    $("#memberActionDuration").value = button.dataset.recentActionDuration || "";
+    localStorage.setItem(storageKeys.memberAction, $("#memberAction").value);
+    localStorage.setItem(storageKeys.memberDuration, $("#memberActionDuration").value);
+    setActiveView("members");
+    setAlert("Loaded recent action into the moderation form.");
+  });
+  $("#clearRecentActions").addEventListener("click", clearRecentActions);
   $("#toggleMemberExemption").addEventListener("click", () => toggleSelectedMemberExemption(true).catch(error => setAlert(error.message, "error")));
   $("#removeMemberExemption").addEventListener("click", () => toggleSelectedMemberExemption(false).catch(error => setAlert(error.message, "error")));
   $("#memberAction").addEventListener("change", () => {
@@ -1892,6 +2081,21 @@ function bindEvents() {
   });
   $("#memberActionDuration").addEventListener("input", () => {
     localStorage.setItem(storageKeys.memberDuration, $("#memberActionDuration").value);
+  });
+  $("#templateList").addEventListener("click", event => {
+    const button = event.target.closest("[data-template-edit-index]");
+    if (!button) return;
+    selectTemplateEditorIndex(Number(button.dataset.templateEditIndex));
+  });
+  $("#templateEditorFields").addEventListener("input", event => {
+    const field = event.target.closest("[data-template-field]");
+    if (!field) return;
+    updateSelectedTemplateDraft(field.dataset.templateField, field.value);
+  });
+  $("#templateEditorFields").addEventListener("change", event => {
+    const field = event.target.closest("[data-template-field]");
+    if (!field) return;
+    updateSelectedTemplateDraft(field.dataset.templateField, field.value);
   });
   $("#timelineSearchInput").addEventListener("input", () => {
     localStorage.setItem(storageKeys.timelineSearch, $("#timelineSearchInput").value);

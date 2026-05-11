@@ -189,6 +189,14 @@
             </div>
             <div id="memberTimeline" class="event-list"></div>
           </section>
+
+          <section class="panel">
+            <div class="panel-header">
+              <h3>Recent Actions</h3>
+              <button id="clearRecentActions" class="ghost-button" type="button">Clear</button>
+            </div>
+            <div id="recentActionsList" class="event-list"></div>
+          </section>
         </section>
 
         <section id="automodView" class="view">
@@ -372,9 +380,29 @@
               <h3>Moderator Operations</h3>
               <button class="save-button" id="saveOps" type="button">Save</button>
             </div>
-            <div class="form-grid">
-              <label>Templates<textarea id="modTemplates" rows="8" placeholder="Label | action | duration | reason"></textarea></label>
-              <label>Channel profiles<textarea id="channelProfiles" rows="8" placeholder="#general: standard&#10;#promo: strict links"></textarea></label>
+            <div class="split">
+              <section class="panel">
+                <div class="panel-header">
+                  <h3>Template Library</h3>
+                  <div class="button-row">
+                    <button class="ghost-button" id="addTemplateButton" type="button">Add Template</button>
+                    <button class="ghost-button" id="deleteTemplateButton" type="button">Delete</button>
+                  </div>
+                </div>
+                <div class="template-editor">
+                  <div id="templateList" class="template-list"></div>
+                  <div id="templateEditorFields" class="stacked-fields"></div>
+                </div>
+                <textarea id="modTemplates" class="hidden" rows="8" aria-hidden="true" tabindex="-1"></textarea>
+              </section>
+              <section class="panel">
+                <div class="panel-header">
+                  <h3>Channel Profiles</h3>
+                </div>
+                <div class="stacked-fields">
+                  <label>Profiles<textarea id="channelProfiles" rows="12" placeholder="#general: standard&#10;#promo: strict links"></textarea></label>
+                </div>
+              </section>
             </div>
             <div class="form-grid three">
               <label>Reports enabled<select id="reportEnabled"><option value="false">Off</option><option value="true">On</option></select></label>
