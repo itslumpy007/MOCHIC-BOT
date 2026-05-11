@@ -289,6 +289,60 @@ const memberActionPresets = {
   }
 };
 
+const quickActions = [
+  {
+    id: "open-members",
+    title: "Find a member",
+    description: "Jump to search and moderation actions.",
+    view: "members"
+  },
+  {
+    id: "open-records",
+    title: "Review records",
+    description: "Open cases, warnings, and the timeline.",
+    view: "records"
+  },
+  {
+    id: "preset-first",
+    title: "First offense",
+    description: "Load the warn preset with a clean reason.",
+    preset: "firstOffense"
+  },
+  {
+    id: "preset-spam",
+    title: "Spam raid",
+    description: "Load a short timeout preset for raid cleanup.",
+    preset: "spamRaid"
+  },
+  {
+    id: "preset-scam",
+    title: "Scam link",
+    description: "Load the ban preset for suspicious links.",
+    preset: "scamLink"
+  },
+  {
+    id: "preset-harassment",
+    title: "Harassment",
+    description: "Load the longer timeout preset for abuse.",
+    preset: "harassment"
+  },
+  {
+    id: "open-automod",
+    title: "Open AutoMod",
+    description: "Switch to the policy and rule controls.",
+    view: "automod",
+    advanced: true
+  },
+  {
+    id: "open-settings",
+    title: "Open settings",
+    description: "Edit channels, roles, and verification.",
+    view: "settings",
+    advanced: true,
+    adminOnly: true
+  }
+];
+
 const automodTestSamples = {
   spam: "Join my server now join my server now join my server now",
   invite: "discord.gg/example",
@@ -315,6 +369,10 @@ function setAlert(message, kind = "info") {
   alert.style.borderColor = kind === "error" ? "#ffc7c7" : "#f0cf90";
   alert.style.background = kind === "error" ? "#fff0f0" : "#fff7e8";
   alert.style.color = kind === "error" ? "#8a1f1f" : "#704800";
+}
+
+function confirmDangerousAction(action, target, details = "") {
+  return window.confirm([action, target, details].filter(Boolean).join("\n"));
 }
 
 function readStoredJson(key, fallback) {
@@ -555,6 +613,21 @@ function renderRecentViolations() {
       </article>
     `).join("")
     : renderEmptyState("No detections", "AutoMod has not recorded recent violations.");
+}
+
+function renderQuickActions() {
+  const visibleActions = quickActions.filter(action => {
+    if (action.adminOnly && !hasPanelAccess("admin")) return false;
+    if (action.advanced && !isAdvancedToolsVisible()) return false;
+    return true;
+  });
+
+  $("#quickActions").innerHTML = visibleActions.map(action => `
+    <button class="quick-action" type="button" data-quick-action="${escapeHtml(action.id)}">
+      <strong>${escapeHtml(action.title)}</strong>
+      <span>${escapeHtml(action.description)}</span>
+    </button>
+  `).join("");
 }
 
 function renderAutomod() {
@@ -1273,7 +1346,13 @@ async function applyMemberAction() {
     return;
   }
 
-  if (risky && !window.confirm(`Apply ${action} to ${state.selectedMember.tag}?`)) {
+  const confirmTarget = `${state.selectedMember.tag} (${state.selectedMember.id})`;
+  const confirmDetails = [
+    reason ? `Reason: ${reason}` : "",
+    duration ? `Duration: ${duration}` : ""
+  ].filter(Boolean).join("\n");
+
+  if (risky && !confirmDangerousAction(`Apply ${action}?`, confirmTarget, confirmDetails)) {
     return;
   }
 
@@ -1320,6 +1399,7 @@ function renderEmptyState(title, description) {
 
 function renderAll() {
   renderMetrics();
+  renderQuickActions();
   renderRuntime();
   renderRecentViolations();
   renderAutomod();
@@ -1545,7 +1625,7 @@ async function markAllUnverified() {
     return;
   }
 
-  if (!window.confirm("Mark everyone without the verified role as unverified? This may take a moment.")) {
+  if (!confirmDangerousAction("Mark all unverified?", "This will update the verified status for many members.", "This may take a moment.")) {
     return;
   }
 
@@ -1635,7 +1715,7 @@ async function downloadBackup() {
 }
 
 async function restoreBackup() {
-  if (!window.confirm("Restore this config backup? This replaces live panel settings.")) return;
+  if (!confirmDangerousAction("Restore backup?", "This replaces live panel settings.")) return;
   const config = JSON.parse($("#restoreConfig").value);
   await api("/api/backup-restore", {
     method: "POST",
@@ -1784,6 +1864,23 @@ function bindEvents() {
   });
   $("#advancedToggle").addEventListener("click", () => {
     setAdvancedToolsVisible(!isAdvancedToolsVisible());
+  });
+  $("#quickActions").addEventListener("click", event => {
+    const button = event.target.closest("[data-quick-action]");
+    if (!button) return;
+
+    const action = quickActions.find(item => item.id === button.dataset.quickAction);
+    if (!action) return;
+
+    if (action.view) {
+      setActiveView(action.view);
+      return;
+    }
+
+    if (action.preset) {
+      setActiveView("members");
+      applyMemberPreset(action.preset);
+    }
   });
 
   document.querySelectorAll(".tab").forEach(button => {
