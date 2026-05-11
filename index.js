@@ -3551,11 +3551,11 @@ async function sendAnonymousAffirmation(author, message) {
   await channel.send({
     embeds: [
       makeEmbed({
-        title: "Anonymous affirmation",
+        title: "A little anonymous kindness",
         description: content,
         color: COLORS.pink,
         footer: {
-          text: "Sent anonymously through the affirmations button"
+          text: "Sent with love through the affirmations button"
         }
       })
     ]
@@ -4072,12 +4072,12 @@ function buildAnonymousAffirmationsEmbed() {
   return makeEmbed({
     title: "Anonymous affirmations",
     description: isAnonymousAffirmationsEnabled()
-      ? "Press the button below to share a kind note anonymously with the server."
-      : "Anonymous affirmations are currently disabled. Staff can turn them back on in Settings.",
+      ? "Got a little sunshine to share? Tap the button below and send a sweet note anonymously."
+      : "This little kindness corner is paused for now. Staff can turn it back on in Settings.",
     color: COLORS.pink,
     fields: [
-      { name: "How it works", value: "Tap the button, write your message, and I’ll post it anonymously.", inline: false },
-      { name: "Tips", value: "Keep it short, positive, and supportive.", inline: false },
+      { name: "How it works", value: "Tap the button, write your message, and I’ll tuck it into the chat anonymously.", inline: false },
+      { name: "Tips", value: "Short, kind, and cozy messages work best.", inline: false },
       { name: "Cooldown", value: `${Math.round(getAnonymousAffirmationsCooldownMs() / 1000)} seconds`, inline: true },
       { name: "Status", value: isAnonymousAffirmationsEnabled() ? "Enabled" : "Disabled", inline: true }
     ]
@@ -4089,7 +4089,7 @@ function buildAnonymousAffirmationsComponents() {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId("affirmations:open")
-        .setLabel("Share an affirmation")
+        .setLabel("Send a sweet note")
         .setEmoji("💌")
         .setStyle(ButtonStyle.Primary)
     )
@@ -4099,11 +4099,11 @@ function buildAnonymousAffirmationsComponents() {
 function buildAnonymousAffirmationModal() {
   const modal = new ModalBuilder()
     .setCustomId("affirmations:submit")
-    .setTitle("Share an affirmation anonymously");
+    .setTitle("Send a sweet note");
 
   const input = new TextInputBuilder()
     .setCustomId("affirmation")
-    .setLabel("Your affirmation")
+    .setLabel("Your sweet note")
     .setStyle(TextInputStyle.Paragraph)
     .setRequired(true)
     .setPlaceholder("Write something kind, supportive, or encouraging.")
