@@ -336,6 +336,39 @@ textarea {
   gap: 8px;
 }
 
+.action-shortcuts,
+.template-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.action-shortcuts .ghost-button,
+.template-action {
+  min-height: 40px;
+  padding: 10px 12px;
+}
+
+.template-strip {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-warm);
+}
+
+.template-strip-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .badge {
   border-radius: 999px;
   background: var(--surface-soft);

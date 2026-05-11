@@ -286,8 +286,21 @@ const memberActionPresets = {
     action: "timeout",
     duration: "1d",
     reason: "Harassment or targeted abuse. Cooldown issued pending review."
+  },
+  tempban: {
+    action: "tempban",
+    duration: "7d",
+    reason: "Temporary ban issued after review."
   }
 };
+
+const memberActionShortcuts = [
+  { action: "warn", label: "Warn", preset: "firstOffense" },
+  { action: "timeout", label: "Timeout", preset: "spamRaid" },
+  { action: "ban", label: "Ban", preset: "scamLink" },
+  { action: "tempban", label: "Tempban", preset: "tempban" },
+  { action: "clearwarnings", label: "Clear warnings" }
+];
 
 const quickActions = [
   {
@@ -1093,6 +1106,7 @@ function renderMemberProfile() {
   const risk = member.risk || {};
   const riskScore = Number(risk.score || 0);
   const riskWidth = Math.max(4, Math.min(100, riskScore));
+  const templates = (state.ops?.templates || []).slice(0, 6);
 
   $("#memberProfile").innerHTML = `
     <article class="profile-card">
@@ -1117,6 +1131,25 @@ function renderMemberProfile() {
         <span class="badge">${member.counts.notes} notes</span>
         <span class="badge">${member.counts.cases} cases</span>
         <span class="badge">Risk ${riskScore}</span>
+      </div>
+      <div class="action-shortcuts">
+        ${memberActionShortcuts.map(shortcut => `
+          <button class="ghost-button" type="button" data-member-shortcut="${escapeHtml(shortcut.action)}">${escapeHtml(shortcut.label)}</button>
+        `).join("")}
+      </div>
+      <div class="template-strip">
+        <div class="template-strip-head">
+          <strong>Saved templates</strong>
+          <span>${templates.length ? `${templates.length} ready` : "None saved"}</span>
+        </div>
+        <div class="template-shortcuts">
+          ${templates.length ? templates.map((item, index) => `
+            <button class="quick-action template-action" type="button" data-template-index="${escapeHtml(index)}">
+              <strong>${escapeHtml(item.label || `Template ${index + 1}`)}</strong>
+              <span>${escapeHtml(item.action || "warn")} ${escapeHtml(item.duration || "")}</span>
+            </button>
+          `).join("") : `<span class="badge">Use Ops to add templates.</span>`}
+        </div>
       </div>
       <div class="risk-meter" title="Member risk score">
         <span style="width: ${riskWidth}%"></span>
@@ -1294,6 +1327,28 @@ function applyMemberPreset(name) {
   localStorage.setItem(storageKeys.memberAction, $("#memberAction").value);
   localStorage.setItem(storageKeys.memberDuration, $("#memberActionDuration").value);
   setAlert(`Loaded ${name} moderation preset. Review it before applying.`);
+}
+
+function applyMemberShortcut(action) {
+  const shortcut = memberActionShortcuts.find(item => item.action === action);
+  if (!shortcut) return;
+  $("#memberAction").value = shortcut.action;
+  localStorage.setItem(storageKeys.memberAction, $("#memberAction").value);
+
+  if (shortcut.preset) {
+    const preset = memberActionPresets[shortcut.preset];
+    if (preset) {
+      $("#memberActionDuration").value = preset.duration || "";
+      $("#memberActionReason").value = preset.reason || "";
+      localStorage.setItem(storageKeys.memberDuration, $("#memberActionDuration").value);
+    }
+  } else if (shortcut.action === "clearwarnings") {
+    $("#memberActionDuration").value = "";
+    $("#memberActionReason").value = "";
+    localStorage.setItem(storageKeys.memberDuration, "");
+  }
+
+  setAlert(`Loaded ${shortcut.label.toLowerCase()} shortcut. Review it before applying.`);
 }
 
 async function toggleSelectedMemberExemption(enabled) {
@@ -1801,6 +1856,24 @@ function bindEvents() {
   $("#memberSearchButton").addEventListener("click", () => searchMember().catch(error => setAlert(error.message, "error")));
   $("#memberAiSummaryButton").addEventListener("click", () => loadMemberAiSummary().catch(error => setAlert(error.message, "error")));
   $("#memberActionButton").addEventListener("click", () => applyMemberAction().catch(error => setAlert(error.message, "error")));
+  $("#memberProfile").addEventListener("click", event => {
+    const shortcutButton = event.target.closest("[data-member-shortcut]");
+    if (shortcutButton) {
+      applyMemberShortcut(shortcutButton.dataset.memberShortcut);
+      return;
+    }
+
+    const templateButton = event.target.closest("[data-template-index]");
+    if (!templateButton) return;
+    const template = (state.ops?.templates || [])[Number(templateButton.dataset.templateIndex)];
+    if (!template) return;
+    $("#memberAction").value = template.action || "warn";
+    $("#memberActionReason").value = template.reason || "";
+    $("#memberActionDuration").value = template.duration || "";
+    localStorage.setItem(storageKeys.memberAction, $("#memberAction").value);
+    localStorage.setItem(storageKeys.memberDuration, $("#memberActionDuration").value);
+    setAlert(`Loaded ${template.label || "template"} into the moderation form.`);
+  });
   document.querySelectorAll("[data-member-preset]").forEach(button => {
     button.addEventListener("click", () => applyMemberPreset(button.dataset.memberPreset));
   });
