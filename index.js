@@ -251,7 +251,9 @@ function createDefaultConfig() {
       verifyChannelId: null,
       rulesChannelId: null,
       welcomeChannelId: null,
+      anonymousAffirmationsEnabled: true,
       anonymousAffirmationsChannelId: null,
+      anonymousAffirmationsCooldownMs: 60 * 1000,
       logChannelId: null,
       automodLogChannelId: null,
       mutedRoleId: null,
@@ -323,8 +325,17 @@ function getWelcomeChannelId() {
   return config.settings?.welcomeChannelId || null;
 }
 
+function isAnonymousAffirmationsEnabled() {
+  return config.settings?.anonymousAffirmationsEnabled !== false;
+}
+
 function getAnonymousAffirmationsChannelId() {
   return config.settings?.anonymousAffirmationsChannelId || null;
+}
+
+function getAnonymousAffirmationsCooldownMs() {
+  const cooldown = Number(config.settings?.anonymousAffirmationsCooldownMs);
+  return Number.isFinite(cooldown) && cooldown > 0 ? cooldown : 60 * 1000;
 }
 
 function isTikTokVerificationEnabled() {
@@ -2184,6 +2195,25 @@ const allCommands = [
     )
     .addSubcommand(subcommand =>
       subcommand
+        .setName("affirmenabled")
+        .setDescription("Enable or disable anonymous affirmations")
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("affirmcooldown")
+        .setDescription("Set the anonymous affirmations cooldown")
+        .addStringOption(option =>
+          option
+            .setName("duration")
+            .setDescription("Duration like 10s, 1m, 5m")
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
         .setName("tiktokhandle")
         .setDescription("Set the TikTok handle used for nickname verification")
         .addStringOption(option =>
@@ -2248,6 +2278,8 @@ const allCommands = [
               { name: "verify channel", value: "verifychannel" },
               { name: "welcome channel", value: "welcomechannel" },
               { name: "affirmations channel", value: "affirmchannel" },
+              { name: "affirmations enabled", value: "affirmenabled" },
+              { name: "affirmations cooldown", value: "affirmcooldown" },
               { name: "TikTok handle", value: "tiktokhandle" },
               { name: "TikTok aliases", value: "tiktokaliases" },
               { name: "verified role", value: "verifiedrole" },
@@ -3482,20 +3514,24 @@ function buildSettingsSummary() {
     `Log channel: ${getLogChannelId() ? `<#${getLogChannelId()}>` : "Not set"}`,
     `Verify channel: ${getVerifyChannelId() ? `<#${getVerifyChannelId()}>` : "Not set"}`,
     `Rules channel: ${getRulesChannelId() ? `<#${getRulesChannelId()}>` : "Not set"}`,
-    `Affirmations channel: ${getAnonymousAffirmationsChannelId() ? `<#${getAnonymousAffirmationsChannelId()}>` : "Not set"}`,
+    `Anonymous affirmations: ${isAnonymousAffirmationsEnabled() ? "Enabled" : "Disabled"} (${getAnonymousAffirmationsChannelId() ? `<#${getAnonymousAffirmationsChannelId()}>` : "Not set"})`,
     `Muted role: ${getMutedRoleId() ? `<@&${getMutedRoleId()}>` : "Not set"}`,
     buildTikTokVerificationSummary()
   ].join("\n");
 }
 
 async function sendAnonymousAffirmation(author, message) {
+  if (!isAnonymousAffirmationsEnabled()) {
+    throw new Error("Anonymous affirmations are disabled right now.");
+  }
+
   const channelId = getAnonymousAffirmationsChannelId();
   if (!channelId) {
     throw new Error("Set an affirmations channel first.");
   }
 
   const lastSentAt = anonymousAffirmationCooldowns.get(author.id) || 0;
-  const cooldownMs = 60 * 1000;
+  const cooldownMs = getAnonymousAffirmationsCooldownMs();
   const elapsed = Date.now() - lastSentAt;
   if (elapsed < cooldownMs) {
     const remainingSeconds = Math.ceil((cooldownMs - elapsed) / 1000);
@@ -4035,11 +4071,15 @@ function buildTikTokVerifyComponents() {
 function buildAnonymousAffirmationsEmbed() {
   return makeEmbed({
     title: "Anonymous affirmations",
-    description: "Press the button below to share a kind note anonymously with the server.",
+    description: isAnonymousAffirmationsEnabled()
+      ? "Press the button below to share a kind note anonymously with the server."
+      : "Anonymous affirmations are currently disabled. Staff can turn them back on in Settings.",
     color: COLORS.pink,
     fields: [
       { name: "How it works", value: "Tap the button, write your message, and I’ll post it anonymously.", inline: false },
-      { name: "Tips", value: "Keep it short, positive, and supportive.", inline: false }
+      { name: "Tips", value: "Keep it short, positive, and supportive.", inline: false },
+      { name: "Cooldown", value: `${Math.round(getAnonymousAffirmationsCooldownMs() / 1000)} seconds`, inline: true },
+      { name: "Status", value: isAnonymousAffirmationsEnabled() ? "Enabled" : "Disabled", inline: true }
     ]
   });
 }
@@ -5535,7 +5575,9 @@ function buildWebConfigPayload() {
       verifyChannelId: config.settings.verifyChannelId || "",
       rulesChannelId: config.settings.rulesChannelId || "",
       welcomeChannelId: getWelcomeChannelId() || "",
+      anonymousAffirmationsEnabled: isAnonymousAffirmationsEnabled(),
       anonymousAffirmationsChannelId: getAnonymousAffirmationsChannelId() || "",
+      anonymousAffirmationsCooldownMs: getAnonymousAffirmationsCooldownMs(),
       logChannelId: config.settings.logChannelId || "",
       automodLogChannelId: config.settings.automodLogChannelId || "",
       mutedRoleId: config.settings.mutedRoleId || "",
@@ -5564,7 +5606,9 @@ function updateWebSettings(auth, payload) {
     "verifyChannelId",
     "rulesChannelId",
     "welcomeChannelId",
+    "anonymousAffirmationsEnabled",
     "anonymousAffirmationsChannelId",
+    "anonymousAffirmationsCooldownMs",
     "logChannelId",
     "automodLogChannelId",
     "mutedRoleId",
@@ -5588,6 +5632,12 @@ function updateWebSettings(auth, payload) {
   const nextWelcomeChannelId = Object.prototype.hasOwnProperty.call(payload, "welcomeChannelId")
     ? String(payload.welcomeChannelId || "").trim() || null
     : config.settings.welcomeChannelId || null;
+  const nextAffirmationsEnabled = Object.prototype.hasOwnProperty.call(payload, "anonymousAffirmationsEnabled")
+    ? ["true", "1", "yes", "on"].includes(String(payload.anonymousAffirmationsEnabled).toLowerCase())
+    : isAnonymousAffirmationsEnabled();
+  const nextAffirmationsCooldownMs = Object.prototype.hasOwnProperty.call(payload, "anonymousAffirmationsCooldownMs")
+    ? Math.max(5000, Math.min(10 * 60 * 1000, Number(payload.anonymousAffirmationsCooldownMs) || 0))
+    : getAnonymousAffirmationsCooldownMs();
 
   for (const key of allowed) {
     if (Object.prototype.hasOwnProperty.call(payload, key)) {
@@ -5595,6 +5645,10 @@ function updateWebSettings(auth, payload) {
         config.settings[key] = nextTikTokHandle[0] || "";
       } else if (key === "tiktokNicknameAliases") {
         config.settings[key] = [...new Set([...nextTikTokAliases, ...nextTikTokHandle.slice(1)])];
+      } else if (key === "anonymousAffirmationsEnabled") {
+        config.settings[key] = nextAffirmationsEnabled;
+      } else if (key === "anonymousAffirmationsCooldownMs") {
+        config.settings[key] = nextAffirmationsCooldownMs;
       } else {
         config.settings[key] = String(payload[key] || "").trim() || null;
       }
@@ -5609,7 +5663,9 @@ function updateWebSettings(auth, payload) {
     verifyChannelId: config.settings.verifyChannelId,
     rulesChannelId: config.settings.rulesChannelId,
     welcomeChannelId: config.settings.welcomeChannelId,
+    anonymousAffirmationsEnabled: config.settings.anonymousAffirmationsEnabled,
     anonymousAffirmationsChannelId: config.settings.anonymousAffirmationsChannelId,
+    anonymousAffirmationsCooldownMs: config.settings.anonymousAffirmationsCooldownMs,
     logChannelId: config.settings.logChannelId,
     automodLogChannelId: config.settings.automodLogChannelId,
     mutedRoleId: config.settings.mutedRoleId,
@@ -6637,6 +6693,19 @@ async function handleWebApi(req, res, pathname) {
     });
   }
 
+  if (req.method === "POST" && pathname === "/api/affirmations-panel") {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
+
+    const result = await postAnonymousAffirmationsPanel("web");
+    return sendWebJson(res, 200, {
+      ok: true,
+      channelId: result.channelId,
+      messageId: result.id
+    });
+  }
+
   if (req.method === "GET" && pathname === "/api/member") {
     const requestUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     const { member, user } = await resolveWebMember(requestUrl.searchParams.get("query"));
@@ -7071,6 +7140,10 @@ client.on("interactionCreate", async interaction => {
       if (interaction.customId === "affirmations:open") {
         if (!ENABLE_CORE_BOT) {
           return interaction.reply({ content: "Anonymous affirmations are disabled on this deployment.", ephemeral: true });
+        }
+
+        if (!isAnonymousAffirmationsEnabled()) {
+          return interaction.reply({ content: "Anonymous affirmations are currently disabled by staff.", ephemeral: true });
         }
 
         if (!getAnonymousAffirmationsChannelId()) {
@@ -10228,6 +10301,14 @@ client.on("interactionCreate", async interaction => {
         config.settings.anonymousAffirmationsChannelId = nextAffirmationsChannelId;
       }
 
+      if (subcommand === "affirmenabled") {
+        config.settings.anonymousAffirmationsEnabled = interaction.options.getBoolean("enabled");
+      }
+
+      if (subcommand === "affirmcooldown") {
+        config.settings.anonymousAffirmationsCooldownMs = Math.max(5000, Math.min(10 * 60 * 1000, parseDuration(interaction.options.getString("duration")) || 0));
+      }
+
       if (subcommand === "tiktokhandle") {
         config.settings.tiktokHandle = splitTikTokVerificationInput(interaction.options.getString("handle"))[0] || "";
       }
@@ -10274,6 +10355,14 @@ client.on("interactionCreate", async interaction => {
 
         if (target === "affirmchannel") {
           config.settings.anonymousAffirmationsChannelId = null;
+        }
+
+        if (target === "affirmenabled") {
+          config.settings.anonymousAffirmationsEnabled = true;
+        }
+
+        if (target === "affirmcooldown") {
+          config.settings.anonymousAffirmationsCooldownMs = 60 * 1000;
         }
 
         if (target === "tiktokhandle") {

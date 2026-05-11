@@ -135,10 +135,15 @@ const settingLabels = {
   verifyChannelId: "Verify channel ID",
   rulesChannelId: "Rules channel ID",
   welcomeChannelId: "Welcome channel ID",
-  anonymousAffirmationsChannelId: "Anonymous affirmations channel ID",
   logChannelId: "Log channel ID",
   automodLogChannelId: "AutoMod log channel ID",
   mutedRoleId: "Muted role ID"
+};
+
+const affirmationsSettingLabels = {
+  anonymousAffirmationsEnabled: "Anonymous affirmations enabled",
+  anonymousAffirmationsChannelId: "Anonymous affirmations channel ID",
+  anonymousAffirmationsCooldownMs: "Anonymous affirmations cooldown (ms)"
 };
 
 const verificationSettingLabels = {
@@ -1116,6 +1121,28 @@ function renderSettings() {
         <input data-setting="${key}" value="${escapeHtml(settings[key] || "")}">
       </label>
     `).join("");
+
+  $("#affirmationsSettingsFields").innerHTML = Object.entries(affirmationsSettingLabels)
+    .map(([key, label]) => {
+      if (key === "anonymousAffirmationsEnabled") {
+        return `
+          <label>${label}
+            <select data-setting="${key}">
+              <option value="true" ${String(settings[key] ?? true) === "true" ? "selected" : ""}>On</option>
+              <option value="false" ${String(settings[key] ?? true) === "false" ? "selected" : ""}>Off</option>
+            </select>
+          </label>
+        `;
+      }
+
+      const placeholder = key === "anonymousAffirmationsCooldownMs" ? "60000" : "Channel ID";
+      const type = key === "anonymousAffirmationsCooldownMs" ? 'type="number" min="5000" step="1000"' : "";
+      return `
+        <label>${label}
+          <input data-setting="${key}" ${type} value="${escapeHtml(settings[key] || "")}" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="${placeholder}">
+        </label>
+      `;
+    }).join("");
 
   $("#verificationSettingsFields").innerHTML = Object.entries(verificationSettingLabels)
     .map(([key, label]) => `
@@ -2163,6 +2190,20 @@ async function saveSettings() {
   await loadAll();
 }
 
+async function postAffirmationsPanel() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to post the affirmations panel.", "error");
+    return;
+  }
+
+  await api("/api/affirmations-panel", {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+  await loadAll();
+  setAlert("Anonymous affirmations panel posted.");
+}
+
 async function saveAndPostTikTokVerify() {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change server settings.", "error");
@@ -2342,6 +2383,7 @@ function bindEvents() {
   $("#refreshButton").addEventListener("click", loadAll);
   $("#saveAutomod").addEventListener("click", () => saveAutomod().catch(error => setAlert(error.message, "error")));
   $("#saveSettings").addEventListener("click", () => saveSettings().catch(error => setAlert(error.message, "error")));
+  $("#postAffirmationsPanel").addEventListener("click", () => postAffirmationsPanel().catch(error => setAlert(error.message, "error")));
   $("#saveAndPostTikTokVerify").addEventListener("click", () => saveAndPostTikTokVerify().catch(error => setAlert(error.message, "error")));
   $("#lockVerifiedCurrent").addEventListener("click", () => setVerifiedVisibility(true, "current").catch(error => setAlert(error.message, "error")));
   $("#unlockVerifiedCurrent").addEventListener("click", () => setVerifiedVisibility(false, "current").catch(error => setAlert(error.message, "error")));
