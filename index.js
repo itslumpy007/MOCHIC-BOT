@@ -2446,6 +2446,34 @@ function addNote(userId, moderatorTag, content) {
   saveConfig();
   return notes;
 }
+
+function isPanelAuditAction(action) {
+  return [
+    "settings-updated",
+    "automod-updated",
+    "rule-actions-updated",
+    "permissions-updated",
+    "ops-config-updated",
+    "backup-downloaded",
+    "backup-restored",
+    "tiktok-verify-posted",
+    "verified-visibility-locked",
+    "verified-visibility-unlocked",
+    "verification-mark-unverified",
+    "appeal-created",
+    "appeal-status-updated",
+    "channel-exempt-added",
+    "channel-rule-override-added"
+  ].includes(String(action || ""));
+}
+
+function getRecentPanelChanges(limit = 8) {
+  return (config.auditLog || [])
+    .filter(entry => isPanelAuditAction(entry.action))
+    .slice(-limit)
+    .reverse();
+}
+
 function addCase({ action, targetId, targetTag, moderatorTag, reason, details = [] }) {
   const entry = {
     id: config.nextCaseId,
@@ -5369,6 +5397,7 @@ function buildWebDashboardPayload() {
       ruleCounts: analytics.ruleCounts || {},
       recentViolations: analytics.recentViolations || []
     },
+    panelChanges: getRecentPanelChanges(8),
     recentCases
   };
 }
@@ -5900,8 +5929,8 @@ function serializeWebMember(member, user = null) {
   if (!resolvedUser) return null;
 
   const cases = getCasesForUser(resolvedUser.id).slice(-20).reverse();
-  const warnings = getWarnings(resolvedUser.id).slice().reverse();
-  const notes = getNotes(resolvedUser.id).slice().reverse();
+  const warnings = getWarnings(resolvedUser.id).map((warning, index) => ({ ...warning, index })).reverse();
+  const notes = getNotes(resolvedUser.id).map((note, index) => ({ ...note, index })).reverse();
 
   return {
     id: resolvedUser.id,
@@ -6417,6 +6446,60 @@ async function handleWebApi(req, res, pathname) {
 
   if (req.method === "GET" && pathname === "/api/notes") {
     return sendWebJson(res, 200, { notes: config.notes || {} });
+  }
+
+  if (req.method === "POST" && pathname === "/api/member-record") {
+    if (!hasWebAccess(auth, "mod")) {
+      return sendWebJson(res, 403, { error: "Moderator web access is required." });
+    }
+
+    const body = await readWebJsonBody(req);
+    const userId = String(body.userId || "").trim().replace(/[<@!>]/g, "");
+    const kind = String(body.kind || "").trim().toLowerCase();
+    const index = Number(body.index);
+    const mode = String(body.mode || "update").trim().toLowerCase();
+
+    if (!/^\d{15,25}$/.test(userId)) {
+      return sendWebJson(res, 400, { error: "A valid user ID is required." });
+    }
+
+    if (!["warning", "note"].includes(kind)) {
+      return sendWebJson(res, 400, { error: "Choose warning or note." });
+    }
+
+    const records = kind === "warning" ? getWarnings(userId) : getNotes(userId);
+    if (!Number.isInteger(index) || index < 0 || index >= records.length) {
+      return sendWebJson(res, 400, { error: "That record could not be found." });
+    }
+
+    if (mode === "delete") {
+      records.splice(index, 1);
+    } else if (kind === "warning") {
+      records[index].reason = String(body.reason || "").trim().slice(0, 1000);
+      records[index].editedBy = getWebModeratorTag(auth);
+      records[index].editedAt = new Date().toISOString();
+    } else {
+      records[index].content = String(body.content || "").trim().slice(0, 1000);
+      records[index].editedBy = getWebModeratorTag(auth);
+      records[index].editedAt = new Date().toISOString();
+    }
+
+    if (kind === "warning") {
+      config.warnings[userId] = records;
+    } else {
+      config.notes[userId] = records;
+    }
+    saveConfig();
+    recordAuditLog(getWebModeratorTag(auth), `member-${kind}-${mode === "delete" ? "deleted" : "updated"}`, {
+      userId,
+      index
+    });
+
+    const { member, user } = await resolveWebMember(userId);
+    return sendWebJson(res, 200, {
+      ok: true,
+      member: serializeWebMember(member, user)
+    });
   }
 
   if (req.method === "GET" && pathname === "/api/member") {

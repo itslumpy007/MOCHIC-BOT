@@ -308,6 +308,14 @@ const memberActionShortcuts = [
   { action: "clearwarnings", label: "Clear warnings" }
 ];
 
+const bulkActionPresets = {
+  raidCleanup: {
+    memberPreset: "spamRaid",
+    caseFilterAction: "automod",
+    timelineSearch: "raid"
+  }
+};
+
 const quickActions = [
   {
     id: "open-members",
@@ -346,6 +354,12 @@ const quickActions = [
     preset: "harassment"
   },
   {
+    id: "bulk-raid",
+    title: "Raid cleanup",
+    description: "Load the raid cleanup preset and relevant filters.",
+    bulkPreset: "raidCleanup"
+  },
+  {
     id: "open-automod",
     title: "Open AutoMod",
     description: "Switch to the policy and rule controls.",
@@ -379,7 +393,8 @@ const commandPaletteEntries = [
   { kind: "view", label: "Settings", value: "settings", advanced: true, adminOnly: true },
   { kind: "view", label: "Staff", value: "staff", advanced: true, adminOnly: true },
   { kind: "view", label: "Ops", value: "ops", advanced: true, adminOnly: true },
-  { kind: "action", label: "Search member", value: "search-member" },
+  { kind: "action", label: "Raid cleanup", value: "bulk:raidCleanup" },
+  { kind: "action", label: "Search member", value: "search-member:prompt" },
   { kind: "action", label: "New template", value: "new-template", advanced: true, adminOnly: true },
   { kind: "action", label: "Save filter", value: "save-filter" },
   { kind: "action", label: "Clear recent actions", value: "clear-recent-actions" },
@@ -747,17 +762,31 @@ function renderQuickActions() {
   `).join("");
 }
 
+function renderPanelChanges() {
+  const panelChanges = state.dashboard?.panelChanges || [];
+  $("#panelChangesList").innerHTML = panelChanges.length
+    ? panelChanges.map(entry => `
+      <article class="event">
+        <strong>${escapeHtml(entry.action)} <span class="badge">${escapeHtml(entry.actorTag || "System")}</span></strong>
+        <p>${escapeHtml(formatDate(entry.createdAt))}<br>${escapeHtml(JSON.stringify(entry.details || {}))}</p>
+      </article>
+    `).join("")
+    : renderEmptyState("No panel changes", "Recent web panel edits will appear here.");
+}
+
 function renderWorkloadSummary() {
   const openAiReviews = (state.cases || []).filter(entry => entry.action === "automod:ai-review" && !state.aiReviews[String(entry.id)]).length;
   const openAppeals = (state.ops?.appeals || []).filter(appeal => ["open", "reviewed"].includes(String(appeal.status || "open").toLowerCase())).length;
   const recentActions = getRecentActions().length;
   const savedFilters = readStoredJson(storageKeys.savedCaseFilters, []).length;
+  const panelChanges = state.dashboard?.panelChanges?.length || 0;
 
   $("#workloadSummary").innerHTML = [
     ["Open AI Reviews", openAiReviews],
     ["Open Appeals", openAppeals],
     ["Recent Actions", recentActions],
     ["Saved Filters", savedFilters],
+    ["Panel Changes", panelChanges],
     ["Selected Member", state.selectedMember ? state.selectedMember.tag : "None"],
     ["Quick Templates", (state.ops?.templates || []).length]
   ]
@@ -771,7 +800,7 @@ function renderSavedCaseFilters() {
     ? filters.map((filter, index) => `
       <button class="filter-chip" type="button" data-saved-filter-index="${index}">
         <strong>${escapeHtml(filter.name || `Filter ${index + 1}`)}</strong>
-        <span>${escapeHtml([filter.user || "", filter.action || "", filter.moderator || ""].filter(Boolean).join(" · ") || "Saved filter")}</span>
+        <span>${escapeHtml([filter.user || "", filter.action || "", filter.moderator || ""].filter(Boolean).join(" - ") || "Saved filter")}</span>
       </button>
     `).join("")
     : renderEmptyState("No saved filters", "Save a records filter to reopen it later.");
@@ -807,6 +836,13 @@ function applySavedCaseFilter(index) {
 
 function renderCommandPaletteList(query = "") {
   const term = query.trim().toLowerCase();
+  const searchAction = query.trim()
+    ? [{
+        kind: "action",
+        label: `Search member: ${query.trim()}`,
+        value: `search-member:${query.trim()}`
+      }]
+    : [];
   const templates = (state.ops?.templates || []).map((template, index) => ({
     kind: "template",
     label: `Template: ${template.label || `Template ${index + 1}`}`,
@@ -825,7 +861,7 @@ function renderCommandPaletteList(query = "") {
     value: `recent:${index}`
   }));
 
-  const items = [...commandPaletteEntries, ...templates, ...savedFilters, ...recentActions].filter(entry => {
+  const items = [...searchAction, ...commandPaletteEntries, ...templates, ...savedFilters, ...recentActions].filter(entry => {
     if (entry.adminOnly && !hasPanelAccess("admin")) return false;
     if (entry.advanced && !isAdvancedToolsVisible()) return false;
     if (!term) return true;
@@ -857,9 +893,26 @@ function closeCommandPalette() {
 function runPaletteCommand(kind, value) {
   if (kind === "view") {
     setActiveView(value);
-  } else if (value === "search-member") {
+  } else if (value === "search-member:prompt") {
+    const query = window.prompt("Search member by tag, username, mention, or ID");
+    if (!query) {
+      closeCommandPalette();
+      return;
+    }
     setActiveView("members");
-    $("#memberSearchInput").focus();
+    $("#memberSearchInput").value = query;
+    closeCommandPalette();
+    searchMember().catch(error => setAlert(error.message, "error"));
+  } else if (value.startsWith("search-member:")) {
+    const query = value.slice("search-member:".length).trim();
+    if (!query) {
+      closeCommandPalette();
+      return;
+    }
+    setActiveView("members");
+    $("#memberSearchInput").value = query;
+    closeCommandPalette();
+    searchMember().catch(error => setAlert(error.message, "error"));
   } else if (value === "new-template") {
     setActiveView("ops");
     if (!state.templateEditorDrafts.length) addTemplateDraft();
@@ -871,6 +924,8 @@ function runPaletteCommand(kind, value) {
   } else if (value.startsWith("preset:")) {
     setActiveView("members");
     applyMemberPreset(value.split(":")[1]);
+  } else if (value.startsWith("bulk:")) {
+    applyBulkPreset(value.split(":")[1]);
   } else if (value.startsWith("template:")) {
     setActiveView("ops");
     selectTemplateEditorIndex(Number(value.split(":")[1]));
@@ -1225,7 +1280,7 @@ function renderTemplateEditor() {
     ? templates.map((template, index) => `
       <button class="template-item ${index === state.templateEditorIndex ? "is-active" : ""}" type="button" data-template-edit-index="${index}">
         <strong>${escapeHtml(template.label || `Template ${index + 1}`)}</strong>
-        <span>${escapeHtml(template.category || "general")} · ${escapeHtml(template.action || "warn")} ${escapeHtml(template.duration || "")}</span>
+        <span>${escapeHtml(template.category || "general")} - ${escapeHtml(template.action || "warn")} ${escapeHtml(template.duration || "")}</span>
       </button>
     `).join("")
     : renderEmptyState("No templates", "Add one to create a reusable moderation shortcut.");
@@ -1279,6 +1334,63 @@ function renderRecentActions() {
       </article>
     `).join("")
     : renderEmptyState("No recent actions", "Applied moderation actions will appear here for quick reuse.");
+}
+
+function renderEditableMemberRecords(kind, entries) {
+  const label = kind === "warning" ? "Warning" : "Note";
+  return entries.length
+    ? entries.map(entry => `
+      <article class="event" data-member-record-kind="${kind}" data-member-record-index="${escapeHtml(entry.index)}">
+        <strong>${escapeHtml(label)} <span class="badge">${escapeHtml(entry.moderatorTag || "System")}</span></strong>
+        <textarea data-member-record-text="${kind}" rows="3">${escapeHtml(kind === "warning" ? entry.reason || "" : entry.content || "")}</textarea>
+        <p class="recent-action-meta">${escapeHtml(formatDate(entry.createdAt))}${entry.editedBy ? `<br>Edited by ${escapeHtml(entry.editedBy)}${entry.editedAt ? ` - ${escapeHtml(formatDate(entry.editedAt))}` : ""}` : ""}</p>
+        <div class="button-row">
+          <button class="ghost-button" type="button" data-member-record-save="${kind}" data-member-record-index="${escapeHtml(entry.index)}">Save</button>
+          <button class="ghost-button" type="button" data-member-record-delete="${kind}" data-member-record-index="${escapeHtml(entry.index)}">Delete</button>
+        </div>
+      </article>
+    `).join("")
+    : renderEmptyState(`No ${label.toLowerCase()}s`, `This member has no saved ${label.toLowerCase()} records.`);
+}
+
+async function saveMemberRecord(kind, index, mode = "update") {
+  if (!state.selectedMember) {
+    setAlert("Search for a member first.", "error");
+    return;
+  }
+
+  const textarea = document.querySelector(`[data-member-record-kind="${kind}"][data-member-record-index="${index}"] [data-member-record-text="${kind}"]`);
+  const content = textarea?.value.trim() || "";
+  const body = {
+    userId: state.selectedMember.id,
+    kind,
+    index,
+    mode
+  };
+
+  if (mode !== "delete" && !content) {
+    setAlert(`Enter text before saving that ${kind}.`, "error");
+    return;
+  }
+
+  if (kind === "warning") {
+    body.reason = content;
+  } else {
+    body.content = content;
+  }
+
+  if (mode === "delete" && !confirmDangerousAction(`Delete this ${kind}?`, state.selectedMember.tag)) {
+    return;
+  }
+
+  const result = await api("/api/member-record", {
+    method: "POST",
+    body: JSON.stringify(body)
+  });
+
+  state.selectedMember = result.member;
+  await loadAll();
+  setAlert(`${kind === "warning" ? "Warning" : "Note"} ${mode === "delete" ? "deleted" : "saved"}.`);
 }
 
 function clearRecentActions() {
@@ -1519,7 +1631,7 @@ function renderMemberProfile() {
           ${templates.length ? templates.map((item, index) => `
             <button class="quick-action template-action" type="button" data-template-index="${escapeHtml(index)}">
               <strong>${escapeHtml(item.label || `Template ${index + 1}`)}</strong>
-              <span>${escapeHtml(item.category || "general")} · ${escapeHtml(item.action || "warn")} ${escapeHtml(item.duration || "")}</span>
+              <span>${escapeHtml(item.category || "general")} - ${escapeHtml(item.action || "warn")} ${escapeHtml(item.duration || "")}</span>
             </button>
           `).join("") : `<span class="badge">Use Ops to add templates.</span>`}
         </div>
@@ -1542,19 +1654,21 @@ function renderMemberProfile() {
     `).join("")
     : renderEmptyState("No cases", "No moderation cases for this member.");
 
-  const signals = [
-    ...(member.warnings || []).map(entry => ({ type: "Warning", text: entry.reason, moderatorTag: entry.moderatorTag })),
-    ...(member.notes || []).map(entry => ({ type: "Note", text: entry.content, moderatorTag: entry.moderatorTag }))
-  ];
+  const warnings = member.warnings || [];
+  const notes = member.notes || [];
 
-  $("#memberSignals").innerHTML = signals.length
-    ? signals.slice(0, 20).map(entry => `
-      <article class="event">
-        <strong>${escapeHtml(entry.type)}</strong>
-        <p>${escapeHtml(entry.text || "No details")}<br>${escapeHtml(entry.moderatorTag || "")}</p>
-      </article>
-    `).join("")
-    : renderEmptyState("No warnings or notes", "This member has no saved signals.");
+  $("#memberSignals").innerHTML = `
+    <div class="split">
+      <section class="panel">
+        <div class="panel-header"><h3>Warnings</h3></div>
+        <div class="event-list">${renderEditableMemberRecords("warning", warnings.slice(0, 10))}</div>
+      </section>
+      <section class="panel">
+        <div class="panel-header"><h3>Notes</h3></div>
+        <div class="event-list">${renderEditableMemberRecords("note", notes.slice(0, 10))}</div>
+      </section>
+    </div>
+  `;
 
   renderMemberAiSummary();
   renderMemberTimeline();
@@ -1702,6 +1816,29 @@ function applyMemberPreset(name) {
   setAlert(`Loaded ${name} moderation preset. Review it before applying.`);
 }
 
+function applyBulkPreset(name) {
+  const preset = bulkActionPresets[name];
+  if (!preset) return;
+
+  if (preset.memberPreset) {
+    setActiveView("members");
+    applyMemberPreset(preset.memberPreset);
+  }
+
+  if (typeof preset.caseFilterAction === "string") {
+    $("#caseFilterAction").value = preset.caseFilterAction;
+    persistCaseFilters();
+  }
+
+  if (typeof preset.timelineSearch === "string") {
+    $("#timelineSearchInput").value = preset.timelineSearch;
+    localStorage.setItem(storageKeys.timelineSearch, preset.timelineSearch);
+  }
+
+  renderRecords();
+  setAlert(`Loaded ${name} bulk cleanup preset.`);
+}
+
 function applyMemberShortcut(action) {
   const shortcut = memberActionShortcuts.find(item => item.action === action);
   if (!shortcut) return;
@@ -1836,6 +1973,7 @@ function renderAll() {
   renderMetrics();
   renderQuickActions();
   renderWorkloadSummary();
+  renderPanelChanges();
   renderRuntime();
   renderRecentViolations();
   renderAutomod();
@@ -2266,6 +2404,20 @@ function bindEvents() {
     localStorage.setItem(storageKeys.memberDuration, $("#memberActionDuration").value);
     setAlert(`Loaded ${template.label || "template"} into the moderation form.`);
   });
+  $("#memberSignals").addEventListener("click", event => {
+    const saveButton = event.target.closest("[data-member-record-save]");
+    if (saveButton) {
+      saveMemberRecord(saveButton.dataset.memberRecordSave, Number(saveButton.dataset.memberRecordIndex), "update")
+        .catch(error => setAlert(error.message, "error"));
+      return;
+    }
+
+    const deleteButton = event.target.closest("[data-member-record-delete]");
+    if (deleteButton) {
+      saveMemberRecord(deleteButton.dataset.memberRecordDelete, Number(deleteButton.dataset.memberRecordIndex), "delete")
+        .catch(error => setAlert(error.message, "error"));
+    }
+  });
   document.querySelectorAll("[data-member-preset]").forEach(button => {
     button.addEventListener("click", () => applyMemberPreset(button.dataset.memberPreset));
   });
@@ -2399,6 +2551,10 @@ function bindEvents() {
     if (action.preset) {
       setActiveView("members");
       applyMemberPreset(action.preset);
+    }
+
+    if (action.bulkPreset) {
+      applyBulkPreset(action.bulkPreset);
     }
   });
 
