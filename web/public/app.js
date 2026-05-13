@@ -663,8 +663,14 @@ function fillWebAccountForm(account = null) {
   state.webAccountEditing = account ? account.username : null;
   $("#webAccountUsername").value = account?.username || "";
   $("#webAccountAccessLevel").value = account?.accessLevel || "mod";
+  $("#webAccountEnabled").value = String(account?.enabled !== false);
   $("#webAccountDiscordUserId").value = account?.discordUserId || "";
   $("#webAccountPassword").value = "";
+  $("#deleteWebAccountButton").disabled = !account;
+  $("#resetWebAccountPasswordButton").disabled = !account;
+  $("#toggleWebAccountEnabledButton").disabled = !account;
+  $("#toggleWebAccountEnabledButton").textContent = account?.enabled === false ? "Enable" : "Disable";
+  renderWebAccountAudit(account);
 }
 
 function updateAuthPanel() {
@@ -1299,15 +1305,65 @@ function renderWebAccounts() {
         <p>
           Discord: ${account.discordUserId ? escapeHtml(account.discordUserId) : "Not linked"}<br>
           Password: ${account.hasPassword ? "Set" : "Missing"}<br>
+          Audit trail: ${escapeHtml(account.loginAuditCount || 0)} entries<br>
           Last login: ${account.lastLoginAt ? escapeHtml(formatDate(account.lastLoginAt)) : "Never"}<br>
           Login method: ${account.lastLoginMode || "None"}
         </p>
         <div class="button-row">
           <button class="ghost-button" type="button" data-web-account-edit="${escapeHtml(account.username)}">Edit</button>
+          <button class="ghost-button" type="button" data-web-account-toggle="${escapeHtml(account.username)}" data-web-account-enabled="${account.enabled ? "false" : "true"}">${account.enabled ? "Disable" : "Enable"}</button>
+          <button class="ghost-button" type="button" data-web-account-reset="${escapeHtml(account.username)}">Reset Password</button>
         </div>
       </article>
     `)
     .join("");
+
+  if (state.webAccountEditing) {
+    const account = accounts.find(item => item.username === state.webAccountEditing) || null;
+    if (account) {
+      renderWebAccountAudit(account);
+    }
+  }
+}
+
+function renderWebAccountAudit(account = null) {
+  const list = $("#webAccountAuditList");
+  if (!list) return;
+
+  if (!hasPanelAccess("admin")) {
+    list.innerHTML = renderEmptyState("Admins only", "Login audits are visible to admins.");
+    return;
+  }
+
+  if (!account) {
+    list.innerHTML = renderEmptyState("No account selected", "Pick an account to see its login history.");
+    return;
+  }
+
+  const auditEntries = Array.isArray(account.loginAudit) ? [...account.loginAudit].reverse() : [];
+  if (!auditEntries.length) {
+    list.innerHTML = renderEmptyState("No login history", "This account has not signed in yet.");
+    return;
+  }
+
+  list.innerHTML = auditEntries.map(entry => {
+    const label = entry.mode === "discord"
+      ? "Discord login"
+      : entry.mode === "password"
+        ? "Personal login"
+        : entry.mode === "token"
+          ? "Backup token"
+          : "Login";
+    return `
+      <article class="event">
+        <strong>${escapeHtml(label)} <span class="badge">${escapeHtml(formatDate(entry.createdAt))}</span></strong>
+        <p>
+          Source: ${escapeHtml(entry.source || "Account login")}<br>
+          ${entry.note ? `Note: ${escapeHtml(entry.note)}` : "No note"}
+        </p>
+      </article>
+    `;
+  }).join("");
 }
 
 function collectSettingsPayload() {
@@ -2416,6 +2472,7 @@ async function saveWebAccount() {
     originalUsername: state.webAccountEditing || "",
     username,
     accessLevel: $("#webAccountAccessLevel").value,
+    enabled: $("#webAccountEnabled").value === "true",
     discordUserId: $("#webAccountDiscordUserId").value.trim(),
     password
   };
@@ -2426,7 +2483,7 @@ async function saveWebAccount() {
   });
 
   state.webAccounts = result.accounts || state.webAccounts;
-  fillWebAccountForm(null);
+  fillWebAccountForm(result.account || null);
   await loadAll();
   setAlert(`Saved web account for ${username}.`);
 }
@@ -2456,6 +2513,76 @@ async function deleteWebAccount() {
   fillWebAccountForm(null);
   await loadAll();
   setAlert(`Deleted web account ${username}.`);
+}
+
+async function toggleWebAccountEnabled(username = state.webAccountEditing) {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to manage web accounts.", "error");
+    return;
+  }
+
+  const account = (state.webAccounts || []).find(item => item.username === username);
+  if (!account) {
+    setAlert("Choose a web account first.", "error");
+    return;
+  }
+
+  const result = await api("/api/web-accounts", {
+    method: "POST",
+    body: JSON.stringify({
+      action: "toggle-enabled",
+      username: account.username,
+      enabled: !account.enabled
+    })
+  });
+
+  state.webAccounts = result.accounts || state.webAccounts;
+  const updated = (state.webAccounts || []).find(item => item.username === account.username) || null;
+  fillWebAccountForm(updated);
+  await loadAll();
+  setAlert(`${updated?.enabled ? "Enabled" : "Disabled"} ${account.username}.`);
+}
+
+async function resetWebAccountPassword(username = state.webAccountEditing) {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to manage web accounts.", "error");
+    return;
+  }
+
+  const account = (state.webAccounts || []).find(item => item.username === username);
+  if (!account) {
+    setAlert("Choose a web account first.", "error");
+    return;
+  }
+
+  if (!confirmDangerousAction("Reset password?", `This generates a new password for ${account.username}.`)) {
+    return;
+  }
+
+  const result = await api("/api/web-accounts", {
+    method: "POST",
+    body: JSON.stringify({
+      action: "reset-password",
+      username: account.username
+    })
+  });
+
+  state.webAccounts = result.accounts || state.webAccounts;
+  const updated = (state.webAccounts || []).find(item => item.username === account.username) || null;
+  fillWebAccountForm(updated);
+  $("#webAccountPassword").value = result.generatedPassword || $("#webAccountPassword").value;
+  if (result.generatedPassword) {
+    $("#webAccountPassword").select();
+    try {
+      await navigator.clipboard.writeText(result.generatedPassword);
+      setAlert(`Password reset for ${account.username} and copied to clipboard.`);
+    } catch {
+      setAlert(`Password reset for ${account.username}.`);
+    }
+  } else {
+    setAlert(`Password reset for ${account.username}.`);
+  }
+  await loadAll();
 }
 
 async function postAffirmationsPanel() {
@@ -2667,17 +2794,32 @@ function bindEvents() {
   $("#saveSettings").addEventListener("click", () => saveSettings().catch(error => setAlert(error.message, "error")));
   $("#saveWebAccountButton").addEventListener("click", () => saveWebAccount().catch(error => setAlert(error.message, "error")));
   $("#deleteWebAccountButton").addEventListener("click", () => deleteWebAccount().catch(error => setAlert(error.message, "error")));
+  $("#resetWebAccountPasswordButton").addEventListener("click", () => resetWebAccountPassword().catch(error => setAlert(error.message, "error")));
+  $("#toggleWebAccountEnabledButton").addEventListener("click", () => toggleWebAccountEnabled().catch(error => setAlert(error.message, "error")));
   $("#generateWebPasswordButton").addEventListener("click", () => {
     $("#webAccountPassword").value = generateWebPassword();
     $("#webAccountPassword").focus();
   });
   $("#clearWebAccountForm").addEventListener("click", () => fillWebAccountForm(null));
   $("#webAccountsList").addEventListener("click", event => {
-    const button = event.target.closest("[data-web-account-edit]");
-    if (!button) return;
-    const account = (state.webAccounts || []).find(item => item.username === button.dataset.webAccountEdit);
-    if (account) {
-      fillWebAccountForm(account);
+    const editButton = event.target.closest("[data-web-account-edit]");
+    if (editButton) {
+      const account = (state.webAccounts || []).find(item => item.username === editButton.dataset.webAccountEdit);
+      if (account) {
+        fillWebAccountForm(account);
+      }
+      return;
+    }
+
+    const toggleButton = event.target.closest("[data-web-account-toggle]");
+    if (toggleButton) {
+      toggleWebAccountEnabled(toggleButton.dataset.webAccountToggle).catch(error => setAlert(error.message, "error"));
+      return;
+    }
+
+    const resetButton = event.target.closest("[data-web-account-reset]");
+    if (resetButton) {
+      resetWebAccountPassword(resetButton.dataset.webAccountReset).catch(error => setAlert(error.message, "error"));
     }
   });
   $("#postAffirmationsPanel").addEventListener("click", () => postAffirmationsPanel().catch(error => setAlert(error.message, "error")));

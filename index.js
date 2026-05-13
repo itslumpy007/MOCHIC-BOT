@@ -618,8 +618,44 @@ function sanitizeWebAccountRecord(entry) {
     createdAt: typeof entry.createdAt === "string" ? entry.createdAt : new Date().toISOString(),
     updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : new Date().toISOString(),
     lastLoginAt: typeof entry.lastLoginAt === "string" ? entry.lastLoginAt : null,
-    lastLoginMode: typeof entry.lastLoginMode === "string" ? entry.lastLoginMode : null
+    lastLoginMode: typeof entry.lastLoginMode === "string" ? entry.lastLoginMode : null,
+    loginAudit: Array.isArray(entry.loginAudit)
+      ? entry.loginAudit.map(item => sanitizeWebAccountLoginAuditEntry(item)).filter(Boolean).slice(-20)
+      : []
   };
+}
+
+function sanitizeWebAccountLoginAuditEntry(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  const createdAt = typeof entry.createdAt === "string" ? entry.createdAt : new Date().toISOString();
+  const mode = typeof entry.mode === "string" ? entry.mode.trim().toLowerCase() : "login";
+  return {
+    createdAt,
+    mode,
+    source: typeof entry.source === "string" ? entry.source.trim() : "",
+    note: typeof entry.note === "string" ? entry.note.trim() : ""
+  };
+}
+
+function appendWebAccountLoginAudit(account, entry) {
+  if (!account || typeof account !== "object") return null;
+  const auditEntry = sanitizeWebAccountLoginAuditEntry({
+    createdAt: new Date().toISOString(),
+    ...entry
+  });
+  if (!auditEntry) return null;
+
+  if (!Array.isArray(account.loginAudit)) {
+    account.loginAudit = [];
+  }
+
+  account.loginAudit.push(auditEntry);
+  account.loginAudit = account.loginAudit.slice(-20);
+  account.lastLoginAt = auditEntry.createdAt;
+  account.lastLoginMode = auditEntry.mode;
+  account.updatedAt = auditEntry.createdAt;
+  saveConfig();
+  return auditEntry;
 }
 
 function getWebAccounts() {
@@ -674,7 +710,9 @@ function serializeWebAccount(account) {
     createdAt: account.createdAt,
     updatedAt: account.updatedAt,
     lastLoginAt: account.lastLoginAt,
-    lastLoginMode: account.lastLoginMode
+    lastLoginMode: account.lastLoginMode,
+    loginAudit: Array.isArray(account.loginAudit) ? account.loginAudit.slice(-10) : [],
+    loginAuditCount: Array.isArray(account.loginAudit) ? account.loginAudit.length : 0
   };
 }
 
@@ -697,6 +735,13 @@ function upsertWebAccount(input) {
   const existing = originalUsername
     ? getWebAccountByUsername(originalUsername)
     : getWebAccountByUsername(username);
+
+  const duplicateUsername = getWebAccounts().find(account =>
+    account.usernameLower === normalizedUsername && account !== existing
+  );
+  if (duplicateUsername) {
+    throw new Error("That web username is already in use.");
+  }
 
   if ((!existing || !existing.passwordHash) && !password) {
     throw new Error("Set a password for new web accounts.");
@@ -752,6 +797,25 @@ function deleteWebAccount(username) {
   accounts.splice(index, 1);
   saveConfig();
   return true;
+}
+
+function toggleWebAccountEnabled(username, enabled = null) {
+  const account = getWebAccountByUsername(username);
+  if (!account) return null;
+  account.enabled = enabled === null ? !account.enabled : Boolean(enabled);
+  account.updatedAt = new Date().toISOString();
+  saveConfig();
+  return account;
+}
+
+function resetWebAccountPassword(username, password = "") {
+  const account = getWebAccountByUsername(username);
+  if (!account) return null;
+  const nextPassword = String(password || "").trim() || crypto.randomBytes(10).toString("base64url");
+  account.passwordHash = hashWebAccountPassword(nextPassword);
+  account.updatedAt = new Date().toISOString();
+  saveConfig();
+  return { account, password: nextPassword };
 }
 
 function getBannedWords() {
@@ -5843,6 +5907,17 @@ async function handleWebCallback(req, res, requestUrl) {
     return sendWebText(res, 403, "You are not allowed to access this moderation panel.");
   }
 
+  const linkedAccount = getWebAccountByDiscordId(user.id);
+  if (linkedAccount?.enabled) {
+    appendWebAccountLoginAudit(linkedAccount, {
+      mode: "discord",
+      source: "Discord login",
+      note: linkedAccount.accessLevel === accessLevel
+        ? "Signed in through Discord."
+        : `Signed in through Discord as ${accessLevel}.`
+    });
+  }
+
   const sessionId = createWebSession({
     id: user.id,
     username: user.username,
@@ -5884,10 +5959,11 @@ async function handleWebLocalLogin(req, res) {
     return sendWebJson(res, 401, { error: "Invalid username or password." });
   }
 
-  account.lastLoginAt = new Date().toISOString();
-  account.lastLoginMode = "password";
-  account.updatedAt = account.lastLoginAt;
-  saveConfig();
+  appendWebAccountLoginAudit(account, {
+    mode: "password",
+    source: "Personal login",
+    note: "Signed in with username and password."
+  });
 
   const sessionId = createWebSession({
     id: `local:${account.usernameLower}`,
@@ -7205,6 +7281,35 @@ async function handleWebApi(req, res, pathname) {
         username: String(body.username || "").trim()
       });
       return sendWebJson(res, 200, { ok: true, accounts: serializeWebAccounts() });
+    }
+
+    if (action === "toggle-enabled") {
+      const account = toggleWebAccountEnabled(body.username, body.enabled);
+      if (!account) {
+        return sendWebJson(res, 404, { error: "That web account was not found." });
+      }
+
+      recordAuditLog(getWebModeratorTag(auth), account.enabled ? "web-account-enabled" : "web-account-disabled", {
+        username: account.username
+      });
+      return sendWebJson(res, 200, { ok: true, account: serializeWebAccount(account), accounts: serializeWebAccounts() });
+    }
+
+    if (action === "reset-password") {
+      const result = resetWebAccountPassword(body.username, body.password);
+      if (!result?.account) {
+        return sendWebJson(res, 404, { error: "That web account was not found." });
+      }
+
+      recordAuditLog(getWebModeratorTag(auth), "web-account-password-reset", {
+        username: result.account.username
+      });
+      return sendWebJson(res, 200, {
+        ok: true,
+        account: serializeWebAccount(result.account),
+        generatedPassword: String(body.password || "").trim() ? null : result.password,
+        accounts: serializeWebAccounts()
+      });
     }
 
     const account = upsertWebAccount({

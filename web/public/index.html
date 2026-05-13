@@ -369,7 +369,7 @@
               <h3>Web Accounts</h3>
               <button class="save-button" id="saveWebAccountButton" type="button">Save Account</button>
             </div>
-            <p class="panel-note">Create personal logins for the web panel. You can use Discord, a password, or both for the same staff member.</p>
+            <p class="panel-note">Create personal logins for the web panel. You can use Discord, a password, or both for the same staff member, then reset passwords, disable access, and review recent sign-ins.</p>
             <div class="split">
               <section class="panel">
                 <div class="panel-header">
@@ -387,12 +387,26 @@
                       <option value="admin">Admin</option>
                     </select>
                   </label>
+                  <label>Status
+                    <select id="webAccountEnabled">
+                      <option value="true">Enabled</option>
+                      <option value="false">Disabled</option>
+                    </select>
+                  </label>
                   <label>Discord user ID<input id="webAccountDiscordUserId" placeholder="Optional Discord ID"></label>
                   <label>Password<input id="webAccountPassword" type="password" placeholder="Set or change password"></label>
                 </div>
                 <div class="button-row">
                   <button class="ghost-button" id="generateWebPasswordButton" type="button">Generate Password</button>
+                  <button class="ghost-button" id="resetWebAccountPasswordButton" type="button">Reset Password</button>
+                  <button class="ghost-button" id="toggleWebAccountEnabledButton" type="button">Disable</button>
                 </div>
+                <section class="panel" style="margin-top: 14px;">
+                  <div class="panel-header">
+                    <h3>Login Audit</h3>
+                  </div>
+                  <div id="webAccountAuditList" class="event-list"></div>
+                </section>
               </section>
               <section class="panel">
                 <div class="panel-header">
