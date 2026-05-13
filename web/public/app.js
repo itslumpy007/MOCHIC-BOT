@@ -7,6 +7,7 @@ const state = {
   aiReviews: {},
   selectedMember: null,
   memberAiSummary: null,
+  memberDrawerOpen: false,
   automodPreview: null,
   previewChannelId: "",
   previewMessage: "",
@@ -36,15 +37,18 @@ const storageKeys = {
   themePreset: "mochiThemePreset",
   sidebarOpen: "mochiSidebarOpen",
   workspacePreset: "mochiWorkspacePreset",
+  workspaceAutoApplied: "mochiWorkspaceAutoApplied",
   caseFilters: "mochiCaseFilters",
   savedCaseFilters: "mochiSavedCaseFilters",
   lastMemberSearch: "mochiLastMemberSearch",
+  recentMemberSearches: "mochiRecentMemberSearches",
   memberAction: "mochiMemberAction",
   memberDuration: "mochiMemberDuration",
   timelineSearch: "mochiTimelineSearch",
   auditFilter: "mochiAuditFilter",
   appealFilter: "mochiAppealFilter",
   recentActions: "mochiRecentActions",
+  activityFilters: "mochiActivityFilters",
   templateEditorIndex: "mochiTemplateEditorIndex",
   commandPaletteOpen: "mochiCommandPaletteOpen"
 };
@@ -430,6 +434,11 @@ const bulkActionPresets = {
     memberPreset: "spamRaid",
     caseFilterAction: "automod",
     timelineSearch: "raid"
+  },
+  spamWave: {
+    memberPreset: "spamRaid",
+    caseFilterAction: "spam",
+    timelineSearch: "spam"
   }
 };
 
@@ -477,6 +486,20 @@ const quickActions = [
     bulkPreset: "raidCleanup"
   },
   {
+    id: "bulk-spam-wave",
+    title: "Spam wave",
+    description: "Load a faster cleanup flow for repeated spam bursts.",
+    bulkPreset: "spamWave"
+  },
+  {
+    id: "bulk-appeals",
+    title: "Appeal review",
+    description: "Jump to appeals and the workflow queue.",
+    view: "ops",
+    subtab: "workflow",
+    adminOnly: true
+  },
+  {
     id: "open-automod",
     title: "Open AutoMod",
     description: "Switch to the policy and rule controls.",
@@ -511,6 +534,9 @@ const commandPaletteEntries = [
   { kind: "view", label: "Staff", value: "staff", advanced: true, adminOnly: true },
   { kind: "view", label: "Ops", value: "ops", advanced: true, adminOnly: true },
   { kind: "action", label: "Raid cleanup", value: "bulk:raidCleanup" },
+  { kind: "action", label: "Spam wave", value: "bulk:spamWave" },
+  { kind: "action", label: "Appeal review", value: "view:ops:workflow", advanced: true, adminOnly: true },
+  { kind: "action", label: "Open member drawer", value: "open-member-drawer" },
   { kind: "action", label: "Search member", value: "search-member:prompt" },
   { kind: "action", label: "New template", value: "new-template", advanced: true, adminOnly: true },
   { kind: "action", label: "Save filter", value: "save-filter" },
@@ -537,6 +563,87 @@ function escapeHtml(value) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function readStoredArray(key, fallback = []) {
+  const value = readStoredJson(key, fallback);
+  return Array.isArray(value) ? value : fallback;
+}
+
+function writeStoredArray(key, items) {
+  writeStoredJson(key, Array.isArray(items) ? items : []);
+}
+
+function addRecentMemberSearch(query) {
+  const normalized = String(query || "").trim();
+  if (!normalized) return;
+  const next = [normalized, ...readStoredArray(storageKeys.recentMemberSearches)]
+    .filter((item, index, array) => array.indexOf(item) === index)
+    .slice(0, 8);
+  writeStoredArray(storageKeys.recentMemberSearches, next);
+  renderRecentMemberSearches();
+}
+
+function renderRecentMemberSearches() {
+  const list = $("#recentMemberSearches");
+  if (!list) return;
+  const searches = readStoredArray(storageKeys.recentMemberSearches);
+  list.innerHTML = searches.length
+    ? searches.map(search => `
+      <button class="filter-chip" type="button" data-member-search="${escapeHtml(search)}">
+        <strong>${escapeHtml(search)}</strong>
+        <span>Recent member search</span>
+      </button>
+    `).join("")
+    : renderEmptyState("No recent searches", "Searches will appear here for quick reuse.");
+}
+
+function getActivityFilters() {
+  const filters = readStoredArray(storageKeys.activityFilters, []);
+  return filters.length ? new Set(filters) : new Set(["all"]);
+}
+
+function setActivityFilters(filters) {
+  const next = Array.from(filters || []).filter(Boolean);
+  writeStoredArray(storageKeys.activityFilters, next.length ? next : ["all"]);
+  renderActivityFilters();
+  renderActivityStream();
+}
+
+function toggleActivityFilter(filter) {
+  const active = getActivityFilters();
+  if (filter === "all") {
+    setActivityFilters(new Set(["all"]));
+    return;
+  }
+  active.delete("all");
+  if (active.has(filter)) {
+    active.delete(filter);
+  } else {
+    active.add(filter);
+  }
+  if (!active.size) active.add("all");
+  setActivityFilters(active);
+}
+
+function renderActivityFilters() {
+  const filters = getActivityFilters();
+  const options = [
+    ["all", "All"],
+    ["panel", "Panel edits"],
+    ["moderation", "Moderation"],
+    ["automod", "AutoMod"],
+    ["appeal", "Appeals"]
+  ];
+
+  const list = $("#activityFilters");
+  if (!list) return;
+  list.innerHTML = options.map(([value, label]) => `
+    <button class="filter-chip ${filters.has(value) || (value === "all" && filters.has("all")) ? "is-active" : ""}" type="button" data-activity-filter="${value}">
+      <strong>${escapeHtml(label)}</strong>
+      <span>${filters.has(value) || (value === "all" && filters.has("all")) ? "Showing" : "Hidden"}</span>
+    </button>
+  `).join("");
 }
 
 function applyThemePreset(theme) {
@@ -584,6 +691,29 @@ function syncWorkspacePreset(preset) {
   } else if (selected === "audit") {
     setActiveView("ops");
     setActiveSubtab("ops", "audit");
+  }
+}
+
+function applyRoleAwareWorkspace() {
+  const userKey = state.me?.user?.id || state.me?.user?.username || "guest";
+  const accessLevel = state.me?.accessLevel || "mod";
+  const autoKey = `${userKey}:${accessLevel}`;
+  if (sessionStorage.getItem(storageKeys.workspaceAutoApplied) === autoKey) return;
+  const workspacePreset = localStorage.getItem(storageKeys.workspacePreset) || "auto";
+  if (workspacePreset !== "auto") return;
+
+  const next = accessLevel === "admin" ? "admin" : "moderation";
+  sessionStorage.setItem(storageKeys.workspaceAutoApplied, autoKey);
+  const workspaceSelect = $("#workspaceSelect");
+  if (workspaceSelect) {
+    workspaceSelect.value = "auto";
+  }
+  if (next === "admin") {
+    setActiveView("settings");
+    setActiveSubtab("settings", "accounts");
+  } else {
+    setActiveView("members");
+    setActiveSubtab("members", "profile");
   }
 }
 
@@ -1071,6 +1201,7 @@ function renderPanelChanges() {
 }
 
 function renderActivityStream() {
+  const activeFilters = getActivityFilters();
   const recentActions = getRecentActions().map(item => ({
     kind: "moderation",
     title: item.action || "Moderation action",
@@ -1101,6 +1232,7 @@ function renderActivityStream() {
 
   const items = [...panelChanges, ...recentViolations, ...recentActions, ...appeals]
     .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
+    .filter(item => activeFilters.has("all") || activeFilters.has(item.kind))
     .slice(0, 12);
 
   $("#activityStream").innerHTML = items.length
@@ -1111,6 +1243,68 @@ function renderActivityStream() {
       </article>
     `).join("")
     : renderEmptyState("No recent activity", "Panel changes, moderation actions, and alerts will appear here.");
+}
+
+function renderAttentionBoard() {
+  const alerts = [];
+  const reactionRoles = state.dashboard?.reactionRoles || {};
+  const googleError = state.config?.automod?.googleBlockListLastError;
+  const automationIssues = Array.isArray(reactionRoles.issues) ? reactionRoles.issues : [];
+
+  if (!reactionRoles.ready || !reactionRoles.botManageRoles || !reactionRoles.roleHierarchyOk) {
+    alerts.push({
+      title: "Reaction roles need attention",
+      detail: [
+        reactionRoles.panelMessageFound ? "Panel found" : "Panel missing",
+        reactionRoles.botManageRoles ? "Manage Roles ok" : "Manage Roles missing",
+        reactionRoles.roleHierarchyOk ? "Role hierarchy ok" : "Role hierarchy problem"
+      ].join(" - ")
+    });
+  }
+
+  if (googleError) {
+    alerts.push({
+      title: "Google block list issue",
+      detail: googleError
+    });
+  }
+
+  if (!state.me?.oauthConfigured && !state.me?.localLoginConfigured && !state.token) {
+    alerts.push({
+      title: "Login setup incomplete",
+      detail: "No personal login options are ready yet."
+    });
+  }
+
+  if (automationIssues.length) {
+    alerts.push({
+      title: "Setup items",
+      detail: automationIssues.slice(0, 2).join(" - ")
+    });
+  }
+
+  const pulse = [
+    ["Moderation actions", getRecentActions().length],
+    ["Recent violations", (state.dashboard?.analytics?.recentViolations || []).length],
+    ["Open appeals", (state.ops?.appeals || []).filter(appeal => ["open", "reviewed"].includes(String(appeal.status || "open").toLowerCase())).length],
+    ["Saved searches", readStoredArray(storageKeys.recentMemberSearches).length]
+  ];
+
+  $("#attentionBoard").innerHTML = `
+    <div class="summary-grid">
+      ${pulse.map(([label, value]) => `<article class="summary-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`).join("")}
+    </div>
+    <div class="event-list">
+      ${alerts.length
+        ? alerts.map(alert => `
+          <article class="event">
+            <strong>${escapeHtml(alert.title)}</strong>
+            <p>${escapeHtml(alert.detail)}</p>
+          </article>
+        `).join("")
+        : renderEmptyState("All calm", "No active attention cards right now.")}
+    </div>
+  `;
 }
 
 function renderWorkloadSummary() {
@@ -1127,7 +1321,8 @@ function renderWorkloadSummary() {
     ["Saved Filters", savedFilters],
     ["Panel Changes", panelChanges],
     ["Selected Member", state.selectedMember ? state.selectedMember.tag : "None"],
-    ["Quick Templates", (state.ops?.templates || []).length]
+    ["Quick Templates", (state.ops?.templates || []).length],
+    ["Recent Searches", readStoredArray(storageKeys.recentMemberSearches).length]
   ]
     .map(([label, value]) => `<article class="summary-item"><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`)
     .join("");
@@ -1194,13 +1389,18 @@ function renderCommandPaletteList(query = "") {
     label: `Saved filter: ${filter.name || `Filter ${index + 1}`}`,
     value: `filter:${index}`
   }));
+  const recentMemberSearches = readStoredArray(storageKeys.recentMemberSearches).slice(0, 5).map(search => ({
+    kind: "member-search",
+    label: `Recent search: ${search}`,
+    value: `search-member:${search}`
+  }));
   const recentActions = getRecentActions().slice(0, 5).map((action, index) => ({
     kind: "recent",
     label: `Recent action: ${action.action} ${action.userTag || action.userId || ""}`.trim(),
     value: `recent:${index}`
   }));
 
-  const items = [...searchAction, ...commandPaletteEntries, ...templates, ...savedFilters, ...recentActions].filter(entry => {
+  const items = [...searchAction, ...commandPaletteEntries, ...templates, ...savedFilters, ...recentMemberSearches, ...recentActions].filter(entry => {
     if (entry.adminOnly && !hasPanelAccess("admin")) return false;
     if (entry.advanced && !isAdvancedToolsVisible()) return false;
     if (!term) return true;
@@ -1231,7 +1431,11 @@ function closeCommandPalette() {
 
 function runPaletteCommand(kind, value) {
   if (kind === "view") {
-    setActiveView(value);
+    const [view, subtab] = String(value || "").split(":");
+    setActiveView(view);
+    if (subtab) {
+      setActiveSubtab(view, subtab);
+    }
   } else if (value === "search-member:prompt") {
     const query = window.prompt("Search member by tag, username, mention, or ID");
     if (!query) {
@@ -1280,6 +1484,9 @@ function runPaletteCommand(kind, value) {
     $("#memberActionDuration").value = action.duration || "";
     localStorage.setItem(storageKeys.memberAction, $("#memberAction").value);
     localStorage.setItem(storageKeys.memberDuration, $("#memberActionDuration").value);
+  } else if (value === "open-member-drawer") {
+    state.memberDrawerOpen = true;
+    renderMemberDrawer();
   }
   closeCommandPalette();
 }
@@ -2105,6 +2312,9 @@ function renderMemberProfile() {
         <span class="badge">${member.counts.cases} cases</span>
         <span class="badge">Risk ${riskScore}</span>
       </div>
+      <div class="button-row profile-actions">
+        <button class="ghost-button" type="button" id="openMemberDrawerButton">Open Drawer</button>
+      </div>
       <div class="action-shortcuts">
         ${memberActionShortcuts.map(shortcut => `
           <button class="ghost-button" type="button" data-member-shortcut="${escapeHtml(shortcut.action)}">${escapeHtml(shortcut.label)}</button>
@@ -2160,6 +2370,59 @@ function renderMemberProfile() {
 
   renderMemberAiSummary();
   renderMemberTimeline();
+  renderMemberDrawer();
+}
+
+function renderMemberDrawer() {
+  const drawer = $("#memberDrawer");
+  if (!drawer) return;
+
+  const member = state.selectedMember;
+  if (!member || !state.memberDrawerOpen) {
+    drawer.innerHTML = "";
+    drawer.classList.add("hidden");
+    document.body.classList.remove("drawer-open");
+    return;
+  }
+
+  const recentSearches = readStoredArray(storageKeys.recentMemberSearches);
+  drawer.classList.remove("hidden");
+  document.body.classList.add("drawer-open");
+  drawer.innerHTML = `
+    <div class="drawer-panel">
+      <div class="panel-header">
+        <h3>Member Drawer</h3>
+        <button class="ghost-button" type="button" id="closeMemberDrawerButton">Close</button>
+      </div>
+      <article class="profile-card compact">
+        <div class="profile-title">
+          ${member.avatarUrl ? `<img src="${member.avatarUrl}" alt="">` : ""}
+          <div>
+            <strong>${escapeHtml(member.tag)}</strong>
+            <span>${escapeHtml(member.id)}</span>
+          </div>
+        </div>
+        <div class="badge-row">
+          <span class="badge">${member.counts.warnings} warnings</span>
+          <span class="badge">${member.counts.notes} notes</span>
+          <span class="badge">${member.counts.cases} cases</span>
+        </div>
+        <div class="action-shortcuts">
+          ${memberActionShortcuts.map(shortcut => `
+            <button class="ghost-button" type="button" data-member-shortcut="${escapeHtml(shortcut.action)}">${escapeHtml(shortcut.label)}</button>
+          `).join("")}
+        </div>
+      </article>
+      <section class="panel">
+        <div class="panel-header"><h3>Recent Searches</h3></div>
+        <div class="filter-chip-row">
+          ${recentSearches.length
+            ? recentSearches.map(search => `<button class="filter-chip" type="button" data-member-search="${escapeHtml(search)}"><strong>${escapeHtml(search)}</strong><span>Search again</span></button>`).join("")
+            : renderEmptyState("No recent searches", "Searches will show here.")}
+        </div>
+      </section>
+    </div>
+  `;
 }
 
 function renderMemberAiSummary() {
@@ -2286,9 +2549,11 @@ async function searchMember() {
   }
 
   localStorage.setItem(storageKeys.lastMemberSearch, query);
+  addRecentMemberSearch(query);
   const payload = await api(`/api/member?query=${encodeURIComponent(query)}`);
   state.selectedMember = payload.member;
   state.memberAiSummary = null;
+  state.memberDrawerOpen = true;
   renderMemberProfile();
   setAlert("");
 }
@@ -2460,7 +2725,9 @@ function renderEmptyState(title, description) {
 function renderAll() {
   renderMetrics();
   renderQuickActions();
+  renderAttentionBoard();
   renderWorkloadSummary();
+  renderActivityFilters();
   renderActivityStream();
   renderPanelChanges();
   renderRuntime();
@@ -2473,9 +2740,11 @@ function renderAll() {
   renderOps();
   renderTemplates();
   renderSavedCaseFilters();
+  renderRecentMemberSearches();
   renderRecords();
   renderRecentActions();
   if (state.selectedMember) renderMemberProfile();
+  else renderMemberDrawer();
 }
 
 async function loadAll() {
@@ -2522,6 +2791,7 @@ async function loadAll() {
     state.ops = opsPayload;
     state.webAccounts = webAccountsPayload?.accounts || [];
     applyAccessRestrictions();
+    applyRoleAwareWorkspace();
     renderAll();
     applyAccessRestrictions();
     setLoginVisible(false);
@@ -3043,7 +3313,11 @@ function bindEvents() {
   $("#sidebarToggle").addEventListener("click", () => {
     setSidebarOpen(!document.body.classList.contains("sidebar-open"));
   });
-  $("#sidebarBackdrop").addEventListener("click", () => setSidebarOpen(false));
+  $("#sidebarBackdrop").addEventListener("click", () => {
+    setSidebarOpen(false);
+    state.memberDrawerOpen = false;
+    renderMemberDrawer();
+  });
   $("#globalSearchInput").addEventListener("keydown", event => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -3134,6 +3408,11 @@ function bindEvents() {
     if (!button) return;
     applySavedCaseFilter(Number(button.dataset.savedFilterIndex));
   });
+  $("#activityFilters").addEventListener("click", event => {
+    const button = event.target.closest("[data-activity-filter]");
+    if (!button) return;
+    toggleActivityFilter(button.dataset.activityFilter);
+  });
   $("#previewChannelId").addEventListener("input", () => {
     state.previewChannelId = $("#previewChannelId").value;
   });
@@ -3158,7 +3437,20 @@ function bindEvents() {
   $("#memberSearchButton").addEventListener("click", () => searchMember().catch(error => setAlert(error.message, "error")));
   $("#memberAiSummaryButton").addEventListener("click", () => loadMemberAiSummary().catch(error => setAlert(error.message, "error")));
   $("#memberActionButton").addEventListener("click", () => applyMemberAction().catch(error => setAlert(error.message, "error")));
+  $("#recentMemberSearches").addEventListener("click", event => {
+    const button = event.target.closest("[data-member-search]");
+    if (!button) return;
+    $("#memberSearchInput").value = button.dataset.memberSearch || "";
+    searchMember().catch(error => setAlert(error.message, "error"));
+  });
   $("#memberProfile").addEventListener("click", event => {
+    const drawerButton = event.target.closest("#openMemberDrawerButton");
+    if (drawerButton) {
+      state.memberDrawerOpen = true;
+      renderMemberDrawer();
+      return;
+    }
+
     const shortcutButton = event.target.closest("[data-member-shortcut]");
     if (shortcutButton) {
       applyMemberShortcut(shortcutButton.dataset.memberShortcut);
@@ -3203,6 +3495,23 @@ function bindEvents() {
     localStorage.setItem(storageKeys.memberDuration, $("#memberActionDuration").value);
     setActiveView("members");
     setAlert("Loaded recent action into the moderation form.");
+  });
+  $("#memberDrawer").addEventListener("click", event => {
+    if (event.target.closest("#closeMemberDrawerButton")) {
+      state.memberDrawerOpen = false;
+      renderMemberDrawer();
+      return;
+    }
+    const shortcutButton = event.target.closest("[data-member-shortcut]");
+    if (shortcutButton) {
+      applyMemberShortcut(shortcutButton.dataset.memberShortcut);
+      return;
+    }
+    const searchButton = event.target.closest("[data-member-search]");
+    if (searchButton) {
+      $("#memberSearchInput").value = searchButton.dataset.memberSearch || "";
+      searchMember().catch(error => setAlert(error.message, "error"));
+    }
   });
   $("#clearRecentActions").addEventListener("click", clearRecentActions);
   $("#toggleMemberExemption").addEventListener("click", () => toggleSelectedMemberExemption(true).catch(error => setAlert(error.message, "error")));
@@ -3322,6 +3631,9 @@ function bindEvents() {
 
     if (action.view) {
       setActiveView(action.view);
+      if (action.subtab) {
+        setActiveSubtab(action.view, action.subtab);
+      }
       return;
     }
 
@@ -3352,6 +3664,12 @@ function bindEvents() {
 
     if (event.key === "Escape" && !$("#commandPalette").classList.contains("hidden")) {
       closeCommandPalette();
+      return;
+    }
+
+    if (event.key === "Escape" && state.memberDrawerOpen) {
+      state.memberDrawerOpen = false;
+      renderMemberDrawer();
     }
   });
 }

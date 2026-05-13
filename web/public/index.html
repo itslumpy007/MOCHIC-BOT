@@ -117,6 +117,12 @@
             <div class="metric-grid" id="metricGrid"></div>
             <section class="panel">
               <div class="panel-header">
+                <h3>Attention</h3>
+              </div>
+              <div id="attentionBoard" class="event-list"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
                 <h3>Live Activity</h3>
               </div>
               <div id="activityStream" class="event-list"></div>
@@ -141,6 +147,12 @@
                 <h3>Panel Changes</h3>
               </div>
               <div id="panelChangesList" class="event-list"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Live Filters</h3>
+              </div>
+              <div id="activityFilters" class="filter-chip-row"></div>
             </section>
             <div class="split">
               <section class="panel">
@@ -185,6 +197,7 @@
                 <input id="memberSearchInput" placeholder="Discord ID, mention, or username">
                 <button id="memberSearchButton" class="save-button" type="button">Search</button>
               </div>
+              <div id="recentMemberSearches" class="filter-chip-row"></div>
             </section>
 
             <div class="split">
@@ -743,6 +756,8 @@
         <div id="commandPaletteList" class="command-palette-list"></div>
       </div>
     </div>
+
+    <aside id="memberDrawer" class="member-drawer hidden" aria-label="Quick member drawer"></aside>
 
     <script src="/app.js"></script>
   </body>

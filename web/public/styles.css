@@ -829,6 +829,51 @@ textarea {
   font-size: 12px;
 }
 
+.filter-chip.is-active {
+  border-color: rgba(217, 106, 160, 0.38);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: var(--shadow-soft);
+}
+
+.attention-board {
+  display: grid;
+  gap: 12px;
+}
+
+.member-drawer {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 45;
+  width: min(390px, calc(100vw - 36px));
+  max-height: calc(100vh - 36px);
+  overflow: auto;
+  padding: 0;
+}
+
+.member-drawer .drawer-panel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid rgba(234, 217, 230, 0.92);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 22px 54px rgba(117, 69, 99, 0.2);
+  backdrop-filter: blur(16px);
+}
+
+.member-drawer .compact {
+  margin: 0;
+}
+
+.profile-actions {
+  margin-top: 4px;
+}
+
+body.drawer-open .sidebar-backdrop {
+  display: block;
+}
+
 .command-palette {
   position: fixed;
   inset: 0;
@@ -1232,6 +1277,13 @@ tbody tr:hover td {
     padding: 16px;
     transform: translateX(-105%);
     transition: transform 180ms ease;
+  }
+
+  .member-drawer {
+    top: 0;
+    right: 0;
+    width: 100vw;
+    max-height: 100vh;
   }
 
   body.sidebar-open .sidebar {
