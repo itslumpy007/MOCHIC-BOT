@@ -4689,7 +4689,62 @@ function buildStatusEmbed() {
   });
 }
 
-function buildDashboardEmbed() {
+async function buildReactionRoleHealth() {
+  const guild = client.guilds.cache.get(GUILD_ID) || await client.guilds.fetch(GUILD_ID).catch(() => null);
+  const botMember = guild?.members?.me || (guild ? await guild.members.fetchMe().catch(() => null) : null);
+  const verifyChannelId = getVerifyChannelId();
+  const verifyMessageId = await resolveVerifyMessageId();
+  const verifyChannel = verifyChannelId && guild?.channels?.fetch ? await guild.channels.fetch(verifyChannelId).catch(() => null) : null;
+  const verifyMessage = verifyChannel && verifyMessageId && verifyChannel.messages?.fetch
+    ? await verifyChannel.messages.fetch(verifyMessageId).catch(() => null)
+    : null;
+  const botManageRoles = Boolean(botMember?.permissions?.has(PermissionFlagsBits.ManageRoles));
+
+  const roles = [];
+  for (const [emoji, roleData] of Object.entries(MOCHI_ROLES)) {
+    const role = roleData?.id && guild?.roles?.fetch
+      ? guild.roles.cache.get(roleData.id) || await guild.roles.fetch(roleData.id).catch(() => null)
+      : null;
+    const reactionPresent = Boolean(
+      verifyMessage?.reactions?.cache?.find(reaction => reaction.emoji?.name === emoji || reaction.emoji?.id === emoji)
+    );
+    const hierarchyOk = Boolean(botMember && role && botMember.roles.highest.comparePositionTo(role) > 0);
+
+    roles.push({
+      emoji,
+      label: roleData?.name || emoji,
+      roleId: roleData?.id || null,
+      roleExists: Boolean(role),
+      reactionPresent,
+      hierarchyOk,
+      manageable: botManageRoles && hierarchyOk
+    });
+  }
+
+  const issues = [];
+  if (!verifyChannelId) issues.push("Verify channel is not set.");
+  if (!verifyMessage) issues.push("The verify panel message could not be found.");
+  if (!botManageRoles) issues.push("The bot is missing Manage Roles permission.");
+  for (const role of roles) {
+    if (!role.roleId) issues.push(`${role.label} role is not configured.`);
+    if (role.roleId && !role.roleExists) issues.push(`${role.label} role does not exist.`);
+    if (role.roleExists && !role.hierarchyOk) issues.push(`${role.label} role is above the bot role.`);
+    if (!role.reactionPresent) issues.push(`${role.label} reaction is missing from the panel.`);
+  }
+
+  return {
+    ready: issues.length === 0,
+    verifyChannelId,
+    verifyMessageId: verifyMessage?.id || verifyMessageId || null,
+    botManageRoles,
+    roleHierarchyOk: roles.every(role => role.hierarchyOk),
+    panelMessageFound: Boolean(verifyMessage),
+    roles,
+    issues: [...new Set(issues)]
+  };
+}
+
+async function buildDashboardEmbed() {
   const allCases = Array.isArray(config.cases) ? config.cases : [];
   const recentCases = allCases.slice(-5).reverse();
   const recentAutomodCases = recentCases.filter(entry => typeof entry?.action === "string" && entry.action.startsWith("automod:"));
@@ -4699,6 +4754,7 @@ function buildDashboardEmbed() {
         .join("\n")
         .slice(0, 1024)
     : "No recent automod cases.";
+  const reactionRoleHealth = await buildReactionRoleHealth();
 
   return makeEmbed({
     title: "Moderation dashboard",
@@ -4712,6 +4768,9 @@ function buildDashboardEmbed() {
       { name: "AutoMod log channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
       { name: "Alert-only rules", value: getAlertOnlyRules().join(", ") || "None", inline: false },
       { name: "Nickname filter terms", value: `${getNicknameBlockedTerms().length}`, inline: true },
+      { name: "Reaction roles", value: reactionRoleHealth.ready ? "Ready" : `${reactionRoleHealth.issues.length} issue${reactionRoleHealth.issues.length === 1 ? "" : "s"} found`, inline: true },
+      { name: "Reaction role panel", value: reactionRoleHealth.panelMessageFound ? "Found" : "Missing", inline: true },
+      { name: "Reaction role issues", value: reactionRoleHealth.issues.slice(0, 6).join("\n") || "None", inline: false },
       {
         name: "Recent AutoMod cases",
         value: recentAutomodText,
@@ -5695,11 +5754,12 @@ function setWebDuration(target, key, value, allowZero = false) {
   return true;
 }
 
-function buildWebDashboardPayload() {
+async function buildWebDashboardPayload() {
   const analytics = getAutoModAnalytics();
   const recentCases = [...(Array.isArray(config.cases) ? config.cases : [])]
     .slice(-25)
     .reverse();
+  const reactionRoleHealth = await buildReactionRoleHealth();
 
   return {
     client: {
@@ -5749,6 +5809,7 @@ function buildWebDashboardPayload() {
       ruleCounts: analytics.ruleCounts || {},
       recentViolations: analytics.recentViolations || []
     },
+    reactionRoles: reactionRoleHealth,
     panelChanges: getRecentPanelChanges(8),
     recentCases
   };
@@ -6814,7 +6875,7 @@ async function handleWebApi(req, res, pathname) {
   }
 
   if (req.method === "GET" && pathname === "/api/dashboard") {
-    return sendWebJson(res, 200, buildWebDashboardPayload());
+    return sendWebJson(res, 200, await buildWebDashboardPayload());
   }
 
   if (req.method === "GET" && pathname === "/api/config") {
@@ -8034,7 +8095,7 @@ client.on("interactionCreate", async interaction => {
         }
 
         if (action === "dashboard") {
-          return interaction.reply({ embeds: [buildDashboardEmbed()], ephemeral: true });
+          return interaction.reply({ embeds: [await buildDashboardEmbed()], ephemeral: true });
         }
 
         if (action === "reload-config") {
@@ -9199,7 +9260,7 @@ client.on("interactionCreate", async interaction => {
     }
 
     if (interaction.commandName === "moddashboard") {
-      return interaction.reply({ embeds: [buildDashboardEmbed()], ephemeral: true });
+      return interaction.reply({ embeds: [await buildDashboardEmbed()], ephemeral: true });
     }
 
     if (interaction.commandName === "backup") {

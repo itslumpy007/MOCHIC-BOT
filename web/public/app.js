@@ -748,6 +748,60 @@ function renderRuntime() {
   $("#clientStatus").textContent = client.ready ? client.tag : "Bot not ready";
 }
 
+function renderReactionRoleHealth() {
+  const health = state.dashboard?.reactionRoles || {};
+  const roles = Array.isArray(health.roles) ? health.roles : [];
+  const issues = Array.isArray(health.issues) ? health.issues : [];
+
+  $("#reactionRoleHealth").innerHTML = [
+    ["Status", health.ready ? "Ready" : "Needs attention"],
+    ["Panel", health.panelMessageFound ? "Found" : "Missing"],
+    ["Manage Roles", health.botManageRoles ? "Yes" : "No"],
+    ["Hierarchy", health.roleHierarchyOk ? "Good" : "Bad"],
+    ["Roles Configured", roles.filter(role => role.roleId).length],
+    ["Roles Present", roles.filter(role => role.roleExists).length]
+  ].map(([label, value]) => `<article class="summary-item"><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`).join("");
+
+  $("#reactionRoleIssues").innerHTML = roles.length
+    ? roles.map(role => {
+        const warnings = [
+          role.roleId ? null : "No role ID",
+          role.roleExists ? null : "Role missing",
+          role.hierarchyOk ? null : "Role above bot",
+          role.reactionPresent ? null : "Reaction missing"
+        ].filter(Boolean);
+
+        return `
+          <article class="event">
+            <strong>${escapeHtml(role.label)} <span class="badge">${escapeHtml(role.emoji)}</span></strong>
+            <p>
+              Role: ${role.roleId ? escapeHtml(role.roleId) : "Not set"}<br>
+              Reaction: ${role.reactionPresent ? "Present" : "Missing"}<br>
+              Manageable: ${role.manageable ? "Yes" : "No"}<br>
+              ${warnings.length ? `Issues: ${escapeHtml(warnings.join(", "))}` : "Looks good"}
+            </p>
+          </article>
+        `;
+      }).join("")
+    : renderEmptyState("No reaction roles", "The reaction role mapping is empty.");
+
+  if (!roles.length && issues.length) {
+    $("#reactionRoleIssues").innerHTML = issues.map(issue => `
+      <article class="event">
+        <strong>Setup issue</strong>
+        <p>${escapeHtml(issue)}</p>
+      </article>
+    `).join("");
+  } else if (issues.length) {
+    $("#reactionRoleIssues").innerHTML += issues.slice(0, 5).map(issue => `
+      <article class="event">
+        <strong>Setup issue</strong>
+        <p>${escapeHtml(issue)}</p>
+      </article>
+    `).join("");
+  }
+}
+
 function renderRecentViolations() {
   const items = state.dashboard?.analytics?.recentViolations || [];
   $("#recentViolations").innerHTML = items.length
@@ -2053,6 +2107,7 @@ function renderAll() {
   renderWorkloadSummary();
   renderPanelChanges();
   renderRuntime();
+  renderReactionRoleHealth();
   renderRecentViolations();
   renderAutomod();
   renderAiReview();
