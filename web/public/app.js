@@ -70,6 +70,12 @@ const automodSwitchLabels = {
   emojiSpamEnabled: "Emoji spam"
 };
 
+const googleBlockListLabels = {
+  googleBlockListEnabled: "Enable doc sync",
+  googleBlockListUrl: "Google Doc URL",
+  googleBlockListSyncMinutes: "Refresh interval (minutes)"
+};
+
 const limitLabels = {
   maxMentions: "Mention limit",
   maxEmojiCount: "Emoji limit",
@@ -1034,6 +1040,7 @@ function renderAutomod() {
 
   $("#raidAction").value = automod.raidAction || "log";
   renderAutomodSummary(automod);
+  renderGoogleBlockListCard();
 
   const ruleActions = automod.ruleActions || {};
   const grouped = Object.entries(ruleActions).reduce((acc, [rule, mode]) => {
@@ -1056,6 +1063,7 @@ function renderAutomodSummary(automod) {
   const analytics = state.dashboard?.analytics || {};
   const topRule = Object.entries(analytics.ruleCounts || {}).sort((a, b) => b[1] - a[1])[0];
   const overrideCount = Object.values(automod.channelRuleOverrides || {}).reduce((sum, rules) => sum + (rules || []).length, 0);
+  const googleSyncCount = Number(automod.googleBlockListLastCount || 0);
   const summary = [
     ["Enabled", `${enabledRules}/${totalRules}`],
     ["Detections", analytics.totalDetections || 0],
@@ -1065,12 +1073,53 @@ function renderAutomodSummary(automod) {
     ["Custom AI", automod.aiCustomRulesEnabled ? `${automod.aiCustomRulesThreshold || 75}%` : "Off"],
     ["Dry Run", automod.dryRunEnabled ? "On" : "Off"],
     ["Profiles", (state.ops?.channelProfiles || "").split("\n").filter(Boolean).length || 0],
-    ["Overrides", overrideCount]
+    ["Overrides", overrideCount],
+    ["Doc Terms", googleSyncCount]
   ];
 
   $("#automodSummary").innerHTML = summary
     .map(([label, value]) => `<article class="summary-item"><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`)
     .join("");
+}
+
+function renderGoogleBlockListCard() {
+  const automod = state.config?.automod || {};
+  $("#googleBlockListSettingsFields").innerHTML = Object.entries(googleBlockListLabels)
+    .map(([key, label]) => {
+      if (key === "googleBlockListEnabled") {
+        return `
+          <label class="switch">
+            <span>${label}</span>
+            <input type="checkbox" data-automod-bool="${key}" ${automod[key] ? "checked" : ""}>
+          </label>
+        `;
+      }
+
+      if (key === "googleBlockListSyncMinutes") {
+        return `
+          <label>${label}
+            <input type="number" min="5" max="1440" step="5" data-automod-number="${key}" value="${escapeHtml(automod[key] ?? 15)}" placeholder="15">
+          </label>
+        `;
+      }
+
+      return `
+        <label>${label}
+          <input data-automod-string="${key}" value="${escapeHtml(automod[key] || "")}" placeholder="https://docs.google.com/document/d/...">
+        </label>
+      `;
+    }).join("");
+
+  const lastSyncedAt = automod.googleBlockListLastSyncedAt ? formatDate(automod.googleBlockListLastSyncedAt) : "Never";
+  const lastError = automod.googleBlockListLastError ? automod.googleBlockListLastError : "None";
+  const count = Number(automod.googleBlockListLastCount || 0);
+
+  $("#googleBlockListStatus").innerHTML = [
+    ["Enabled", automod.googleBlockListEnabled ? "Yes" : "No"],
+    ["Terms", count],
+    ["Last Sync", lastSyncedAt],
+    ["Last Error", lastError]
+  ].map(([label, value]) => `<article class="summary-item"><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`).join("");
 }
 
 function formatChannelRuleOverrides(overrides) {
@@ -2089,6 +2138,26 @@ async function saveAutomod() {
   await loadAll();
 }
 
+async function syncGoogleBlockList() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to sync the Google block list.", "error");
+    return;
+  }
+
+  const result = await api("/api/google-block-list-sync", {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+
+  state.config.automod = result.automod || state.config.automod;
+  await loadAll();
+  if (result.result?.error) {
+    setAlert(result.result.error, "error");
+    return;
+  }
+  setAlert(`Synced ${result.result?.count || 0} Google block list terms.`);
+}
+
 async function runAutomodPreview() {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to preview AutoMod.", "error");
@@ -2382,6 +2451,7 @@ function bindEvents() {
 
   $("#refreshButton").addEventListener("click", loadAll);
   $("#saveAutomod").addEventListener("click", () => saveAutomod().catch(error => setAlert(error.message, "error")));
+  $("#syncGoogleBlockListButton").addEventListener("click", () => syncGoogleBlockList().catch(error => setAlert(error.message, "error")));
   $("#saveSettings").addEventListener("click", () => saveSettings().catch(error => setAlert(error.message, "error")));
   $("#postAffirmationsPanel").addEventListener("click", () => postAffirmationsPanel().catch(error => setAlert(error.message, "error")));
   $("#saveAndPostTikTokVerify").addEventListener("click", () => saveAndPostTikTokVerify().catch(error => setAlert(error.message, "error")));

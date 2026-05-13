@@ -233,6 +233,18 @@
             <div class="switch-grid" id="automodSwitches"></div>
           </div>
 
+          <div class="panel" data-required-access="admin">
+            <div class="panel-header">
+              <h3>Google Doc Block List</h3>
+              <div class="button-row">
+                <button class="ghost-button" id="syncGoogleBlockListButton" type="button">Sync Now</button>
+              </div>
+            </div>
+            <p class="panel-note">Pull name blocks from a public Google Doc and merge them into the nickname filter.</p>
+            <div class="form-grid" id="googleBlockListSettingsFields"></div>
+            <div id="googleBlockListStatus" class="summary-grid"></div>
+          </div>
+
           <div class="split" data-required-access="admin">
             <section class="panel">
               <div class="panel-header">

@@ -142,11 +142,16 @@ const SUSPICIOUS_SCAM_DOMAINS = [
 const spamTracker = new Map();
 const joinTracker = new Map();
 const anonymousAffirmationCooldowns = new Map();
+const googleBlockListSyncState = {
+  running: false,
+  lastSyncAt: null
+};
 const pendingPanelActions = new Map();
 const webSessions = new Map();
 const webOauthStates = new Map();
 let tempBanInterval = null;
 let scheduledReportInterval = null;
+let googleBlockListInterval = null;
 
 const dataDir = path.join(__dirname, "data");
 const configPath = path.join(dataDir, "config.json");
@@ -227,6 +232,13 @@ function createDefaultConfig() {
       spamDuplicateThreshold: 3,
       channelRuleOverrides: {},
       scamPhraseList: [],
+      googleBlockListEnabled: false,
+      googleBlockListUrl: "",
+      googleBlockListSyncMinutes: 15,
+      googleBlockListTerms: [],
+      googleBlockListLastSyncedAt: null,
+      googleBlockListLastError: null,
+      googleBlockListLastCount: 0,
       alertOnlyRules: ["ai-review"],
       ruleActions: {},
       maxMentions: 5,
@@ -481,6 +493,13 @@ function loadConfig() {
         blockedAttachmentExtensions: Array.isArray(parsed.automod?.blockedAttachmentExtensions) ? parsed.automod.blockedAttachmentExtensions : defaults.automod.blockedAttachmentExtensions,
         nicknameBlockedTerms: Array.isArray(parsed.automod?.nicknameBlockedTerms) ? parsed.automod.nicknameBlockedTerms : [],
         scamPhraseList: Array.isArray(parsed.automod?.scamPhraseList) ? parsed.automod.scamPhraseList : [],
+        googleBlockListEnabled: parsed.automod?.googleBlockListEnabled !== undefined ? Boolean(parsed.automod.googleBlockListEnabled) : defaults.automod.googleBlockListEnabled,
+        googleBlockListUrl: typeof parsed.automod?.googleBlockListUrl === "string" ? parsed.automod.googleBlockListUrl : "",
+        googleBlockListSyncMinutes: Number.isFinite(Number(parsed.automod?.googleBlockListSyncMinutes)) ? Number(parsed.automod.googleBlockListSyncMinutes) : defaults.automod.googleBlockListSyncMinutes,
+        googleBlockListTerms: Array.isArray(parsed.automod?.googleBlockListTerms) ? parsed.automod.googleBlockListTerms : [],
+        googleBlockListLastSyncedAt: typeof parsed.automod?.googleBlockListLastSyncedAt === "string" ? parsed.automod.googleBlockListLastSyncedAt : null,
+        googleBlockListLastError: typeof parsed.automod?.googleBlockListLastError === "string" ? parsed.automod.googleBlockListLastError : null,
+        googleBlockListLastCount: Number.isFinite(Number(parsed.automod?.googleBlockListLastCount)) ? Number(parsed.automod.googleBlockListLastCount) : 0,
         alertOnlyRules: Array.isArray(parsed.automod?.alertOnlyRules) ? parsed.automod.alertOnlyRules : defaults.automod.alertOnlyRules,
         ruleActions: parsed.automod?.ruleActions && typeof parsed.automod.ruleActions === "object" ? parsed.automod.ruleActions : {},
         channelRuleOverrides: parsed.automod?.channelRuleOverrides && typeof parsed.automod.channelRuleOverrides === "object"
@@ -572,8 +591,22 @@ function getBannedWords() {
   return Array.isArray(config.automod.bannedWordList) ? config.automod.bannedWordList : [];
 }
 
+function normalizeBlockListTerms(value) {
+  return [...new Set(
+    String(value || "")
+      .split(/\r?\n/)
+      .flatMap(line => line.split(/[;,]/))
+      .map(term => term.replace(/^[*-•]\s*/, "").trim())
+      .filter(term => term && !term.startsWith("#") && !term.startsWith("//"))
+      .map(term => normalizeComparisonText(term))
+      .filter(Boolean)
+  )];
+}
+
 function getNicknameBlockedTerms() {
-  return Array.isArray(config.automod.nicknameBlockedTerms) ? config.automod.nicknameBlockedTerms : [];
+  const localTerms = Array.isArray(config.automod.nicknameBlockedTerms) ? config.automod.nicknameBlockedTerms : [];
+  const googleTerms = Array.isArray(config.automod.googleBlockListTerms) ? config.automod.googleBlockListTerms : [];
+  return [...new Set([...localTerms, ...googleTerms].map(term => normalizeComparisonText(term)).filter(Boolean))];
 }
 
 function getAlertOnlyRules() {
@@ -583,6 +616,102 @@ function getAlertOnlyRules() {
 function getScamPhrases() {
   const customPhrases = Array.isArray(config.automod.scamPhraseList) ? config.automod.scamPhraseList : [];
   return [...new Set([...BUILT_IN_SCAM_PHRASES, ...customPhrases].map(value => normalizeComparisonText(value)).filter(Boolean))];
+}
+
+function getGoogleBlockListRefreshMs() {
+  const minutes = Number(config.automod?.googleBlockListSyncMinutes);
+  const normalized = Number.isFinite(minutes) ? Math.max(5, Math.min(1440, minutes)) : 15;
+  return normalized * 60 * 1000;
+}
+
+function getGoogleBlockListDocId(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const urlMatch = raw.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]+)/i);
+  if (urlMatch) return urlMatch[1];
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(raw)) return raw;
+  return "";
+}
+
+function getGoogleBlockListExportUrl(value) {
+  const docId = getGoogleBlockListDocId(value);
+  return docId ? `https://docs.google.com/document/d/${docId}/export?format=txt` : "";
+}
+
+async function syncGoogleBlockList(source = "manual", force = false) {
+  if (!config.automod?.googleBlockListEnabled) {
+    config.automod.googleBlockListTerms = [];
+    config.automod.googleBlockListLastError = null;
+    config.automod.googleBlockListLastCount = 0;
+    saveConfig();
+    return { enabled: false, synced: false, count: 0 };
+  }
+
+  const exportUrl = getGoogleBlockListExportUrl(config.automod.googleBlockListUrl);
+  if (!exportUrl) {
+    config.automod.googleBlockListTerms = [];
+    config.automod.googleBlockListLastError = "Set a Google Doc URL first.";
+    config.automod.googleBlockListLastCount = 0;
+    saveConfig();
+    return { enabled: true, synced: false, count: 0, error: config.automod.googleBlockListLastError };
+  }
+
+  const lastSyncedAt = config.automod.googleBlockListLastSyncedAt ? new Date(config.automod.googleBlockListLastSyncedAt).getTime() : 0;
+  if (!force && lastSyncedAt && Date.now() - lastSyncedAt < getGoogleBlockListRefreshMs()) {
+    return {
+      enabled: true,
+      synced: false,
+      count: Array.isArray(config.automod.googleBlockListTerms) ? config.automod.googleBlockListTerms.length : 0,
+      skipped: true
+    };
+  }
+
+  if (googleBlockListSyncState.running) {
+    return { enabled: true, synced: false, count: Array.isArray(config.automod.googleBlockListTerms) ? config.automod.googleBlockListTerms.length : 0, skipped: true };
+  }
+
+  googleBlockListSyncState.running = true;
+  try {
+    const response = await fetch(exportUrl, {
+      headers: { "User-Agent": "MochiBot/1.0" }
+    });
+    if (!response.ok) {
+      throw new Error(`Google Doc fetch failed (${response.status}).`);
+    }
+
+    const text = await response.text();
+    const terms = normalizeBlockListTerms(text);
+    config.automod.googleBlockListTerms = terms;
+    config.automod.googleBlockListLastSyncedAt = new Date().toISOString();
+    config.automod.googleBlockListLastError = null;
+    config.automod.googleBlockListLastCount = terms.length;
+    googleBlockListSyncState.lastSyncAt = config.automod.googleBlockListLastSyncedAt;
+    saveConfig();
+    recordAuditLog(source, "google-block-list-synced", {
+      docId: getGoogleBlockListDocId(config.automod.googleBlockListUrl),
+      count: terms.length
+    });
+    return { enabled: true, synced: true, count: terms.length };
+  } catch (error) {
+    config.automod.googleBlockListLastError = error.message;
+    saveConfig();
+    recordAuditLog(source, "google-block-list-sync-failed", {
+      docId: getGoogleBlockListDocId(config.automod.googleBlockListUrl),
+      error: error.message
+    });
+    return { enabled: true, synced: false, count: Array.isArray(config.automod.googleBlockListTerms) ? config.automod.googleBlockListTerms.length : 0, error: error.message };
+  } finally {
+    googleBlockListSyncState.running = false;
+  }
+}
+
+function startGoogleBlockListSync() {
+  if (googleBlockListInterval) clearInterval(googleBlockListInterval);
+  googleBlockListInterval = setInterval(() => {
+    syncGoogleBlockList("interval").catch(error => {
+      console.error("Google block list sync error:", error.message);
+    });
+  }, 5 * 60 * 1000);
 }
 
 function getAutoModAnalytics() {
@@ -830,6 +959,7 @@ function cloneAutoModSettings(source = {}) {
     exemptUserIds: [...(source.exemptUserIds || [])],
     nicknameBlockedTerms: [...(source.nicknameBlockedTerms || [])],
     scamPhraseList: [...(source.scamPhraseList || [])],
+    googleBlockListTerms: [...(source.googleBlockListTerms || [])],
     alertOnlyRules: [...(source.alertOnlyRules || [])],
     channelRuleOverrides: { ...(source.channelRuleOverrides || {}) },
     ruleActions: { ...(source.ruleActions || {}) }
@@ -2514,7 +2644,10 @@ function isPanelAuditAction(action) {
     "appeal-created",
     "appeal-status-updated",
     "channel-exempt-added",
-    "channel-rule-override-added"
+    "channel-rule-override-added",
+    "google-block-list-synced",
+    "google-block-list-sync-failed",
+    "affirmations-panel-posted"
   ].includes(String(action || ""));
 }
 
@@ -5682,7 +5815,7 @@ function updateWebSettings(auth, payload) {
   return buildWebConfigPayload().settings;
 }
 
-function updateWebAutomod(auth, payload) {
+async function updateWebAutomod(auth, payload) {
   const booleanKeys = [
     "invites",
     "spam",
@@ -5704,7 +5837,8 @@ function updateWebAutomod(auth, payload) {
     "languageAwareFiltersEnabled",
     "quietHoursEnabled",
     "escalationEnabled",
-    "emojiSpamEnabled"
+    "emojiSpamEnabled",
+    "googleBlockListEnabled"
   ];
 
   const integerRules = {
@@ -5721,7 +5855,8 @@ function updateWebAutomod(auth, payload) {
     contextMessageCount: [1, 10],
     spamWindowMs: [1000, 60000],
     spamBurstThreshold: [2, 20],
-    spamDuplicateThreshold: [2, 10]
+    spamDuplicateThreshold: [2, 10],
+    googleBlockListSyncMinutes: [5, 1440]
   };
 
   const durationRules = [
@@ -5753,7 +5888,7 @@ function updateWebAutomod(auth, payload) {
     }
   }
 
-  const stringKeys = ["aiModerationModel", "aiCustomRulesModel", "aiCustomRules", "aiCustomInstructions", "quietHoursStart", "quietHoursEnd", "quietHoursMode"];
+  const stringKeys = ["aiModerationModel", "aiCustomRulesModel", "aiCustomRules", "aiCustomInstructions", "quietHoursStart", "quietHoursEnd", "quietHoursMode", "googleBlockListUrl"];
   for (const key of stringKeys) {
     if (Object.prototype.hasOwnProperty.call(payload, key)) {
       const value = String(payload[key] || "").trim();
@@ -5773,6 +5908,9 @@ function updateWebAutomod(auth, payload) {
   }
   if (Object.prototype.hasOwnProperty.call(payload, "scamPhraseList")) {
     config.automod.scamPhraseList = toWebList(payload.scamPhraseList, value => normalizeComparisonText(value));
+  }
+  if (Object.prototype.hasOwnProperty.call(payload, "googleBlockListTerms")) {
+    config.automod.googleBlockListTerms = toWebList(payload.googleBlockListTerms, value => normalizeComparisonText(value));
   }
   if (Object.prototype.hasOwnProperty.call(payload, "allowedDomains")) {
     config.automod.allowedDomains = toWebList(payload.allowedDomains, normalizeDomain);
@@ -5826,6 +5964,15 @@ function updateWebAutomod(auth, payload) {
     exemptRoles: config.automod.exemptRoleIds.length,
     exemptUsers: config.automod.exemptUserIds.length
   });
+
+  if (
+    Object.prototype.hasOwnProperty.call(payload, "googleBlockListEnabled") ||
+    Object.prototype.hasOwnProperty.call(payload, "googleBlockListUrl") ||
+    Object.prototype.hasOwnProperty.call(payload, "googleBlockListSyncMinutes")
+  ) {
+    await syncGoogleBlockList("web", true);
+  }
+
   return buildWebConfigPayload().automod;
 }
 
@@ -6824,7 +6971,16 @@ async function handleWebApi(req, res, pathname) {
       return sendWebJson(res, 403, { error: "Admin web access is required." });
     }
     const body = await readWebJsonBody(req);
-    return sendWebJson(res, 200, { automod: updateWebAutomod(auth, body) });
+    return sendWebJson(res, 200, { automod: await updateWebAutomod(auth, body) });
+  }
+
+  if (req.method === "POST" && pathname === "/api/google-block-list-sync") {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
+
+    const result = await syncGoogleBlockList("web", true);
+    return sendWebJson(res, 200, { ok: true, result, automod: buildWebConfigPayload().automod });
   }
 
   if (req.method === "POST" && pathname === "/api/automod-preview") {
@@ -7015,6 +7171,9 @@ client.once("clientReady", async () => {
       await resolveVerifyMessageId();
       await enforceFlavorRoleVisibility(client.guilds.cache.get(GUILD_ID)).catch(() => null);
       await processExpiredTempBans();
+      await syncGoogleBlockList("startup").catch(error => {
+        console.error("Google block list startup sync error:", error.message);
+      });
 
       if (tempBanInterval) {
         clearInterval(tempBanInterval);
@@ -7025,6 +7184,7 @@ client.once("clientReady", async () => {
         });
       }, 60 * 1000);
       startScheduledReports();
+      startGoogleBlockListSync();
     }
   } catch (error) {
     console.error("Ready error:", error);
@@ -10663,7 +10823,7 @@ client.on("guildMemberAdd", async member => {
     }
 
     if (config.automod.nicknameFilterEnabled) {
-      const displayName = (member.nickname || member.user.username || "").toLowerCase();
+      const displayName = normalizeComparisonText(member.nickname || member.user.username || "");
       const blockedTerm = getNicknameBlockedTerms().find(term => displayName.includes(term));
 
       if (blockedTerm) {
@@ -10713,8 +10873,8 @@ client.on("guildMemberUpdate", async (oldMember, newMember) => {
 
     if (!config.automod.nicknameFilterEnabled) return;
 
-    const previousName = (oldMember.nickname || oldMember.user.username || "").toLowerCase();
-    const currentName = (newMember.nickname || newMember.user.username || "").toLowerCase();
+    const previousName = normalizeComparisonText(oldMember.nickname || oldMember.user.username || "");
+    const currentName = normalizeComparisonText(newMember.nickname || newMember.user.username || "");
     if (previousName === currentName) return;
 
     const blockedTerm = getNicknameBlockedTerms().find(term => currentName.includes(term));
