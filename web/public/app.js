@@ -47,6 +47,15 @@ const storageKeys = {
 };
 
 const advancedViews = new Set(["automod", "settings", "staff", "ops"]);
+const subtabDefaults = {
+  overview: "summary",
+  members: "profile",
+  automod: "rules",
+  settings: "general",
+  staff: "access",
+  ops: "templates",
+  records: "cases"
+};
 
 const automodSwitchLabels = {
   invites: "Invite links",
@@ -593,6 +602,50 @@ function setActiveView(view) {
   });
   $("#viewTitle").textContent = titles[nextView];
   localStorage.setItem(storageKeys.activeView, nextView);
+  updateViewSubtabs(nextView);
+}
+
+function getSubtabStorageKey(view) {
+  return `mochiSubtab:${view}`;
+}
+
+function getAvailableSubtabs(view) {
+  return [...document.querySelectorAll(`[data-subtab-view="${view}"]`)]
+    .filter(button => !button.classList.contains("hidden") && !button.disabled)
+    .map(button => button.dataset.subtab)
+    .filter(Boolean);
+}
+
+function getActiveSubtab(view) {
+  const available = getAvailableSubtabs(view);
+  const stored = localStorage.getItem(getSubtabStorageKey(view));
+  if (stored && available.includes(stored)) return stored;
+  return available.includes(subtabDefaults[view]) ? subtabDefaults[view] : available[0] || "";
+}
+
+function setActiveSubtab(view, subtab) {
+  localStorage.setItem(getSubtabStorageKey(view), subtab);
+  updateViewSubtabs(view);
+}
+
+function updateViewSubtabs(view = localStorage.getItem(storageKeys.activeView) || getDefaultView()) {
+  const activeSubtab = getActiveSubtab(view);
+  const available = getAvailableSubtabs(view);
+  const nextSubtab = available.includes(activeSubtab) ? activeSubtab : available[0] || "";
+
+  if (nextSubtab && nextSubtab !== activeSubtab) {
+    localStorage.setItem(getSubtabStorageKey(view), nextSubtab);
+  }
+
+  document.querySelectorAll(`[data-subtab-view="${view}"]`).forEach(button => {
+    const isActive = button.dataset.subtab === (nextSubtab || activeSubtab);
+    button.classList.toggle("is-active", isActive);
+  });
+
+  document.querySelectorAll(`[data-view-subtab-group="${view}"]`).forEach(group => {
+    const shouldShow = group.dataset.subtab === (nextSubtab || activeSubtab);
+    group.classList.toggle("hidden", !shouldShow);
+  });
 }
 
 function applyAccessRestrictions() {
@@ -3034,6 +3087,11 @@ function bindEvents() {
   $("#commandPaletteButton").addEventListener("click", openCommandPalette);
   $("#advancedToggle").addEventListener("click", () => {
     setAdvancedToolsVisible(!isAdvancedToolsVisible());
+  });
+  document.querySelectorAll("[data-subtab-view]").forEach(button => {
+    button.addEventListener("click", () => {
+      setActiveSubtab(button.dataset.subtabView, button.dataset.subtab);
+    });
   });
   $("#quickActions").addEventListener("click", event => {
     const button = event.target.closest("[data-quick-action]");

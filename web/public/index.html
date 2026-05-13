@@ -90,68 +90,93 @@
         <section id="alert" class="alert hidden" role="status"></section>
 
         <section id="overviewView" class="view is-active">
-          <div class="metric-grid" id="metricGrid"></div>
-          <section class="panel">
-            <div class="panel-header">
-              <h3>Quick Actions</h3>
-            </div>
-            <div class="quick-actions" id="quickActions"></div>
-          </section>
-          <section class="panel">
-            <div class="panel-header">
-              <h3>My Workload</h3>
-            </div>
-            <div id="workloadSummary" class="summary-grid"></div>
-          </section>
-          <section class="panel">
-            <div class="panel-header">
-              <h3>Panel Changes</h3>
-            </div>
-            <div id="panelChangesList" class="event-list"></div>
-          </section>
-          <div class="split">
+          <div class="view-tabs" aria-label="Overview tabs">
+            <button class="view-tab is-active" type="button" data-subtab-view="overview" data-subtab="summary">Summary</button>
+            <button class="view-tab" type="button" data-subtab-view="overview" data-subtab="activity">Activity</button>
+            <button class="view-tab" type="button" data-subtab-view="overview" data-subtab="security">Safety</button>
+          </div>
+
+          <div class="view-stack" data-view-subtab-group="overview" data-subtab="summary">
+            <div class="metric-grid" id="metricGrid"></div>
             <section class="panel">
               <div class="panel-header">
-                <h3>Runtime</h3>
+                <h3>Quick Actions</h3>
               </div>
-              <dl class="detail-list" id="runtimeList"></dl>
+              <div class="quick-actions" id="quickActions"></div>
             </section>
             <section class="panel">
               <div class="panel-header">
-                <h3>Recent AutoMod</h3>
+                <h3>My Workload</h3>
               </div>
-              <div id="recentViolations" class="event-list"></div>
+              <div id="workloadSummary" class="summary-grid"></div>
             </section>
           </div>
-          <section class="panel">
-            <div class="panel-header">
-              <h3>Reaction Roles</h3>
+
+          <div class="view-stack hidden" data-view-subtab-group="overview" data-subtab="activity">
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Panel Changes</h3>
+              </div>
+              <div id="panelChangesList" class="event-list"></div>
+            </section>
+            <div class="split">
+              <section class="panel">
+                <div class="panel-header">
+                  <h3>Runtime</h3>
+                </div>
+                <dl class="detail-list" id="runtimeList"></dl>
+              </section>
+              <section class="panel">
+                <div class="panel-header">
+                  <h3>Recent AutoMod</h3>
+                </div>
+                <div id="recentViolations" class="event-list"></div>
+              </section>
             </div>
-            <div id="reactionRoleHealth" class="summary-grid"></div>
-            <div id="reactionRoleIssues" class="event-list"></div>
-          </section>
+          </div>
+
+          <div class="view-stack hidden" data-view-subtab-group="overview" data-subtab="security">
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Reaction Roles</h3>
+              </div>
+              <div id="reactionRoleHealth" class="summary-grid"></div>
+              <div id="reactionRoleIssues" class="event-list"></div>
+            </section>
+          </div>
         </section>
 
         <section id="membersView" class="view">
-          <section class="panel">
-            <div class="panel-header">
-              <h3>Find Member</h3>
-            </div>
-            <div class="search-row">
-              <input id="memberSearchInput" placeholder="Discord ID, mention, or username">
-              <button id="memberSearchButton" class="save-button" type="button">Search</button>
-            </div>
-          </section>
+          <div class="view-tabs" aria-label="Members tabs">
+            <button class="view-tab is-active" type="button" data-subtab-view="members" data-subtab="profile">Profile</button>
+            <button class="view-tab" type="button" data-subtab-view="members" data-subtab="moderation">Moderation</button>
+            <button class="view-tab" type="button" data-subtab-view="members" data-subtab="history">History</button>
+          </div>
 
-          <div class="split">
+          <div class="view-stack" data-view-subtab-group="members" data-subtab="profile">
             <section class="panel">
               <div class="panel-header">
-                <h3>Profile</h3>
-                <button id="memberAiSummaryButton" class="ghost-button" type="button">AI Summary</button>
+                <h3>Find Member</h3>
               </div>
-              <div id="memberProfile" class="profile-empty">Search a member to view profile details.</div>
-              <div id="memberAiSummary" class="event-list"></div>
+              <div class="search-row">
+                <input id="memberSearchInput" placeholder="Discord ID, mention, or username">
+                <button id="memberSearchButton" class="save-button" type="button">Search</button>
+              </div>
             </section>
+
+            <div class="split">
+              <section class="panel">
+                <div class="panel-header">
+                  <h3>Profile</h3>
+                  <button id="memberAiSummaryButton" class="ghost-button" type="button">AI Summary</button>
+                </div>
+                <div id="memberProfile" class="profile-empty">Search a member to view profile details.</div>
+                <div id="memberAiSummary" class="event-list"></div>
+              </section>
+            </div>
+          </div>
+
+          <div class="view-stack hidden" data-view-subtab-group="members" data-subtab="moderation">
             <section class="panel">
               <div class="panel-header">
                 <h3>Quick Actions</h3>
@@ -195,98 +220,136 @@
                 <button id="memberActionButton" class="save-button" type="button">Apply Action</button>
               </div>
             </section>
-          </div>
 
-          <div class="split">
             <section class="panel">
               <div class="panel-header">
-                <h3>Recent Cases</h3>
+                <h3>Recent Actions</h3>
+                <button id="clearRecentActions" class="ghost-button" type="button">Clear</button>
               </div>
-              <div id="memberCases" class="event-list"></div>
-            </section>
-            <section class="panel">
-              <div class="panel-header">
-                <h3>Flags</h3>
-              </div>
-              <div id="memberSignals" class="event-list"></div>
+              <div id="recentActionsList" class="event-list"></div>
             </section>
           </div>
 
-          <section class="panel">
-            <div class="panel-header">
-              <h3>Member Timeline</h3>
-              <label class="inline-search">Search history<input id="timelineSearchInput" placeholder="action, reason, moderator, note"></label>
+          <div class="view-stack hidden" data-view-subtab-group="members" data-subtab="history">
+            <div class="split">
+              <section class="panel">
+                <div class="panel-header">
+                  <h3>Recent Cases</h3>
+                </div>
+                <div id="memberCases" class="event-list"></div>
+              </section>
+              <section class="panel">
+                <div class="panel-header">
+                  <h3>Flags</h3>
+                </div>
+                <div id="memberSignals" class="event-list"></div>
+              </section>
             </div>
-            <div id="memberTimeline" class="event-list"></div>
-          </section>
 
-          <section class="panel">
-            <div class="panel-header">
-              <h3>Recent Actions</h3>
-              <button id="clearRecentActions" class="ghost-button" type="button">Clear</button>
-            </div>
-            <div id="recentActionsList" class="event-list"></div>
-          </section>
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Member Timeline</h3>
+                <label class="inline-search">Search history<input id="timelineSearchInput" placeholder="action, reason, moderator, note"></label>
+              </div>
+              <div id="memberTimeline" class="event-list"></div>
+            </section>
+          </div>
         </section>
 
         <section id="automodView" class="view">
-          <section class="panel">
-            <div class="panel-header">
-              <h3>AutoMod Mode</h3>
-              <div class="button-row">
-                <button class="ghost-button" type="button" data-automod-preset="light">Light</button>
-                <button class="ghost-button" type="button" data-automod-preset="standard">Standard</button>
-                <button class="ghost-button" type="button" data-automod-preset="strict">Strict</button>
-              </div>
-            </div>
-            <div id="automodSummary" class="summary-grid"></div>
-          </section>
-
-          <div class="panel" data-required-access="admin">
-            <div class="panel-header">
-              <h3>Rule Switches</h3>
-              <button class="save-button" id="saveAutomod" type="button">Save</button>
-            </div>
-            <div class="switch-grid" id="automodSwitches"></div>
+          <div class="view-tabs" aria-label="AutoMod tabs">
+            <button class="view-tab is-active" type="button" data-subtab-view="automod" data-subtab="rules">Rules</button>
+            <button class="view-tab" type="button" data-subtab-view="automod" data-subtab="filters">Filters</button>
+            <button class="view-tab" type="button" data-subtab-view="automod" data-subtab="tuning">Tuning</button>
+            <button class="view-tab" type="button" data-subtab-view="automod" data-subtab="ai">AI</button>
+            <button class="view-tab" type="button" data-subtab-view="automod" data-subtab="preview">Preview</button>
           </div>
 
-          <div class="panel" data-required-access="admin">
-            <div class="panel-header">
-              <h3>Google Doc Block List</h3>
-              <div class="button-row">
-                <button class="ghost-button" id="syncGoogleBlockListButton" type="button">Sync Now</button>
+          <div class="view-stack" data-view-subtab-group="automod" data-subtab="rules">
+            <section class="panel">
+              <div class="panel-header">
+                <h3>AutoMod Mode</h3>
+                <div class="button-row">
+                  <button class="ghost-button" type="button" data-automod-preset="light">Light</button>
+                  <button class="ghost-button" type="button" data-automod-preset="standard">Standard</button>
+                  <button class="ghost-button" type="button" data-automod-preset="strict">Strict</button>
+                </div>
               </div>
+              <div id="automodSummary" class="summary-grid"></div>
+            </section>
+            <div class="panel" data-required-access="admin">
+              <div class="panel-header">
+                <h3>Rule Switches</h3>
+                <button class="save-button" id="saveAutomod" type="button">Save</button>
+              </div>
+              <div class="switch-grid" id="automodSwitches"></div>
             </div>
-            <p class="panel-note">Pull name blocks from a public Google Doc and merge them into the nickname filter. Use either a normal share link or a published-to-web /pub link.</p>
-            <div class="form-grid" id="googleBlockListSettingsFields"></div>
-            <div id="googleBlockListStatus" class="summary-grid"></div>
           </div>
 
-          <div class="split" data-required-access="admin">
-            <section class="panel">
+          <div class="view-stack hidden" data-view-subtab-group="automod" data-subtab="filters">
+            <div class="panel" data-required-access="admin">
               <div class="panel-header">
-                <h3>Limits</h3>
+                <h3>Google Doc Block List</h3>
+                <div class="button-row">
+                  <button class="ghost-button" id="syncGoogleBlockListButton" type="button">Sync Now</button>
+                </div>
               </div>
-              <div class="form-grid" id="limitFields"></div>
-            </section>
-            <section class="panel">
+              <p class="panel-note">Pull name blocks from a public Google Doc and merge them into the nickname filter. Use either a normal share link or a published-to-web /pub link.</p>
+              <div class="form-grid" id="googleBlockListSettingsFields"></div>
+              <div id="googleBlockListStatus" class="summary-grid"></div>
+            </div>
+
+            <div class="panel" data-required-access="admin">
               <div class="panel-header">
-                <h3>AI Moderation</h3>
+                <h3>Lists</h3>
               </div>
-              <div class="form-grid" id="aiFields"></div>
-              <div class="form-grid" id="aiAdvancedFields"></div>
-              <div class="stacked-fields" id="aiInstructionFields"></div>
-            </section>
+              <div class="stacked-fields" id="listFields"></div>
+            </div>
           </div>
 
-          <div class="split" data-required-access="admin">
-            <section class="panel">
-              <div class="panel-header">
-                <h3>Quiet Hours</h3>
-              </div>
-              <div class="form-grid" id="modeFields"></div>
-            </section>
-            <section class="panel">
+          <div class="view-stack hidden" data-view-subtab-group="automod" data-subtab="tuning">
+            <div class="split" data-required-access="admin">
+              <section class="panel">
+                <div class="panel-header">
+                  <h3>Limits</h3>
+                </div>
+                <div class="form-grid" id="limitFields"></div>
+              </section>
+              <section class="panel">
+                <div class="panel-header">
+                  <h3>Quiet Hours</h3>
+                </div>
+                <div class="form-grid" id="modeFields"></div>
+              </section>
+            </div>
+
+            <div class="split" data-required-access="admin">
+              <section class="panel">
+                <div class="panel-header">
+                  <h3>Durations & Gates</h3>
+                </div>
+                <div class="form-grid" id="durationFields"></div>
+              </section>
+              <section class="panel">
+                <div class="panel-header">
+                  <h3>Rule Actions</h3>
+                  <button class="save-button" id="saveRuleActions" type="button">Save Actions</button>
+                </div>
+                <div class="form-grid three">
+                  <label>Anti-raid action
+                    <select id="raidAction" data-automod-string="raidAction">
+                      <option value="log">Log only</option>
+                      <option value="timeout">Timeout</option>
+                    </select>
+                  </label>
+                  <label>Alert rules<textarea id="alertRules" rows="4"></textarea></label>
+                  <label>Warn rules<textarea id="warnRules" rows="4"></textarea></label>
+                  <label>Timeout rules<textarea id="timeoutRules" rows="4"></textarea></label>
+                </div>
+              </section>
+            </div>
+
+            <section class="panel" data-required-access="admin">
               <div class="panel-header">
                 <h3>Policy Overrides</h3>
               </div>
@@ -294,283 +357,303 @@
             </section>
           </div>
 
-          <div class="split" data-required-access="admin">
-            <section class="panel">
-              <div class="panel-header">
-                <h3>Lists</h3>
-              </div>
-              <div class="stacked-fields" id="listFields"></div>
-            </section>
+          <div class="view-stack hidden" data-view-subtab-group="automod" data-subtab="ai">
+            <div class="split" data-required-access="admin">
+              <section class="panel">
+                <div class="panel-header">
+                  <h3>AI Moderation</h3>
+                </div>
+                <div class="form-grid" id="aiFields"></div>
+                <div class="form-grid" id="aiAdvancedFields"></div>
+                <div class="stacked-fields" id="aiInstructionFields"></div>
+              </section>
+              <section class="panel">
+                <div class="panel-header">
+                  <h3>AI Review Queue</h3>
+                </div>
+                <div id="aiReviewList" class="event-list"></div>
+              </section>
+            </div>
           </div>
 
-          <section class="panel" data-required-access="admin">
-            <div class="panel-header">
-              <h3>Durations & Gates</h3>
-            </div>
-            <div class="form-grid" id="durationFields"></div>
-          </section>
-
-          <section class="panel" data-required-access="admin">
-            <div class="panel-header">
-              <h3>Rule Actions</h3>
-              <button class="save-button" id="saveRuleActions" type="button">Save Actions</button>
-            </div>
-            <div class="form-grid three">
-              <label>Anti-raid action
-                <select id="raidAction" data-automod-string="raidAction">
-                  <option value="log">Log only</option>
-                  <option value="timeout">Timeout</option>
-                </select>
-              </label>
-              <label>Alert rules<textarea id="alertRules" rows="4"></textarea></label>
-              <label>Warn rules<textarea id="warnRules" rows="4"></textarea></label>
-              <label>Timeout rules<textarea id="timeoutRules" rows="4"></textarea></label>
-            </div>
-          </section>
-
-          <section class="panel" data-required-access="admin">
-            <div class="panel-header">
-              <h3>AutoMod Preview</h3>
-              <button class="save-button" id="runPreview" type="button">Run Preview</button>
-            </div>
-            <div class="form-grid">
-              <label>Channel ID<input id="previewChannelId" placeholder="Channel ID"></label>
-              <label>Sample message<textarea id="previewMessage" rows="5" placeholder="Paste a message to test against the current policy"></textarea></label>
-            </div>
-            <div class="button-row">
-              <button class="ghost-button" type="button" data-automod-sample="spam">Spam test</button>
-              <button class="ghost-button" type="button" data-automod-sample="invite">Invite test</button>
-              <button class="ghost-button" type="button" data-automod-sample="scam">Scam test</button>
-              <button class="ghost-button" type="button" data-automod-sample="caps">Caps test</button>
-            </div>
-            <div id="automodPreviewResult" class="event-list"></div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-header">
-              <h3>AI Review Queue</h3>
-            </div>
-            <div id="aiReviewList" class="event-list"></div>
-          </section>
+          <div class="view-stack hidden" data-view-subtab-group="automod" data-subtab="preview">
+            <section class="panel" data-required-access="admin">
+              <div class="panel-header">
+                <h3>AutoMod Preview</h3>
+                <button class="save-button" id="runPreview" type="button">Run Preview</button>
+              </div>
+              <div class="form-grid">
+                <label>Channel ID<input id="previewChannelId" placeholder="Channel ID"></label>
+                <label>Sample message<textarea id="previewMessage" rows="5" placeholder="Paste a message to test against the current policy"></textarea></label>
+              </div>
+              <div class="button-row">
+                <button class="ghost-button" type="button" data-automod-sample="spam">Spam test</button>
+                <button class="ghost-button" type="button" data-automod-sample="invite">Invite test</button>
+                <button class="ghost-button" type="button" data-automod-sample="scam">Scam test</button>
+                <button class="ghost-button" type="button" data-automod-sample="caps">Caps test</button>
+              </div>
+              <div id="automodPreviewResult" class="event-list"></div>
+            </section>
+          </div>
         </section>
 
         <section id="settingsView" class="view">
-          <section class="panel">
-            <div class="panel-header">
-              <h3>Server Settings</h3>
-              <button class="save-button" id="saveSettings" type="button">Save</button>
-            </div>
-            <p class="panel-note">Set the main server channels here.</p>
-            <div class="form-grid" id="generalSettingsFields"></div>
-          </section>
+          <div class="view-tabs" aria-label="Settings tabs">
+            <button class="view-tab is-active" type="button" data-subtab-view="settings" data-subtab="general">General</button>
+            <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="accounts">Accounts</button>
+            <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="verification">Verification</button>
+            <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="safety">Safety</button>
+          </div>
 
-          <section class="panel" data-required-access="admin">
-            <div class="panel-header">
-              <h3>Web Accounts</h3>
-              <button class="save-button" id="saveWebAccountButton" type="button">Save Account</button>
-            </div>
-            <p class="panel-note">Create personal logins for the web panel. You can use Discord, a password, or both for the same staff member, then reset passwords, disable access, and review recent sign-ins.</p>
-            <div class="split">
-              <section class="panel">
-                <div class="panel-header">
-                  <h3>Account Editor</h3>
-                  <div class="button-row">
-                    <button class="ghost-button" id="clearWebAccountForm" type="button">Clear</button>
-                    <button class="ghost-button" id="deleteWebAccountButton" type="button">Delete</button>
-                  </div>
-                </div>
-                <div class="form-grid">
-                  <label>Username<input id="webAccountUsername" placeholder="staff name"></label>
-                  <label>Access level
-                    <select id="webAccountAccessLevel">
-                      <option value="mod">Moderator</option>
-                      <option value="admin">Admin</option>
-                    </select>
-                  </label>
-                  <label>Status
-                    <select id="webAccountEnabled">
-                      <option value="true">Enabled</option>
-                      <option value="false">Disabled</option>
-                    </select>
-                  </label>
-                  <label>Discord user ID<input id="webAccountDiscordUserId" placeholder="Optional Discord ID"></label>
-                  <label>Password<input id="webAccountPassword" type="password" placeholder="Set or change password"></label>
-                  <label>Confirm password<input id="webAccountPasswordConfirm" type="password" placeholder="Re-enter password"></label>
-                </div>
-                <div class="button-row">
-                  <button class="ghost-button" id="generateWebPasswordButton" type="button">Generate Password</button>
-                  <button class="ghost-button" id="resetWebAccountPasswordButton" type="button">Reset Password</button>
-                  <button class="ghost-button" id="toggleWebAccountEnabledButton" type="button">Disable</button>
-                </div>
-                <section class="panel" style="margin-top: 14px;">
-                  <div class="panel-header">
-                    <h3>Login Audit</h3>
-                  </div>
-                  <div id="webAccountAuditList" class="event-list"></div>
-                </section>
-              </section>
-              <section class="panel">
-                <div class="panel-header">
-                  <h3>Accounts</h3>
-                </div>
-                <div id="webAccountsList" class="event-list"></div>
-              </section>
-            </div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-header">
-              <h3>Anonymous Affirmations</h3>
-              <div class="button-row">
-                <button class="ghost-button" id="postAffirmationsPanel" type="button">Post Panel</button>
-              </div>
-            </div>
-            <p class="panel-note">Control the little kindness corner: button, channel, and cooldown.</p>
-            <div class="form-grid" id="affirmationsSettingsFields"></div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-header">
-              <h3>Verification</h3>
-              <button class="save-button" id="saveAndPostTikTokVerify" type="button">Save &amp; Post TikTok Verify</button>
-            </div>
-            <p class="panel-note">Set the verify channel, roles, and TikTok details.</p>
-            <div class="button-row" style="margin-bottom: 12px;">
-              <button class="ghost-button" id="lockVerifiedCurrent" type="button">Lock Verified Here</button>
-              <button class="ghost-button" id="unlockVerifiedCurrent" type="button">Unlock Verified Here</button>
-              <button class="ghost-button" id="lockVerifiedAll" type="button">Lock Verified All</button>
-              <button class="ghost-button" id="unlockVerifiedAll" type="button">Unlock Verified All</button>
-            </div>
-            <p class="panel-note">Bulk sync updates verified and unverified roles across the server.</p>
-            <div class="button-row" style="margin-bottom: 12px;">
-              <button class="save-button" id="markAllUnverified" type="button">Mark All Unverified</button>
-            </div>
-            <div class="form-grid" id="verificationSettingsFields"></div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-header">
-              <h3>Exemptions</h3>
-              <button class="save-button" id="saveExemptions" type="button">Save</button>
-            </div>
-            <div class="form-grid three">
-              <label>Channels<textarea id="exemptChannelIds" rows="4"></textarea></label>
-              <label>Roles<textarea id="exemptRoleIds" rows="4"></textarea></label>
-              <label>Users<textarea id="exemptUserIds" rows="4"></textarea></label>
-            </div>
-          </section>
-        </section>
-
-        <section id="staffView" class="view">
-          <section class="panel">
-            <div class="panel-header">
-              <h3>Staff Access</h3>
-              <button class="save-button" id="saveStaff" type="button">Save</button>
-            </div>
-            <div class="form-grid">
-              <label>Moderator role IDs<textarea id="modRoleIds" rows="5" placeholder="Role IDs or @role mentions"></textarea></label>
-              <label>Admin role IDs<textarea id="adminRoleIds" rows="5" placeholder="Role IDs or @role mentions"></textarea></label>
-            </div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-header">
-              <h3>Access Summary</h3>
-            </div>
-            <div id="staffSummary" class="summary-grid"></div>
-          </section>
-        </section>
-
-        <section id="opsView" class="view">
-          <section class="panel">
-            <div class="panel-header">
-              <h3>Moderator Operations</h3>
-              <button class="save-button" id="saveOps" type="button">Save</button>
-            </div>
-            <div class="split">
-              <section class="panel">
-                <div class="panel-header">
-                  <h3>Template Library</h3>
-                  <div class="button-row">
-                    <button class="ghost-button" id="addTemplateButton" type="button">Add Template</button>
-                    <button class="ghost-button" id="deleteTemplateButton" type="button">Delete</button>
-                  </div>
-                </div>
-                <div class="template-editor">
-                  <div id="templateList" class="template-list"></div>
-                  <div id="templateEditorFields" class="stacked-fields"></div>
-                </div>
-                <textarea id="modTemplates" class="hidden" rows="8" aria-hidden="true" tabindex="-1"></textarea>
-              </section>
-              <section class="panel">
-                <div class="panel-header">
-                  <h3>Channel Profiles</h3>
-                </div>
-                <div class="stacked-fields">
-                  <label>Profiles<textarea id="channelProfiles" rows="12" placeholder="#general: standard&#10;#promo: strict links"></textarea></label>
-                </div>
-              </section>
-            </div>
-            <div class="form-grid three">
-              <label>Reports enabled<select id="reportEnabled"><option value="false">Off</option><option value="true">On</option></select></label>
-              <label>Report channel ID<input id="reportChannelId" placeholder="Channel ID"></label>
-              <label>Report frequency<select id="reportFrequency"><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label>
-            </div>
-          </section>
-
-          <div class="split">
+          <div class="view-stack" data-view-subtab-group="settings" data-subtab="general">
             <section class="panel">
-              <div class="panel-header"><h3>Risk Leaderboard</h3></div>
-              <div id="riskLeaderboard" class="event-list"></div>
+              <div class="panel-header">
+                <h3>Server Settings</h3>
+                <button class="save-button" id="saveSettings" type="button">Save</button>
+              </div>
+              <p class="panel-note">Set the main server channels here.</p>
+              <div class="form-grid" id="generalSettingsFields"></div>
             </section>
+
             <section class="panel">
-              <div class="panel-header"><h3>Appeals</h3></div>
-              <div class="form-grid">
-                <label>Status filter
-                  <select id="appealStatusFilter">
-                    <option value="open">Open</option>
-                    <option value="reviewed">Reviewed</option>
-                    <option value="approved">Approved</option>
-                    <option value="rejected">Rejected</option>
-                    <option value="closed">Closed</option>
-                    <option value="all">All</option>
-                  </select>
-                </label>
+              <div class="panel-header">
+                <h3>Anonymous Affirmations</h3>
+                <div class="button-row">
+                  <button class="ghost-button" id="postAffirmationsPanel" type="button">Post Panel</button>
+                </div>
               </div>
-              <div class="form-grid">
-                <label>User ID<input id="appealUserId" placeholder="Discord user ID"></label>
-                <label>User tag<input id="appealUserTag" placeholder="username"></label>
-              </div>
-              <div class="stacked-fields">
-                <label>Appeal reason<textarea id="appealReason" rows="4"></textarea></label>
-                <button class="save-button" id="createAppeal" type="button">Create Appeal</button>
-              </div>
-              <div id="appealsList" class="event-list"></div>
+              <p class="panel-note">Control the little kindness corner: button, channel, and cooldown.</p>
+              <div class="form-grid" id="affirmationsSettingsFields"></div>
             </section>
           </div>
 
-          <div class="split">
-            <section class="panel">
-              <div class="panel-header"><h3>Audit Log</h3></div>
-              <div class="form-grid">
-                <label>Search audit log<input id="auditFilterInput" placeholder="action, actor, detail"></label>
+          <div class="view-stack hidden" data-view-subtab-group="settings" data-subtab="accounts">
+            <section class="panel" data-required-access="admin">
+              <div class="panel-header">
+                <h3>Web Accounts</h3>
+                <button class="save-button" id="saveWebAccountButton" type="button">Save Account</button>
               </div>
-              <div id="auditLogList" class="event-list"></div>
+              <p class="panel-note">Create personal logins for the web panel. You can use Discord, a password, or both for the same staff member, then reset passwords, disable access, and review recent sign-ins.</p>
+              <div class="split">
+                <section class="panel">
+                  <div class="panel-header">
+                    <h3>Account Editor</h3>
+                    <div class="button-row">
+                      <button class="ghost-button" id="clearWebAccountForm" type="button">Clear</button>
+                      <button class="ghost-button" id="deleteWebAccountButton" type="button">Delete</button>
+                    </div>
+                  </div>
+                  <div class="form-grid">
+                    <label>Username<input id="webAccountUsername" placeholder="staff name"></label>
+                    <label>Access level
+                      <select id="webAccountAccessLevel">
+                        <option value="mod">Moderator</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </label>
+                    <label>Status
+                      <select id="webAccountEnabled">
+                        <option value="true">Enabled</option>
+                        <option value="false">Disabled</option>
+                      </select>
+                    </label>
+                    <label>Discord user ID<input id="webAccountDiscordUserId" placeholder="Optional Discord ID"></label>
+                    <label>Password<input id="webAccountPassword" type="password" placeholder="Set or change password"></label>
+                    <label>Confirm password<input id="webAccountPasswordConfirm" type="password" placeholder="Re-enter password"></label>
+                  </div>
+                  <div class="button-row">
+                    <button class="ghost-button" id="generateWebPasswordButton" type="button">Generate Password</button>
+                    <button class="ghost-button" id="resetWebAccountPasswordButton" type="button">Reset Password</button>
+                    <button class="ghost-button" id="toggleWebAccountEnabledButton" type="button">Disable</button>
+                  </div>
+                  <section class="panel" style="margin-top: 14px;">
+                    <div class="panel-header">
+                      <h3>Login Audit</h3>
+                    </div>
+                    <div id="webAccountAuditList" class="event-list"></div>
+                  </section>
+                </section>
+                <section class="panel">
+                  <div class="panel-header">
+                    <h3>Accounts</h3>
+                  </div>
+                  <div id="webAccountsList" class="event-list"></div>
+                </section>
+              </div>
             </section>
+          </div>
+
+          <div class="view-stack hidden" data-view-subtab-group="settings" data-subtab="verification">
             <section class="panel">
               <div class="panel-header">
-                <h3>Backup & Restore</h3>
-                <button class="ghost-button" id="downloadBackup" type="button">Download Backup</button>
+                <h3>Verification</h3>
+                <button class="save-button" id="saveAndPostTikTokVerify" type="button">Save &amp; Post TikTok Verify</button>
               </div>
-              <div class="stacked-fields">
-                <label>Restore config JSON<textarea id="restoreConfig" rows="10"></textarea></label>
-                <button class="save-button" id="restoreBackup" type="button">Restore Backup</button>
+              <p class="panel-note">Set the verify channel, roles, and TikTok details.</p>
+              <div class="button-row" style="margin-bottom: 12px;">
+                <button class="ghost-button" id="lockVerifiedCurrent" type="button">Lock Verified Here</button>
+                <button class="ghost-button" id="unlockVerifiedCurrent" type="button">Unlock Verified Here</button>
+                <button class="ghost-button" id="lockVerifiedAll" type="button">Lock Verified All</button>
+                <button class="ghost-button" id="unlockVerifiedAll" type="button">Unlock Verified All</button>
+              </div>
+              <p class="panel-note">Bulk sync updates verified and unverified roles across the server.</p>
+              <div class="button-row" style="margin-bottom: 12px;">
+                <button class="save-button" id="markAllUnverified" type="button">Mark All Unverified</button>
+              </div>
+              <div class="form-grid" id="verificationSettingsFields"></div>
+            </section>
+          </div>
+
+          <div class="view-stack hidden" data-view-subtab-group="settings" data-subtab="safety">
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Exemptions</h3>
+                <button class="save-button" id="saveExemptions" type="button">Save</button>
+              </div>
+              <div class="form-grid three">
+                <label>Channels<textarea id="exemptChannelIds" rows="4"></textarea></label>
+                <label>Roles<textarea id="exemptRoleIds" rows="4"></textarea></label>
+                <label>Users<textarea id="exemptUserIds" rows="4"></textarea></label>
               </div>
             </section>
+          </div>
+        </section>
+
+        <section id="staffView" class="view">
+          <div class="view-tabs" aria-label="Staff tabs">
+            <button class="view-tab is-active" type="button" data-subtab-view="staff" data-subtab="access">Access</button>
+            <button class="view-tab" type="button" data-subtab-view="staff" data-subtab="summary">Summary</button>
+          </div>
+          <div class="view-stack" data-view-subtab-group="staff" data-subtab="access">
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Staff Access</h3>
+                <button class="save-button" id="saveStaff" type="button">Save</button>
+              </div>
+              <div class="form-grid">
+                <label>Moderator role IDs<textarea id="modRoleIds" rows="5" placeholder="Role IDs or @role mentions"></textarea></label>
+                <label>Admin role IDs<textarea id="adminRoleIds" rows="5" placeholder="Role IDs or @role mentions"></textarea></label>
+              </div>
+            </section>
+          </div>
+          <div class="view-stack hidden" data-view-subtab-group="staff" data-subtab="summary">
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Access Summary</h3>
+              </div>
+              <div id="staffSummary" class="summary-grid"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="opsView" class="view">
+          <div class="view-tabs" aria-label="Ops tabs">
+            <button class="view-tab is-active" type="button" data-subtab-view="ops" data-subtab="templates">Templates</button>
+            <button class="view-tab" type="button" data-subtab-view="ops" data-subtab="workflow">Workflow</button>
+            <button class="view-tab" type="button" data-subtab-view="ops" data-subtab="audit">Audit</button>
+          </div>
+
+          <div class="view-stack" data-view-subtab-group="ops" data-subtab="templates">
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Moderator Operations</h3>
+                <button class="save-button" id="saveOps" type="button">Save</button>
+              </div>
+              <div class="split">
+                <section class="panel">
+                  <div class="panel-header">
+                    <h3>Template Library</h3>
+                    <div class="button-row">
+                      <button class="ghost-button" id="addTemplateButton" type="button">Add Template</button>
+                      <button class="ghost-button" id="deleteTemplateButton" type="button">Delete</button>
+                    </div>
+                  </div>
+                  <div class="template-editor">
+                    <div id="templateList" class="template-list"></div>
+                    <div id="templateEditorFields" class="stacked-fields"></div>
+                  </div>
+                  <textarea id="modTemplates" class="hidden" rows="8" aria-hidden="true" tabindex="-1"></textarea>
+                </section>
+                <section class="panel">
+                  <div class="panel-header">
+                    <h3>Channel Profiles</h3>
+                  </div>
+                  <div class="stacked-fields">
+                    <label>Profiles<textarea id="channelProfiles" rows="12" placeholder="#general: standard&#10;#promo: strict links"></textarea></label>
+                  </div>
+                </section>
+              </div>
+              <div class="form-grid three">
+                <label>Reports enabled<select id="reportEnabled"><option value="false">Off</option><option value="true">On</option></select></label>
+                <label>Report channel ID<input id="reportChannelId" placeholder="Channel ID"></label>
+                <label>Report frequency<select id="reportFrequency"><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label>
+              </div>
+            </section>
+          </div>
+
+          <div class="view-stack hidden" data-view-subtab-group="ops" data-subtab="workflow">
+            <div class="split">
+              <section class="panel">
+                <div class="panel-header"><h3>Risk Leaderboard</h3></div>
+                <div id="riskLeaderboard" class="event-list"></div>
+              </section>
+              <section class="panel">
+                <div class="panel-header"><h3>Appeals</h3></div>
+                <div class="form-grid">
+                  <label>Status filter
+                    <select id="appealStatusFilter">
+                      <option value="open">Open</option>
+                      <option value="reviewed">Reviewed</option>
+                      <option value="approved">Approved</option>
+                      <option value="rejected">Rejected</option>
+                      <option value="closed">Closed</option>
+                      <option value="all">All</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="form-grid">
+                  <label>User ID<input id="appealUserId" placeholder="Discord user ID"></label>
+                  <label>User tag<input id="appealUserTag" placeholder="username"></label>
+                </div>
+                <div class="stacked-fields">
+                  <label>Appeal reason<textarea id="appealReason" rows="4"></textarea></label>
+                  <button class="save-button" id="createAppeal" type="button">Create Appeal</button>
+                </div>
+                <div id="appealsList" class="event-list"></div>
+              </section>
+            </div>
+          </div>
+
+          <div class="view-stack hidden" data-view-subtab-group="ops" data-subtab="audit">
+            <div class="split">
+              <section class="panel">
+                <div class="panel-header"><h3>Audit Log</h3></div>
+                <div class="form-grid">
+                  <label>Search audit log<input id="auditFilterInput" placeholder="action, actor, detail"></label>
+                </div>
+                <div id="auditLogList" class="event-list"></div>
+              </section>
+              <section class="panel">
+                <div class="panel-header">
+                  <h3>Backup & Restore</h3>
+                  <button class="ghost-button" id="downloadBackup" type="button">Download Backup</button>
+                </div>
+                <div class="stacked-fields">
+                  <label>Restore config JSON<textarea id="restoreConfig" rows="10"></textarea></label>
+                  <button class="save-button" id="restoreBackup" type="button">Restore Backup</button>
+                </div>
+              </section>
+            </div>
           </div>
         </section>
 
         <section id="recordsView" class="view">
+          <div class="view-tabs" aria-label="Records tabs">
+            <button class="view-tab is-active" type="button" data-subtab-view="records" data-subtab="cases">Cases</button>
+            <button class="view-tab" type="button" data-subtab-view="records" data-subtab="warnings">Warnings</button>
+            <button class="view-tab" type="button" data-subtab-view="records" data-subtab="timeline">Timeline</button>
+          </div>
+
           <section class="panel">
             <div class="panel-header">
               <h3>Case Filters</h3>
@@ -589,7 +672,7 @@
             </div>
             <div id="savedCaseFilters" class="filter-chip-row"></div>
           </section>
-          <div class="split">
+          <div class="view-stack" data-view-subtab-group="records" data-subtab="cases">
             <section class="panel">
               <div class="panel-header">
                 <h3>Cases</h3>
@@ -609,6 +692,8 @@
                 </table>
               </div>
             </section>
+          </div>
+          <div class="view-stack hidden" data-view-subtab-group="records" data-subtab="warnings">
             <section class="panel">
               <div class="panel-header">
                 <h3>Warnings</h3>
@@ -616,12 +701,14 @@
               <div id="warningsList" class="event-list"></div>
             </section>
           </div>
-          <section class="panel">
-            <div class="panel-header">
-              <h3>Unified Timeline</h3>
-            </div>
-            <div id="timelineList" class="event-list"></div>
-          </section>
+          <div class="view-stack hidden" data-view-subtab-group="records" data-subtab="timeline">
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Unified Timeline</h3>
+              </div>
+              <div id="timelineList" class="event-list"></div>
+            </section>
+          </div>
         </section>
       </main>
     </div>
