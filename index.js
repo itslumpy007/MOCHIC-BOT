@@ -10799,6 +10799,41 @@ client.on("guildMemberAdd", async member => {
       })
     );
 
+    if (config.automod.nicknameFilterEnabled) {
+      const displayName = normalizeComparisonText(member.nickname || member.user.username || "");
+      const blockedTerm = getNicknameBlockedTerms().find(term => displayName.includes(term));
+
+      if (blockedTerm) {
+        const entry = addCase({
+          action: "automod:nickname",
+          targetId: member.user.id,
+          targetTag: member.user.tag,
+          moderatorTag: "AutoMod",
+          reason: `Nickname matched blocked term "${blockedTerm}" on join.`
+        });
+        recordAutoModAnalytics("nickname", `Nickname matched blocked term "${blockedTerm}" on join.`, member.user.tag);
+
+        const kickReason = `Nickname matched blocked term "${blockedTerm}" on join.`;
+        const kickApplied = member.kickable ? await member.kick(kickReason).then(() => true).catch(() => false) : false;
+
+        await logAutoModEmbed(
+          makeEmbed({
+            title: `Auto mod case #${entry.id}`,
+            description: kickApplied
+              ? `${member.user.tag} matched the nickname filter on join and was kicked.`
+              : `${member.user.tag} matched the nickname filter on join, but I could not kick them.`,
+            color: COLORS.red,
+            fields: [
+              ...buildCaseFields(entry),
+              { name: "Action", value: kickApplied ? "Kicked from server" : "Kick failed", inline: true }
+            ]
+          })
+        );
+      }
+
+      if (blockedTerm) return;
+    }
+
     const unverifiedRoleId = getUnverifiedRoleId();
     if (!member.user.bot && unverifiedRoleId) {
       await member.roles.add(unverifiedRoleId, "TikTok verification: join default unverified role").catch(() => {});
@@ -10817,31 +10852,6 @@ client.on("guildMemberAdd", async member => {
             title: "Verified",
             description: `You're verified as @${getTikTokHandle()}. You should now be able to see the server.`,
             color: COLORS.mint
-          })
-        );
-      }
-    }
-
-    if (config.automod.nicknameFilterEnabled) {
-      const displayName = normalizeComparisonText(member.nickname || member.user.username || "");
-      const blockedTerm = getNicknameBlockedTerms().find(term => displayName.includes(term));
-
-      if (blockedTerm) {
-        const entry = addCase({
-          action: "automod:nickname",
-          targetId: member.user.id,
-          targetTag: member.user.tag,
-          moderatorTag: "AutoMod",
-          reason: `Nickname matched blocked term "${blockedTerm}" on join.`
-        });
-        recordAutoModAnalytics("nickname", `Nickname matched blocked term "${blockedTerm}" on join.`, member.user.tag);
-
-        await logAutoModEmbed(
-          makeEmbed({
-            title: `Auto mod case #${entry.id}`,
-            description: `${member.user.tag} matched the nickname filter on join.`,
-            color: COLORS.red,
-            fields: buildCaseFields(entry)
           })
         );
       }
@@ -10890,12 +10900,20 @@ client.on("guildMemberUpdate", async (oldMember, newMember) => {
     });
     recordAutoModAnalytics("nickname", `Nickname matched blocked term "${blockedTerm}".`, newMember.user.tag);
 
+    const kickReason = `Nickname matched blocked term "${blockedTerm}".`;
+    const kickApplied = newMember.kickable ? await newMember.kick(kickReason).then(() => true).catch(() => false) : false;
+
     await logAutoModEmbed(
       makeEmbed({
         title: `Auto mod case #${entry.id}`,
-        description: `${newMember.user.tag} matched the nickname filter.`,
+        description: kickApplied
+          ? `${newMember.user.tag} matched the nickname filter and was kicked.`
+          : `${newMember.user.tag} matched the nickname filter, but I could not kick them.`,
         color: COLORS.red,
-        fields: buildCaseFields(entry)
+        fields: [
+          ...buildCaseFields(entry),
+          { name: "Action", value: kickApplied ? "Kicked from server" : "Kick failed", inline: true }
+        ]
       })
     );
   } catch (error) {
