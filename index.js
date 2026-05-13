@@ -170,6 +170,7 @@ function createDefaultConfig() {
       { label: "Harassment", category: "harassment", action: "warn", duration: "", reason: "Harassment or targeted insults are not allowed." },
       { label: "Scam link", category: "scam", action: "timeout", duration: "1h", reason: "Suspicious or scam links are not allowed." }
     ],
+    webAccounts: [],
     channelProfiles: "",
     reportSettings: {
       enabled: false,
@@ -476,6 +477,9 @@ function loadConfig() {
       appeals: Array.isArray(parsed.appeals) ? parsed.appeals : [],
       auditLog: Array.isArray(parsed.auditLog) ? parsed.auditLog.slice(-200) : [],
       modTemplates: Array.isArray(parsed.modTemplates) ? parsed.modTemplates : defaults.modTemplates,
+      webAccounts: Array.isArray(parsed.webAccounts)
+        ? parsed.webAccounts.map(entry => sanitizeWebAccountRecord(entry)).filter(Boolean)
+        : [],
       channelProfiles: typeof parsed.channelProfiles === "string" ? parsed.channelProfiles : "",
       reportSettings: {
         ...defaults.reportSettings,
@@ -585,6 +589,169 @@ function getAutoModLogChannelId() {
 
 function getMutedRoleId() {
   return config.settings.mutedRoleId || null;
+}
+
+function normalizeWebLoginUsername(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, "");
+}
+
+function normalizeWebAccessLevel(value) {
+  return String(value || "").trim().toLowerCase() === "admin" ? "admin" : "mod";
+}
+
+function normalizeWebDiscordId(value) {
+  return String(value || "").trim().replace(/[<@!>]/g, "") || null;
+}
+
+function sanitizeWebAccountRecord(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  const username = String(entry.username || "").trim();
+  if (!username) return null;
+
+  return {
+    username,
+    usernameLower: normalizeWebLoginUsername(username),
+    accessLevel: normalizeWebAccessLevel(entry.accessLevel),
+    discordUserId: normalizeWebDiscordId(entry.discordUserId),
+    enabled: entry.enabled !== false,
+    passwordHash: typeof entry.passwordHash === "string" ? entry.passwordHash : "",
+    createdAt: typeof entry.createdAt === "string" ? entry.createdAt : new Date().toISOString(),
+    updatedAt: typeof entry.updatedAt === "string" ? entry.updatedAt : new Date().toISOString(),
+    lastLoginAt: typeof entry.lastLoginAt === "string" ? entry.lastLoginAt : null,
+    lastLoginMode: typeof entry.lastLoginMode === "string" ? entry.lastLoginMode : null
+  };
+}
+
+function getWebAccounts() {
+  if (!Array.isArray(config.webAccounts)) {
+    config.webAccounts = [];
+  }
+  config.webAccounts = config.webAccounts.map(entry => sanitizeWebAccountRecord(entry)).filter(Boolean);
+  return config.webAccounts;
+}
+
+function getWebAccountByUsername(username) {
+  const normalized = normalizeWebLoginUsername(username);
+  if (!normalized) return null;
+  return getWebAccounts().find(account => account.usernameLower === normalized) || null;
+}
+
+function getWebAccountByDiscordId(discordUserId) {
+  const normalized = normalizeWebDiscordId(discordUserId);
+  if (!normalized) return null;
+  return getWebAccounts().find(account => account.discordUserId === normalized) || null;
+}
+
+function hashWebAccountPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
+  const iterations = 120000;
+  const digest = crypto.pbkdf2Sync(String(password || ""), salt, iterations, 32, "sha256").toString("hex");
+  return `pbkdf2$sha256$${iterations}$${salt}$${digest}`;
+}
+
+function verifyWebAccountPassword(password, passwordHash) {
+  const parts = String(passwordHash || "").split("$");
+  if (parts.length !== 5 || parts[0] !== "pbkdf2" || parts[1] !== "sha256") return false;
+
+  const iterations = Number(parts[2]);
+  const salt = parts[3];
+  const expected = parts[4];
+  if (!Number.isInteger(iterations) || !salt || !expected) return false;
+
+  const actual = crypto.pbkdf2Sync(String(password || ""), salt, iterations, Buffer.from(expected, "hex").length, "sha256").toString("hex");
+  const expectedBuffer = Buffer.from(expected, "hex");
+  const actualBuffer = Buffer.from(actual, "hex");
+  if (expectedBuffer.length !== actualBuffer.length) return false;
+  return crypto.timingSafeEqual(expectedBuffer, actualBuffer);
+}
+
+function serializeWebAccount(account) {
+  return {
+    username: account.username,
+    accessLevel: account.accessLevel,
+    discordUserId: account.discordUserId,
+    enabled: account.enabled,
+    hasPassword: Boolean(account.passwordHash),
+    createdAt: account.createdAt,
+    updatedAt: account.updatedAt,
+    lastLoginAt: account.lastLoginAt,
+    lastLoginMode: account.lastLoginMode
+  };
+}
+
+function serializeWebAccounts() {
+  return getWebAccounts().map(account => serializeWebAccount(account));
+}
+
+function upsertWebAccount(input) {
+  const username = String(input?.username || "").trim();
+  const normalizedUsername = normalizeWebLoginUsername(username);
+  if (!normalizedUsername) {
+    throw new Error("Username is required.");
+  }
+
+  const accessLevel = normalizeWebAccessLevel(input?.accessLevel);
+  const enabled = input?.enabled !== false;
+  const discordUserId = normalizeWebDiscordId(input?.discordUserId);
+  const password = String(input?.password || "").trim();
+  const originalUsername = normalizeWebLoginUsername(input?.originalUsername);
+  const existing = originalUsername
+    ? getWebAccountByUsername(originalUsername)
+    : getWebAccountByUsername(username);
+
+  if ((!existing || !existing.passwordHash) && !password) {
+    throw new Error("Set a password for new web accounts.");
+  }
+
+  if (discordUserId) {
+    const duplicate = getWebAccounts().find(account =>
+      account.discordUserId === discordUserId &&
+      account.usernameLower !== (existing ? existing.usernameLower : normalizedUsername)
+    );
+    if (duplicate) {
+      throw new Error(`Discord user ID is already linked to ${duplicate.username}.`);
+    }
+  }
+
+  if (existing) {
+    existing.username = username;
+    existing.usernameLower = normalizedUsername;
+    existing.accessLevel = accessLevel;
+    existing.discordUserId = discordUserId;
+    existing.enabled = enabled;
+    if (password) {
+      existing.passwordHash = hashWebAccountPassword(password);
+    }
+    existing.updatedAt = new Date().toISOString();
+    saveConfig();
+    return existing;
+  }
+
+  const account = sanitizeWebAccountRecord({
+    username,
+    accessLevel,
+    discordUserId,
+    enabled,
+    passwordHash: hashWebAccountPassword(password),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    lastLoginAt: null,
+    lastLoginMode: null
+  });
+
+  getWebAccounts().push(account);
+  saveConfig();
+  return account;
+}
+
+function deleteWebAccount(username) {
+  const normalized = normalizeWebLoginUsername(username);
+  if (!normalized) return false;
+  const accounts = getWebAccounts();
+  const index = accounts.findIndex(account => account.usernameLower === normalized);
+  if (index < 0) return false;
+  accounts.splice(index, 1);
+  saveConfig();
+  return true;
 }
 
 function getBannedWords() {
@@ -5513,12 +5680,13 @@ function verifySignedWebValue(signedValue) {
   return crypto.timingSafeEqual(expectedBuffer, signatureBuffer) ? value : null;
 }
 
-function createWebSession(user, accessLevel) {
+function createWebSession(user, accessLevel, authMode = "discord") {
   const sessionId = crypto.randomBytes(32).toString("hex");
   const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
   webSessions.set(sessionId, {
     user,
     accessLevel,
+    authMode,
     expiresAt
   });
   return sessionId;
@@ -5539,11 +5707,12 @@ function getWebSession(req) {
 function buildWebUserPayload(session = null) {
   return {
     authenticated: Boolean(session),
-    authMode: session ? "discord" : null,
+    authMode: session?.authMode || null,
     accessLevel: session?.accessLevel || null,
     user: session?.user || null,
     oauthConfigured: Boolean(DISCORD_CLIENT_SECRET && SESSION_SECRET),
-    tokenFallbackEnabled: Boolean(WEB_ADMIN_TOKEN)
+    tokenFallbackEnabled: Boolean(WEB_ADMIN_TOKEN),
+    localLoginConfigured: getWebAccounts().some(account => account.enabled && account.passwordHash)
   };
 }
 
@@ -5565,6 +5734,7 @@ function getWebAuth(req) {
     return {
       sessionId: null,
       accessLevel: "admin",
+      authMode: "token",
       user: {
         id: "token",
         username: "Admin Token",
@@ -5593,6 +5763,11 @@ async function fetchDiscordJson(url, options = {}) {
 }
 
 async function getWebDiscordAccessLevel(userId) {
+  const linkedAccount = getWebAccountByDiscordId(userId);
+  if (linkedAccount?.enabled) {
+    return linkedAccount.accessLevel;
+  }
+
   const guild = client.guilds.cache.get(GUILD_ID) || await client.guilds.fetch(GUILD_ID).catch(() => null);
   if (!guild) return null;
 
@@ -5676,7 +5851,7 @@ async function handleWebCallback(req, res, requestUrl) {
       ? `${user.username}#${user.discriminator}`
       : user.username,
     avatar: user.avatar || null
-  }, accessLevel);
+  }, accessLevel, "discord");
 
   setWebCookie(req, res, "mochi_session", createSignedWebValue(sessionId), 7 * 24 * 60 * 60);
   redirectWeb(res, "/");
@@ -5689,6 +5864,44 @@ function handleWebLogout(req, res) {
   }
   clearWebCookie(req, res, "mochi_session");
   redirectWeb(res, "/");
+}
+
+async function handleWebLocalLogin(req, res) {
+  if (req.method !== "POST") {
+    return sendWebText(res, 405, "Method not allowed.");
+  }
+
+  if (!SESSION_SECRET) {
+    return sendWebText(res, 503, "Web sessions are not configured.");
+  }
+
+  const body = await readWebJsonBody(req);
+  const username = normalizeWebLoginUsername(body.username);
+  const password = String(body.password || "");
+  const account = getWebAccountByUsername(username);
+
+  if (!account || !account.enabled || !account.passwordHash || !verifyWebAccountPassword(password, account.passwordHash)) {
+    return sendWebJson(res, 401, { error: "Invalid username or password." });
+  }
+
+  account.lastLoginAt = new Date().toISOString();
+  account.lastLoginMode = "password";
+  account.updatedAt = account.lastLoginAt;
+  saveConfig();
+
+  const sessionId = createWebSession({
+    id: `local:${account.usernameLower}`,
+    username: account.username,
+    globalName: account.username,
+    tag: account.username,
+    avatar: null
+  }, account.accessLevel, "local");
+
+  setWebCookie(req, res, "mochi_session", createSignedWebValue(sessionId), 7 * 24 * 60 * 60);
+  return sendWebJson(res, 200, {
+    ok: true,
+    user: serializeWebAccount(account)
+  });
 }
 
 function readWebJsonBody(req) {
@@ -6882,6 +7095,14 @@ async function handleWebApi(req, res, pathname) {
     return sendWebJson(res, 200, buildWebConfigPayload());
   }
 
+  if (req.method === "GET" && pathname === "/api/web-accounts") {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
+
+    return sendWebJson(res, 200, { accounts: serializeWebAccounts() });
+  }
+
   if (req.method === "GET" && pathname === "/api/ops") {
     return sendWebJson(res, 200, buildWebOpsPayload(hasWebAccess(auth, "admin")));
   }
@@ -6964,6 +7185,43 @@ async function handleWebApi(req, res, pathname) {
       channelId: result.channelId,
       messageId: result.id
     });
+  }
+
+  if (req.method === "POST" && pathname === "/api/web-accounts") {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
+
+    const body = await readWebJsonBody(req);
+    const action = String(body.action || "upsert").trim().toLowerCase();
+
+    if (action === "delete") {
+      const deleted = deleteWebAccount(body.username);
+      if (!deleted) {
+        return sendWebJson(res, 404, { error: "That web account was not found." });
+      }
+
+      recordAuditLog(getWebModeratorTag(auth), "web-account-deleted", {
+        username: String(body.username || "").trim()
+      });
+      return sendWebJson(res, 200, { ok: true, accounts: serializeWebAccounts() });
+    }
+
+    const account = upsertWebAccount({
+      username: body.username,
+      password: body.password,
+      accessLevel: body.accessLevel,
+      discordUserId: body.discordUserId,
+      enabled: body.enabled !== false
+    });
+
+    recordAuditLog(getWebModeratorTag(auth), "web-account-upserted", {
+      username: account.username,
+      accessLevel: account.accessLevel,
+      linkedDiscord: Boolean(account.discordUserId)
+    });
+
+    return sendWebJson(res, 200, { ok: true, account: serializeWebAccount(account), accounts: serializeWebAccounts() });
   }
 
   if (req.method === "GET" && pathname === "/api/member") {
@@ -7204,6 +7462,13 @@ function startWebServer() {
 
     if (pathname === "/auth/login") {
       handleWebLogin(req, res);
+      return;
+    }
+
+    if (pathname === "/auth/local/login") {
+      handleWebLocalLogin(req, res).catch(error => {
+        sendWebJson(res, 400, { error: error.message || "Local login failed." });
+      });
       return;
     }
 

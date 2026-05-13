@@ -21,6 +21,16 @@
           <h2>Sign in to continue</h2>
         </div>
         <a class="discord-login" href="/auth/login">Login with Discord</a>
+        <div class="login-divider"><span>Personal login</span></div>
+        <div class="login-fields">
+          <label for="localUsernameInput">Username</label>
+          <input id="localUsernameInput" type="text" autocomplete="username" placeholder="yourname">
+          <label for="localPasswordInput">Password</label>
+          <div class="token-row">
+            <input id="localPasswordInput" type="password" autocomplete="current-password" placeholder="Password">
+            <button id="localLoginButton" type="button">Sign in</button>
+          </div>
+        </div>
         <div class="login-divider"><span>Backup access</span></div>
         <label for="loginTokenInput">Admin token</label>
         <div class="token-row">
@@ -352,6 +362,45 @@
             </div>
             <p class="panel-note">Set the main server channels here.</p>
             <div class="form-grid" id="generalSettingsFields"></div>
+          </section>
+
+          <section class="panel" data-required-access="admin">
+            <div class="panel-header">
+              <h3>Web Accounts</h3>
+              <button class="save-button" id="saveWebAccountButton" type="button">Save Account</button>
+            </div>
+            <p class="panel-note">Create personal logins for the web panel. You can use Discord, a password, or both for the same staff member.</p>
+            <div class="split">
+              <section class="panel">
+                <div class="panel-header">
+                  <h3>Account Editor</h3>
+                  <div class="button-row">
+                    <button class="ghost-button" id="clearWebAccountForm" type="button">Clear</button>
+                    <button class="ghost-button" id="deleteWebAccountButton" type="button">Delete</button>
+                  </div>
+                </div>
+                <div class="form-grid">
+                  <label>Username<input id="webAccountUsername" placeholder="staff name"></label>
+                  <label>Access level
+                    <select id="webAccountAccessLevel">
+                      <option value="mod">Moderator</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </label>
+                  <label>Discord user ID<input id="webAccountDiscordUserId" placeholder="Optional Discord ID"></label>
+                  <label>Password<input id="webAccountPassword" type="password" placeholder="Set or change password"></label>
+                </div>
+                <div class="button-row">
+                  <button class="ghost-button" id="generateWebPasswordButton" type="button">Generate Password</button>
+                </div>
+              </section>
+              <section class="panel">
+                <div class="panel-header">
+                  <h3>Accounts</h3>
+                </div>
+                <div id="webAccountsList" class="event-list"></div>
+              </section>
+            </div>
           </section>
 
           <section class="panel">

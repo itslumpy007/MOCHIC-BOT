@@ -14,6 +14,8 @@ const state = {
   cases: [],
   warnings: {},
   notes: {},
+  webAccounts: [],
+  webAccountEditing: null,
   templateEditorDrafts: [],
   templateEditorIndex: 0
 };
@@ -657,6 +659,14 @@ function setLoginVisible(visible, message = "") {
   if (message) $("#loginStatus").textContent = message;
 }
 
+function fillWebAccountForm(account = null) {
+  state.webAccountEditing = account ? account.username : null;
+  $("#webAccountUsername").value = account?.username || "";
+  $("#webAccountAccessLevel").value = account?.accessLevel || "mod";
+  $("#webAccountDiscordUserId").value = account?.discordUserId || "";
+  $("#webAccountPassword").value = "";
+}
+
 function updateAuthPanel() {
   const me = state.me || {};
   const user = me.user;
@@ -664,16 +674,21 @@ function updateAuthPanel() {
   const logoutLink = $("#logoutLink");
 
   if (me.authenticated && user) {
-    signedInUser.textContent = `${user.tag || user.username} - ${me.accessLevel} access`;
+    const methodLabel = me.authMode === "local" ? "personal login" : me.authMode === "token" ? "backup token" : "Discord";
+    signedInUser.textContent = `${user.tag || user.username} - ${me.accessLevel} access via ${methodLabel}`;
     logoutLink.classList.remove("hidden");
   } else if (state.token) {
     signedInUser.textContent = "Token access active";
     logoutLink.classList.add("hidden");
-  } else if (me.oauthConfigured) {
-    signedInUser.textContent = "Use Discord login for staff access.";
+  } else if (me.oauthConfigured || me.localLoginConfigured) {
+    signedInUser.textContent = me.oauthConfigured && me.localLoginConfigured
+      ? "Use Discord or your personal login."
+      : me.oauthConfigured
+        ? "Use Discord login for staff access."
+        : "Use your personal login for staff access.";
     logoutLink.classList.add("hidden");
   } else {
-    signedInUser.textContent = "Discord login is not configured yet.";
+    signedInUser.textContent = "Login options are not configured yet.";
     logoutLink.classList.add("hidden");
   }
 }
@@ -1259,6 +1274,40 @@ function renderSettings() {
   $("#exemptChannelIds").value = (automod.exemptChannelIds || []).join(", ");
   $("#exemptRoleIds").value = (automod.exemptRoleIds || []).join(", ");
   $("#exemptUserIds").value = (automod.exemptUserIds || []).join(", ");
+  renderWebAccounts();
+}
+
+function renderWebAccounts() {
+  const accounts = Array.isArray(state.webAccounts) ? state.webAccounts : [];
+  const list = $("#webAccountsList");
+  if (!list) return;
+
+  if (!hasPanelAccess("admin")) {
+    list.innerHTML = renderEmptyState("Admins only", "Web accounts are visible to admins.");
+    return;
+  }
+
+  if (!accounts.length) {
+    list.innerHTML = renderEmptyState("No web accounts", "Create the first personal login above.");
+    return;
+  }
+
+  list.innerHTML = accounts
+    .map(account => `
+      <article class="event">
+        <strong>${escapeHtml(account.username)} <span class="badge">${escapeHtml(account.accessLevel)}</span>${account.enabled ? "" : ' <span class="badge">Disabled</span>'}</strong>
+        <p>
+          Discord: ${account.discordUserId ? escapeHtml(account.discordUserId) : "Not linked"}<br>
+          Password: ${account.hasPassword ? "Set" : "Missing"}<br>
+          Last login: ${account.lastLoginAt ? escapeHtml(formatDate(account.lastLoginAt)) : "Never"}<br>
+          Login method: ${account.lastLoginMode || "None"}
+        </p>
+        <div class="button-row">
+          <button class="ghost-button" type="button" data-web-account-edit="${escapeHtml(account.username)}">Edit</button>
+        </div>
+      </article>
+    `)
+    .join("");
 }
 
 function collectSettingsPayload() {
@@ -2129,18 +2178,32 @@ async function loadAll() {
 
     if (!state.me.authenticated && !state.token) {
       updateApiState("Login required");
-      setLoginVisible(true, state.me.oauthConfigured ? "Login with Discord or use the backup admin token." : "Enter the backup admin token to load the dashboard.");
+      const loginMessage = state.me.oauthConfigured && state.me.localLoginConfigured
+        ? "Login with Discord, your personal account, or the backup admin token."
+        : state.me.oauthConfigured
+          ? "Login with Discord or use the backup admin token."
+          : state.me.localLoginConfigured
+            ? "Use your personal login or the backup admin token."
+            : "Enter the backup admin token to load the dashboard.";
+      setLoginVisible(true, loginMessage);
       return;
     }
 
-    const [dashboard, config, casesPayload, warningsPayload, notesPayload, opsPayload] = await Promise.all([
+    const requests = [
       api("/api/dashboard"),
       api("/api/config"),
       api("/api/cases"),
       api("/api/warnings"),
       api("/api/notes"),
       api("/api/ops")
-    ]);
+    ];
+    const wantsAdminData = hasPanelAccess("admin");
+    if (wantsAdminData) {
+      requests.push(api("/api/web-accounts"));
+    }
+
+    const results = await Promise.all(requests);
+    const [dashboard, config, casesPayload, warningsPayload, notesPayload, opsPayload, webAccountsPayload] = results;
 
     state.dashboard = dashboard;
     state.config = config;
@@ -2149,6 +2212,7 @@ async function loadAll() {
     state.warnings = warningsPayload.warnings || {};
     state.notes = notesPayload.notes || {};
     state.ops = opsPayload;
+    state.webAccounts = webAccountsPayload?.accounts || [];
     applyAccessRestrictions();
     renderAll();
     applyAccessRestrictions();
@@ -2312,6 +2376,86 @@ async function saveSettings() {
   });
   state.config.settings = result.settings;
   await loadAll();
+}
+
+function generateWebPassword(length = 18) {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%*?";
+  const bytes = new Uint32Array(length);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, value => alphabet[value % alphabet.length]).join("");
+}
+
+async function loginLocalAccount() {
+  const username = $("#localUsernameInput").value.trim();
+  const password = $("#localPasswordInput").value;
+
+  if (!username || !password) {
+    setAlert("Enter your username and password.", "error");
+    return;
+  }
+
+  await api("/auth/local/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password })
+  });
+
+  $("#localPasswordInput").value = "";
+  await loadAll();
+}
+
+async function saveWebAccount() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to manage web accounts.", "error");
+    return;
+  }
+
+  const username = $("#webAccountUsername").value.trim();
+  const password = $("#webAccountPassword").value;
+  const payload = {
+    action: "upsert",
+    originalUsername: state.webAccountEditing || "",
+    username,
+    accessLevel: $("#webAccountAccessLevel").value,
+    discordUserId: $("#webAccountDiscordUserId").value.trim(),
+    password
+  };
+
+  const result = await api("/api/web-accounts", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+
+  state.webAccounts = result.accounts || state.webAccounts;
+  fillWebAccountForm(null);
+  await loadAll();
+  setAlert(`Saved web account for ${username}.`);
+}
+
+async function deleteWebAccount() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to manage web accounts.", "error");
+    return;
+  }
+
+  const username = $("#webAccountUsername").value.trim() || state.webAccountEditing;
+  if (!username) {
+    setAlert("Choose a web account first.", "error");
+    return;
+  }
+
+  if (!confirmDangerousAction("Delete web account?", `This removes ${username}'s personal login.`)) {
+    return;
+  }
+
+  const result = await api("/api/web-accounts", {
+    method: "POST",
+    body: JSON.stringify({ action: "delete", username })
+  });
+
+  state.webAccounts = result.accounts || state.webAccounts;
+  fillWebAccountForm(null);
+  await loadAll();
+  setAlert(`Deleted web account ${username}.`);
 }
 
 async function postAffirmationsPanel() {
@@ -2497,10 +2641,23 @@ function bindEvents() {
     localStorage.setItem("mochiAdminToken", state.token);
     loadAll();
   });
+  $("#localLoginButton").addEventListener("click", () => loginLocalAccount().catch(error => setAlert(error.message, "error")));
   $("#loginTokenInput").addEventListener("keydown", event => {
     if (event.key === "Enter") {
       event.preventDefault();
       $("#loginSaveToken").click();
+    }
+  });
+  $("#localUsernameInput").addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      $("#localLoginButton").click();
+    }
+  });
+  $("#localPasswordInput").addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      $("#localLoginButton").click();
     }
   });
 
@@ -2508,6 +2665,21 @@ function bindEvents() {
   $("#saveAutomod").addEventListener("click", () => saveAutomod().catch(error => setAlert(error.message, "error")));
   $("#syncGoogleBlockListButton").addEventListener("click", () => syncGoogleBlockList().catch(error => setAlert(error.message, "error")));
   $("#saveSettings").addEventListener("click", () => saveSettings().catch(error => setAlert(error.message, "error")));
+  $("#saveWebAccountButton").addEventListener("click", () => saveWebAccount().catch(error => setAlert(error.message, "error")));
+  $("#deleteWebAccountButton").addEventListener("click", () => deleteWebAccount().catch(error => setAlert(error.message, "error")));
+  $("#generateWebPasswordButton").addEventListener("click", () => {
+    $("#webAccountPassword").value = generateWebPassword();
+    $("#webAccountPassword").focus();
+  });
+  $("#clearWebAccountForm").addEventListener("click", () => fillWebAccountForm(null));
+  $("#webAccountsList").addEventListener("click", event => {
+    const button = event.target.closest("[data-web-account-edit]");
+    if (!button) return;
+    const account = (state.webAccounts || []).find(item => item.username === button.dataset.webAccountEdit);
+    if (account) {
+      fillWebAccountForm(account);
+    }
+  });
   $("#postAffirmationsPanel").addEventListener("click", () => postAffirmationsPanel().catch(error => setAlert(error.message, "error")));
   $("#saveAndPostTikTokVerify").addEventListener("click", () => saveAndPostTikTokVerify().catch(error => setAlert(error.message, "error")));
   $("#lockVerifiedCurrent").addEventListener("click", () => setVerifiedVisibility(true, "current").catch(error => setAlert(error.message, "error")));
