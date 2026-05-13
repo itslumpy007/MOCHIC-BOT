@@ -393,6 +393,32 @@ textarea {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.workspace-select,
+.global-search {
+  width: auto;
+  min-width: 140px;
+  border-radius: 999px;
+  padding: 10px 14px;
+}
+
+.global-search {
+  min-width: 190px;
+}
+
+.mobile-only {
+  display: none;
+}
+
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 12;
+  background: rgba(38, 20, 34, 0.34);
+  backdrop-filter: blur(2px);
 }
 
 .button-row {
@@ -1166,16 +1192,54 @@ tbody tr:hover td {
     align-items: flex-start;
     flex-direction: column;
   }
+
+  .topbar-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .workspace-select,
+  .global-search {
+    flex: 1 1 160px;
+  }
 }
 
 @media (max-width: 760px) {
+  .mobile-only {
+    display: inline-flex;
+  }
+
+  .sidebar-backdrop {
+    display: none;
+  }
+
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
   body {
     font-size: 14px;
   }
 
   .sidebar {
+    position: fixed;
+    z-index: 20;
+    left: 0;
+    top: 0;
+    width: min(300px, 86vw);
+    height: 100vh;
     gap: 18px;
     padding: 16px;
+    transform: translateX(-105%);
+    transition: transform 180ms ease;
+  }
+
+  body.sidebar-open .sidebar {
+    transform: translateX(0);
+  }
+
+  body.sidebar-open .sidebar-backdrop {
+    display: block;
   }
 
   .brand {

@@ -33,6 +33,9 @@ const titles = {
 const storageKeys = {
   activeView: "mochiActiveView",
   advancedToolsVisible: "mochiAdvancedToolsVisible",
+  themePreset: "mochiThemePreset",
+  sidebarOpen: "mochiSidebarOpen",
+  workspacePreset: "mochiWorkspacePreset",
   caseFilters: "mochiCaseFilters",
   savedCaseFilters: "mochiSavedCaseFilters",
   lastMemberSearch: "mochiLastMemberSearch",
@@ -55,6 +58,97 @@ const subtabDefaults = {
   staff: "access",
   ops: "templates",
   records: "cases"
+};
+
+const themePresets = {
+  pastel: {
+    bg: "#fff7fb",
+    bgAlt: "#f5fbff",
+    surface: "rgba(255, 255, 255, 0.88)",
+    surfaceStrong: "rgba(255, 255, 255, 0.96)",
+    surfaceSoft: "#fff0f7",
+    surfaceWarm: "#fffaf4",
+    line: "rgba(230, 211, 225, 0.96)",
+    lineStrong: "rgba(217, 106, 160, 0.26)",
+    text: "#2b2634",
+    muted: "#766682",
+    mutedSoft: "#a08fb0",
+    accent: "#d96aa0",
+    accentDark: "#c04f88",
+    accentSoft: "#fde4ef",
+    mint: "#5fae9f",
+    blue: "#6f85f7",
+    yellow: "#c98a2a",
+    red: "#d8636f",
+    shadow: "0 18px 42px rgba(117, 69, 99, 0.12)",
+    shadowSoft: "0 10px 28px rgba(117, 69, 99, 0.08)"
+  },
+  ocean: {
+    bg: "#f4fbff",
+    bgAlt: "#eef7ff",
+    surface: "rgba(255, 255, 255, 0.88)",
+    surfaceStrong: "rgba(255, 255, 255, 0.96)",
+    surfaceSoft: "#eaf7ff",
+    surfaceWarm: "#f3fbff",
+    line: "rgba(194, 224, 245, 0.96)",
+    lineStrong: "rgba(68, 131, 190, 0.22)",
+    text: "#203447",
+    muted: "#5d7488",
+    mutedSoft: "#8aa3ba",
+    accent: "#4c8fc7",
+    accentDark: "#2f78b4",
+    accentSoft: "#dff2ff",
+    mint: "#4db2a3",
+    blue: "#3f7ff0",
+    yellow: "#c98a2a",
+    red: "#d8636f",
+    shadow: "0 18px 42px rgba(66, 109, 144, 0.12)",
+    shadowSoft: "0 10px 28px rgba(66, 109, 144, 0.08)"
+  },
+  cherry: {
+    bg: "#fff6f6",
+    bgAlt: "#fff0f4",
+    surface: "rgba(255, 255, 255, 0.9)",
+    surfaceStrong: "rgba(255, 255, 255, 0.97)",
+    surfaceSoft: "#fff0f3",
+    surfaceWarm: "#fff8f6",
+    line: "rgba(238, 205, 210, 0.96)",
+    lineStrong: "rgba(206, 88, 111, 0.25)",
+    text: "#34242a",
+    muted: "#7a5b63",
+    mutedSoft: "#a78a91",
+    accent: "#d65773",
+    accentDark: "#ba3f5d",
+    accentSoft: "#ffe1e8",
+    mint: "#5cae93",
+    blue: "#7182f4",
+    yellow: "#c98a2a",
+    red: "#d8636f",
+    shadow: "0 18px 42px rgba(147, 81, 94, 0.12)",
+    shadowSoft: "0 10px 28px rgba(147, 81, 94, 0.08)"
+  },
+  lavender: {
+    bg: "#fbf8ff",
+    bgAlt: "#f6f3ff",
+    surface: "rgba(255, 255, 255, 0.88)",
+    surfaceStrong: "rgba(255, 255, 255, 0.96)",
+    surfaceSoft: "#f2edff",
+    surfaceWarm: "#fcf8ff",
+    line: "rgba(225, 215, 244, 0.96)",
+    lineStrong: "rgba(143, 112, 224, 0.22)",
+    text: "#2f2942",
+    muted: "#6f668a",
+    mutedSoft: "#9a91b2",
+    accent: "#8c6ad9",
+    accentDark: "#7151ba",
+    accentSoft: "#ece4ff",
+    mint: "#5eae9f",
+    blue: "#6f85f7",
+    yellow: "#c98a2a",
+    red: "#d8636f",
+    shadow: "0 18px 42px rgba(122, 103, 166, 0.12)",
+    shadowSoft: "0 10px 28px rgba(122, 103, 166, 0.08)"
+  }
 };
 
 const automodSwitchLabels = {
@@ -445,6 +539,54 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
+function applyThemePreset(theme) {
+  const selected = themePresets[theme] ? theme : "pastel";
+  const preset = themePresets[selected];
+  document.body.dataset.theme = selected;
+  Object.entries(preset).forEach(([key, value]) => {
+    const cssKey = `--${key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}`;
+    document.documentElement.style.setProperty(cssKey, value);
+  });
+  localStorage.setItem(storageKeys.themePreset, selected);
+  const themeSelect = $("#themeSelect");
+  if (themeSelect && themeSelect.value !== selected) {
+    themeSelect.value = selected;
+  }
+}
+
+function setSidebarOpen(open) {
+  const next = Boolean(open);
+  document.body.classList.toggle("sidebar-open", next);
+  localStorage.setItem(storageKeys.sidebarOpen, next ? "true" : "false");
+  const toggle = $("#sidebarToggle");
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", next ? "true" : "false");
+  }
+}
+
+function syncWorkspacePreset(preset) {
+  const selected = preset || "auto";
+  localStorage.setItem(storageKeys.workspacePreset, selected);
+  const workspaceSelect = $("#workspaceSelect");
+  if (workspaceSelect && workspaceSelect.value !== selected) {
+    workspaceSelect.value = selected;
+  }
+
+  if (selected === "home") {
+    setActiveView("overview");
+    setActiveSubtab("overview", "summary");
+  } else if (selected === "moderation") {
+    setActiveView("members");
+    setActiveSubtab("members", "moderation");
+  } else if (selected === "admin") {
+    setActiveView("settings");
+    setActiveSubtab("settings", "accounts");
+  } else if (selected === "audit") {
+    setActiveView("ops");
+    setActiveSubtab("ops", "audit");
+  }
+}
+
 function setAlert(message, kind = "info") {
   const alert = $("#alert");
   alert.textContent = message;
@@ -603,6 +745,9 @@ function setActiveView(view) {
   $("#viewTitle").textContent = titles[nextView];
   localStorage.setItem(storageKeys.activeView, nextView);
   updateViewSubtabs(nextView);
+  if (window.matchMedia("(max-width: 980px)").matches) {
+    setSidebarOpen(false);
+  }
 }
 
 function getSubtabStorageKey(view) {
@@ -677,6 +822,8 @@ function applyAccessRestrictions() {
   if (!advancedVisible && advancedViews.has(localStorage.getItem(storageKeys.activeView))) {
     localStorage.setItem(storageKeys.activeView, getDefaultView());
   }
+
+  updateViewSubtabs(localStorage.getItem(storageKeys.activeView) || getDefaultView());
 }
 
 function restorePanelMemory() {
@@ -688,8 +835,15 @@ function restorePanelMemory() {
   $("#memberAction").value = localStorage.getItem(storageKeys.memberAction) || "warn";
   $("#memberActionDuration").value = localStorage.getItem(storageKeys.memberDuration) || "";
   $("#timelineSearchInput").value = localStorage.getItem(storageKeys.timelineSearch) || "";
+  applyThemePreset(localStorage.getItem(storageKeys.themePreset) || "pastel");
+  setSidebarOpen(localStorage.getItem(storageKeys.sidebarOpen) === "true");
   updateAdvancedToolsVisibility();
-  setActiveView(localStorage.getItem(storageKeys.activeView) || "overview");
+  const workspacePreset = localStorage.getItem(storageKeys.workspacePreset) || "auto";
+  if (workspacePreset && workspacePreset !== "auto") {
+    syncWorkspacePreset(workspacePreset);
+  } else {
+    setActiveView(localStorage.getItem(storageKeys.activeView) || "overview");
+  }
 }
 
 function persistCaseFilters() {
@@ -916,6 +1070,49 @@ function renderPanelChanges() {
     : renderEmptyState("No panel changes", "Recent web panel edits will appear here.");
 }
 
+function renderActivityStream() {
+  const recentActions = getRecentActions().map(item => ({
+    kind: "moderation",
+    title: item.action || "Moderation action",
+    detail: [item.userTag || item.userId || "Unknown", item.reason || "No reason"].filter(Boolean).join(" - "),
+    createdAt: item.createdAt || null
+  }));
+  const panelChanges = (state.dashboard?.panelChanges || []).map(item => ({
+    kind: "panel",
+    title: item.action || "Panel change",
+    detail: JSON.stringify(item.details || {}),
+    createdAt: item.createdAt || null,
+    actorTag: item.actorTag || "System"
+  }));
+  const recentViolations = (state.dashboard?.analytics?.recentViolations || []).map(item => ({
+    kind: "automod",
+    title: item.action || "AutoMod",
+    detail: item.reason || "No reason",
+    createdAt: item.createdAt || null,
+    actorTag: item.userTag || ""
+  }));
+  const appeals = (state.ops?.appeals || []).slice(-5).reverse().map(item => ({
+    kind: "appeal",
+    title: `Appeal ${item.status || "open"}`,
+    detail: `${item.userTag || item.userId || "Unknown"} - ${item.reason || "No reason"}`,
+    createdAt: item.createdAt || null,
+    actorTag: item.createdBy || ""
+  }));
+
+  const items = [...panelChanges, ...recentViolations, ...recentActions, ...appeals]
+    .sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
+    .slice(0, 12);
+
+  $("#activityStream").innerHTML = items.length
+    ? items.map(item => `
+      <article class="event">
+        <strong>${escapeHtml(item.title)} <span class="badge">${escapeHtml(item.kind)}</span></strong>
+        <p>${escapeHtml(item.actorTag || formatDate(item.createdAt) || "Recent")}<br>${escapeHtml(item.detail || "")}</p>
+      </article>
+    `).join("")
+    : renderEmptyState("No recent activity", "Panel changes, moderation actions, and alerts will appear here.");
+}
+
 function renderWorkloadSummary() {
   const openAiReviews = (state.cases || []).filter(entry => entry.action === "automod:ai-review" && !state.aiReviews[String(entry.id)]).length;
   const openAppeals = (state.ops?.appeals || []).filter(appeal => ["open", "reviewed"].includes(String(appeal.status || "open").toLowerCase())).length;
@@ -1020,11 +1217,11 @@ function renderCommandPaletteList(query = "") {
     : renderEmptyState("No matches", "Try a different search.");
 }
 
-function openCommandPalette() {
+function openCommandPalette(initialQuery = "") {
   $("#commandPalette").classList.remove("hidden");
   const input = $("#commandPaletteInput");
-  input.value = "";
-  renderCommandPaletteList("");
+  input.value = initialQuery;
+  renderCommandPaletteList(initialQuery);
   input.focus();
 }
 
@@ -2264,6 +2461,7 @@ function renderAll() {
   renderMetrics();
   renderQuickActions();
   renderWorkloadSummary();
+  renderActivityStream();
   renderPanelChanges();
   renderRuntime();
   renderReactionRoleHealth();
@@ -2835,6 +3033,28 @@ function bindEvents() {
     localStorage.setItem("mochiAdminToken", state.token);
     loadAll();
   });
+  $("#themeSelect").addEventListener("change", () => {
+    applyThemePreset($("#themeSelect").value);
+  });
+  $("#workspaceSelect").addEventListener("change", () => {
+    const value = $("#workspaceSelect").value;
+    syncWorkspacePreset(value);
+  });
+  $("#sidebarToggle").addEventListener("click", () => {
+    setSidebarOpen(!document.body.classList.contains("sidebar-open"));
+  });
+  $("#sidebarBackdrop").addEventListener("click", () => setSidebarOpen(false));
+  $("#globalSearchInput").addEventListener("keydown", event => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      openCommandPalette($("#globalSearchInput").value.trim());
+    }
+  });
+  $("#globalSearchInput").addEventListener("focus", () => {
+    if (window.matchMedia("(max-width: 980px)").matches) {
+      openCommandPalette($("#globalSearchInput").value.trim());
+    }
+  });
   $("#localLoginButton").addEventListener("click", () => loginLocalAccount().catch(error => setAlert(error.message, "error")));
   $("#loginTokenInput").addEventListener("keydown", event => {
     if (event.key === "Enter") {
@@ -3084,7 +3304,7 @@ function bindEvents() {
     if (!button) return;
     runPaletteCommand(button.dataset.commandKind, button.dataset.commandValue);
   });
-  $("#commandPaletteButton").addEventListener("click", openCommandPalette);
+  $("#commandPaletteButton").addEventListener("click", () => openCommandPalette($("#globalSearchInput").value.trim()));
   $("#advancedToggle").addEventListener("click", () => {
     setAdvancedToolsVisible(!isAdvancedToolsVisible());
   });
