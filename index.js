@@ -7247,12 +7247,19 @@ client.on("messageReactionAdd", async (reaction, user) => {
     const verifyMessageId = await resolveVerifyMessageId();
     if (!verifyMessageId || reaction.message.id !== verifyMessageId) return;
 
-    const roleData = MOCHI_ROLES[reaction.emoji.name];
+    const emojiKey = reaction.emoji?.name || reaction.emoji?.id;
+    const roleData = MOCHI_ROLES[emojiKey];
     if (!roleData?.id) return;
 
     const member = await reaction.message.guild.members.fetch(user.id);
-    await member.roles.remove(ALL_ROLES.filter(id => id !== roleData.id));
-    await member.roles.add(roleData.id);
+    await member.roles.add(roleData.id, `Reaction role selected: ${roleData.name}`).catch(error => {
+      throw new Error(`Failed to add role ${roleData.name}: ${error.message}`);
+    });
+
+    for (const roleId of ALL_ROLES) {
+      if (roleId === roleData.id) continue;
+      await member.roles.remove(roleId, `Reaction role cleanup: ${roleData.name}`).catch(() => {});
+    }
 
     await logEmbed(
       makeEmbed({
@@ -7275,7 +7282,8 @@ client.on("messageReactionRemove", async (reaction, user) => {
     const verifyMessageId = await resolveVerifyMessageId();
     if (!verifyMessageId || reaction.message.id !== verifyMessageId) return;
 
-    const roleData = MOCHI_ROLES[reaction.emoji.name];
+    const emojiKey = reaction.emoji?.name || reaction.emoji?.id;
+    const roleData = MOCHI_ROLES[emojiKey];
     if (!roleData?.id) return;
 
     const member = await reaction.message.guild.members.fetch(user.id);
