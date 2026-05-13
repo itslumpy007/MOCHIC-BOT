@@ -2572,13 +2572,19 @@ async function safeSend(channelId, payload) {
 }
 
 async function resolveVerifyMessageId() {
-  if (config.verifyMessageId) return config.verifyMessageId;
   const verifyChannelId = getVerifyChannelId();
   if (!verifyChannelId) return null;
 
   try {
     const channel = await client.channels.fetch(verifyChannelId);
     if (!channel?.messages?.fetch) return null;
+
+    if (config.verifyMessageId) {
+      const cachedMessage = await channel.messages.fetch(config.verifyMessageId).catch(() => null);
+      if (cachedMessage) return config.verifyMessageId;
+      config.verifyMessageId = null;
+      saveConfig();
+    }
 
     const messages = await channel.messages.fetch({ limit: 25 });
     const verifyMessage = messages.find(message =>
