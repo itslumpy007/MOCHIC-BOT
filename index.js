@@ -731,6 +731,7 @@ function upsertWebAccount(input) {
   const enabled = input?.enabled !== false;
   const discordUserId = normalizeWebDiscordId(input?.discordUserId);
   const password = String(input?.password || "").trim();
+  const passwordConfirm = String(input?.passwordConfirm || "").trim();
   const originalUsername = normalizeWebLoginUsername(input?.originalUsername);
   const existing = originalUsername
     ? getWebAccountByUsername(originalUsername)
@@ -743,8 +744,16 @@ function upsertWebAccount(input) {
     throw new Error("That web username is already in use.");
   }
 
+  if (password && passwordConfirm && password !== passwordConfirm) {
+    throw new Error("Password and confirmation do not match.");
+  }
+
   if ((!existing || !existing.passwordHash) && !password) {
     throw new Error("Set a password for new web accounts.");
+  }
+
+  if (password && password.length < 8) {
+    throw new Error("Use a password with at least 8 characters.");
   }
 
   if (discordUserId) {
@@ -7315,6 +7324,7 @@ async function handleWebApi(req, res, pathname) {
     const account = upsertWebAccount({
       username: body.username,
       password: body.password,
+      passwordConfirm: body.passwordConfirm,
       accessLevel: body.accessLevel,
       discordUserId: body.discordUserId,
       enabled: body.enabled !== false

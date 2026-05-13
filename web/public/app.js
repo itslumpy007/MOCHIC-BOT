@@ -666,6 +666,7 @@ function fillWebAccountForm(account = null) {
   $("#webAccountEnabled").value = String(account?.enabled !== false);
   $("#webAccountDiscordUserId").value = account?.discordUserId || "";
   $("#webAccountPassword").value = "";
+  $("#webAccountPasswordConfirm").value = "";
   $("#deleteWebAccountButton").disabled = !account;
   $("#resetWebAccountPasswordButton").disabled = !account;
   $("#toggleWebAccountEnabledButton").disabled = !account;
@@ -2467,6 +2468,18 @@ async function saveWebAccount() {
 
   const username = $("#webAccountUsername").value.trim();
   const password = $("#webAccountPassword").value;
+  const passwordConfirm = $("#webAccountPasswordConfirm").value;
+
+  if (password && password !== passwordConfirm) {
+    setAlert("The password and confirmation do not match.", "error");
+    return;
+  }
+
+  if (!password && !state.webAccountEditing) {
+    setAlert("Set a password before creating a new web account.", "error");
+    return;
+  }
+
   const payload = {
     action: "upsert",
     originalUsername: state.webAccountEditing || "",
@@ -2474,7 +2487,8 @@ async function saveWebAccount() {
     accessLevel: $("#webAccountAccessLevel").value,
     enabled: $("#webAccountEnabled").value === "true",
     discordUserId: $("#webAccountDiscordUserId").value.trim(),
-    password
+    password,
+    passwordConfirm
   };
 
   const result = await api("/api/web-accounts", {
@@ -2797,7 +2811,9 @@ function bindEvents() {
   $("#resetWebAccountPasswordButton").addEventListener("click", () => resetWebAccountPassword().catch(error => setAlert(error.message, "error")));
   $("#toggleWebAccountEnabledButton").addEventListener("click", () => toggleWebAccountEnabled().catch(error => setAlert(error.message, "error")));
   $("#generateWebPasswordButton").addEventListener("click", () => {
-    $("#webAccountPassword").value = generateWebPassword();
+    const generated = generateWebPassword();
+    $("#webAccountPassword").value = generated;
+    $("#webAccountPasswordConfirm").value = generated;
     $("#webAccountPassword").focus();
   });
   $("#clearWebAccountForm").addEventListener("click", () => fillWebAccountForm(null));
