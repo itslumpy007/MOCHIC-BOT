@@ -627,6 +627,8 @@ function getGoogleBlockListRefreshMs() {
 function getGoogleBlockListDocId(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
+  const publishedMatch = raw.match(/docs\.google\.com\/document\/d\/e\/([a-zA-Z0-9_-]+)\/pub/i);
+  if (publishedMatch) return publishedMatch[1];
   const urlMatch = raw.match(/docs\.google\.com\/document\/d\/([a-zA-Z0-9_-]+)/i);
   if (urlMatch) return urlMatch[1];
   if (/^[a-zA-Z0-9_-]{20,}$/.test(raw)) return raw;
@@ -638,6 +640,24 @@ function getGoogleBlockListExportUrl(value) {
   return docId ? `https://docs.google.com/document/d/${docId}/export?format=txt` : "";
 }
 
+function getGoogleBlockListFetchCandidates(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+
+  if (/docs\.google\.com\/document\/d\/e\/[a-zA-Z0-9_-]+\/pub/i.test(raw)) {
+    return raw.includes("?") ? [raw, raw.split("?")[0] + "?output=txt"] : [`${raw}?output=txt`, raw];
+  }
+
+  const exportUrl = getGoogleBlockListExportUrl(raw);
+  if (exportUrl) return [exportUrl];
+
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(raw)) {
+    return [`https://docs.google.com/document/d/${raw}/export?format=txt`];
+  }
+
+  return [];
+}
+
 async function syncGoogleBlockList(source = "manual", force = false) {
   if (!config.automod?.googleBlockListEnabled) {
     config.automod.googleBlockListTerms = [];
@@ -647,10 +667,10 @@ async function syncGoogleBlockList(source = "manual", force = false) {
     return { enabled: false, synced: false, count: 0 };
   }
 
-  const exportUrl = getGoogleBlockListExportUrl(config.automod.googleBlockListUrl);
-  if (!exportUrl) {
+  const fetchCandidates = getGoogleBlockListFetchCandidates(config.automod.googleBlockListUrl);
+  if (!fetchCandidates.length) {
     config.automod.googleBlockListTerms = [];
-    config.automod.googleBlockListLastError = "Set a Google Doc URL first.";
+    config.automod.googleBlockListLastError = "Set a valid Google Doc URL first.";
     config.automod.googleBlockListLastCount = 0;
     saveConfig();
     return { enabled: true, synced: false, count: 0, error: config.automod.googleBlockListLastError };
@@ -672,14 +692,38 @@ async function syncGoogleBlockList(source = "manual", force = false) {
 
   googleBlockListSyncState.running = true;
   try {
-    const response = await fetch(exportUrl, {
-      headers: { "User-Agent": "MochiBot/1.0" }
-    });
-    if (!response.ok) {
-      throw new Error(`Google Doc fetch failed (${response.status}).`);
+    let response = null;
+    let usedUrl = "";
+    let lastStatus = 0;
+    for (const candidate of fetchCandidates) {
+      response = await fetch(candidate, {
+        headers: { "User-Agent": "MochiBot/1.0" }
+      });
+      usedUrl = candidate;
+      lastStatus = response.status;
+      if (response.ok) break;
     }
 
-    const text = await response.text();
+    if (!response?.ok) {
+      throw new Error(`Google Doc fetch failed (${lastStatus || 404}).`);
+    }
+
+    const responseText = await response.text();
+    const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+    const text = contentType.includes("text/html") && usedUrl.includes("/pub")
+      ? responseText
+          .replace(/<script[\s\S]*?<\/script>/gi, " ")
+          .replace(/<style[\s\S]*?<\/style>/gi, " ")
+          .replace(/<br\s*\/?>/gi, "\n")
+          .replace(/<\/(p|div|li|tr|h\d)>/gi, "\n")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/&nbsp;/gi, " ")
+          .replace(/&amp;/gi, "&")
+          .replace(/&lt;/gi, "<")
+          .replace(/&gt;/gi, ">")
+          .replace(/&quot;/gi, "\"")
+          .replace(/&#39;/gi, "'")
+      : responseText;
     const terms = normalizeBlockListTerms(text);
     config.automod.googleBlockListTerms = terms;
     config.automod.googleBlockListLastSyncedAt = new Date().toISOString();
@@ -689,6 +733,7 @@ async function syncGoogleBlockList(source = "manual", force = false) {
     saveConfig();
     recordAuditLog(source, "google-block-list-synced", {
       docId: getGoogleBlockListDocId(config.automod.googleBlockListUrl),
+      sourceUrl: usedUrl,
       count: terms.length
     });
     return { enabled: true, synced: true, count: terms.length };
@@ -697,6 +742,7 @@ async function syncGoogleBlockList(source = "manual", force = false) {
     saveConfig();
     recordAuditLog(source, "google-block-list-sync-failed", {
       docId: getGoogleBlockListDocId(config.automod.googleBlockListUrl),
+      sourceUrl: config.automod.googleBlockListUrl,
       error: error.message
     });
     return { enabled: true, synced: false, count: Array.isArray(config.automod.googleBlockListTerms) ? config.automod.googleBlockListTerms.length : 0, error: error.message };
