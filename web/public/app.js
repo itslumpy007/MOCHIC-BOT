@@ -3158,21 +3158,19 @@ async function saveVerificationSettings() {
   setAlert("Verification settings saved.");
 }
 
-async function postTikTokVerify() {
+async function repostRolePanel() {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change server settings.", "error");
     return;
   }
 
-  const payload = collectSettingsPayload();
-  const result = await api("/api/tiktok-verify-setup", {
+  await api("/api/reaction-role-panel", {
     method: "POST",
-    body: JSON.stringify(payload)
+    body: JSON.stringify({})
   });
 
-  state.config.settings = result.settings;
   await loadAll();
-  setAlert("TikTok verify panel posted.");
+  setAlert("Role panel reposted.");
 }
 
 async function setVerifiedVisibility(locked, scope) {
@@ -3411,7 +3409,7 @@ function bindEvents() {
   });
   $("#postAffirmationsPanel").addEventListener("click", () => postAffirmationsPanel().catch(error => setAlert(error.message, "error")));
   $("#saveVerificationSettings").addEventListener("click", () => saveVerificationSettings().catch(error => setAlert(error.message, "error")));
-  $("#postTikTokVerify").addEventListener("click", () => postTikTokVerify().catch(error => setAlert(error.message, "error")));
+  $("#repostRolePanel").addEventListener("click", () => repostRolePanel().catch(error => setAlert(error.message, "error")));
   $("#lockVerifiedCurrent").addEventListener("click", () => setVerifiedVisibility(true, "current").catch(error => setAlert(error.message, "error")));
   $("#unlockVerifiedCurrent").addEventListener("click", () => setVerifiedVisibility(false, "current").catch(error => setAlert(error.message, "error")));
   $("#lockVerifiedAll").addEventListener("click", () => setVerifiedVisibility(true, "all").catch(error => setAlert(error.message, "error")));

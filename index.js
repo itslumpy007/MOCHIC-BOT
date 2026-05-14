@@ -5451,7 +5451,7 @@ function buildAdminPanelButtons(view, targetUserId = null) {
     rows.push(
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setupverify", targetUserId)).setLabel("Post Onboarding Panel").setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setuptiktokverify", targetUserId)).setLabel("Post TikTok Panel").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setuptiktokverify", targetUserId)).setLabel("Repost Role Panel").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setuprules", targetUserId)).setLabel("Post Rules").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "settings-view", targetUserId)).setLabel("View Settings").setStyle(ButtonStyle.Secondary)
       ),
@@ -7433,6 +7433,23 @@ async function handleWebApi(req, res, pathname) {
       return sendWebJson(res, 200, { ok: true, settings, posted });
     }
 
+    if (req.method === "POST" && pathname === "/api/reaction-role-panel") {
+      if (!hasWebAccess(auth, "admin")) {
+        return sendWebJson(res, 403, { error: "Admin web access is required." });
+      }
+      await readWebJsonBody(req).catch(() => null);
+      const posted = await postTikTokVerifyPanel("web");
+      recordAuditLog(getWebModeratorTag(auth), "reaction-role-panel-posted", {
+        channelId: posted.channelId,
+        messageId: posted.messageId,
+        tiktokHandle: config.settings.tiktokHandle,
+        verifiedRoleId: config.settings.verifiedRoleId,
+        unverifiedRoleId: config.settings.unverifiedRoleId,
+        aliases: config.settings.tiktokNicknameAliases
+      });
+      return sendWebJson(res, 200, { ok: true, posted });
+    }
+
     if (req.method === "POST" && pathname === "/api/verified-visibility") {
       if (!hasWebAccess(auth, "admin")) {
         return sendWebJson(res, 403, { error: "Admin web access is required." });
@@ -8866,9 +8883,9 @@ client.on("interactionCreate", async interaction => {
         if (action === "setuptiktokverify") {
           try {
             await postTikTokVerifyPanel("adminpanel");
-            return interaction.reply({ content: "TikTok onboarding panel posted.", ephemeral: true });
+            return interaction.reply({ content: "Role panel reposted.", ephemeral: true });
           } catch (error) {
-            return interaction.reply({ content: error.message || "TikTok onboarding panel could not be posted.", ephemeral: true });
+            return interaction.reply({ content: error.message || "Role panel could not be reposted.", ephemeral: true });
           }
         }
         if (action === "setuprules") {
