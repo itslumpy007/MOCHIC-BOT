@@ -3134,7 +3134,17 @@ async function postAffirmationsPanel() {
   setAlert("Anonymous affirmations panel posted.");
 }
 
-async function saveAndPostTikTokVerify() {
+async function saveVerificationSettings() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to change server settings.", "error");
+    return;
+  }
+
+  await saveSettings();
+  setAlert("Verification settings saved.");
+}
+
+async function postTikTokVerify() {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change server settings.", "error");
     return;
@@ -3148,7 +3158,7 @@ async function saveAndPostTikTokVerify() {
 
   state.config.settings = result.settings;
   await loadAll();
-  setAlert("TikTok verify panel saved and posted.");
+  setAlert("TikTok verify panel posted.");
 }
 
 async function setVerifiedVisibility(locked, scope) {
@@ -3386,7 +3396,8 @@ function bindEvents() {
     }
   });
   $("#postAffirmationsPanel").addEventListener("click", () => postAffirmationsPanel().catch(error => setAlert(error.message, "error")));
-  $("#saveAndPostTikTokVerify").addEventListener("click", () => saveAndPostTikTokVerify().catch(error => setAlert(error.message, "error")));
+  $("#saveVerificationSettings").addEventListener("click", () => saveVerificationSettings().catch(error => setAlert(error.message, "error")));
+  $("#postTikTokVerify").addEventListener("click", () => postTikTokVerify().catch(error => setAlert(error.message, "error")));
   $("#lockVerifiedCurrent").addEventListener("click", () => setVerifiedVisibility(true, "current").catch(error => setAlert(error.message, "error")));
   $("#unlockVerifiedCurrent").addEventListener("click", () => setVerifiedVisibility(false, "current").catch(error => setAlert(error.message, "error")));
   $("#lockVerifiedAll").addEventListener("click", () => setVerifiedVisibility(true, "all").catch(error => setAlert(error.message, "error")));
