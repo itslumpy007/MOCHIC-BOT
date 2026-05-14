@@ -1824,10 +1824,12 @@ function renderWebAccountAudit(account = null) {
   }).join("");
 }
 
-function collectSettingsPayload() {
+function collectSettingsPayload(allowedKeys = null) {
   const payload = {};
   document.querySelectorAll("[data-setting]").forEach(input => {
-    payload[input.dataset.setting] = input.value;
+    if (!allowedKeys || allowedKeys.includes(input.dataset.setting)) {
+      payload[input.dataset.setting] = input.value;
+    }
   });
   return payload;
 }
@@ -3140,7 +3142,19 @@ async function saveVerificationSettings() {
     return;
   }
 
-  await saveSettings();
+  const payload = collectSettingsPayload([
+    "tiktokHandle",
+    "tiktokNicknameAliases",
+    "verifiedRoleId",
+    "unverifiedRoleId"
+  ]);
+  const result = await api("/api/settings", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+
+  state.config.settings = result.settings;
+  await loadAll();
   setAlert("Verification settings saved.");
 }
 
