@@ -2958,6 +2958,33 @@ async function saveSettings() {
   await loadAll();
 }
 
+async function saveAllSettings() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to change server settings.", "error");
+    return;
+  }
+
+  const settingsPayload = collectSettingsPayload();
+  const settingsResult = await api("/api/settings", {
+    method: "POST",
+    body: JSON.stringify(settingsPayload)
+  });
+
+  const automodResult = await api("/api/automod", {
+    method: "POST",
+    body: JSON.stringify({
+      exemptChannelIds: $("#exemptChannelIds").value,
+      exemptRoleIds: $("#exemptRoleIds").value,
+      exemptUserIds: $("#exemptUserIds").value
+    })
+  });
+
+  state.config.settings = settingsResult.settings;
+  state.config.automod = automodResult.automod;
+  await loadAll();
+  setAlert("All settings saved.");
+}
+
 function generateWebPassword(length = 18) {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%*?";
   const bytes = new Uint32Array(length);
@@ -3374,6 +3401,7 @@ function bindEvents() {
   $("#refreshButton").addEventListener("click", loadAll);
   $("#saveAutomod").addEventListener("click", () => saveAutomod().catch(error => setAlert(error.message, "error")));
   $("#syncGoogleBlockListButton").addEventListener("click", () => syncGoogleBlockList().catch(error => setAlert(error.message, "error")));
+  $("#saveAllSettings").addEventListener("click", () => saveAllSettings().catch(error => setAlert(error.message, "error")));
   $("#saveSettings").addEventListener("click", () => saveSettings().catch(error => setAlert(error.message, "error")));
   $("#saveWebAccountButton").addEventListener("click", () => saveWebAccount().catch(error => setAlert(error.message, "error")));
   $("#deleteWebAccountButton").addEventListener("click", () => deleteWebAccount().catch(error => setAlert(error.message, "error")));
