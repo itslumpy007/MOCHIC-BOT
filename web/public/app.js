@@ -12,6 +12,8 @@ const state = {
   previewChannelId: "",
   previewMessage: "",
   timelineSearch: "",
+  memberChatSearch: "",
+  memberChatLogs: [],
   cases: [],
   warnings: {},
   notes: {},
@@ -45,6 +47,7 @@ const storageKeys = {
   memberAction: "mochiMemberAction",
   memberDuration: "mochiMemberDuration",
   timelineSearch: "mochiTimelineSearch",
+  memberChatSearch: "mochiMemberChatSearch",
   auditFilter: "mochiAuditFilter",
   appealFilter: "mochiAppealFilter",
   recentActions: "mochiRecentActions",
@@ -965,6 +968,7 @@ function restorePanelMemory() {
   $("#memberAction").value = localStorage.getItem(storageKeys.memberAction) || "warn";
   $("#memberActionDuration").value = localStorage.getItem(storageKeys.memberDuration) || "";
   $("#timelineSearchInput").value = localStorage.getItem(storageKeys.timelineSearch) || "";
+  $("#memberChatSearchInput").value = localStorage.getItem(storageKeys.memberChatSearch) || "";
   applyThemePreset(localStorage.getItem(storageKeys.themePreset) || "pastel");
   setSidebarOpen(localStorage.getItem(storageKeys.sidebarOpen) === "true");
   updateAdvancedToolsVisibility();
@@ -2275,6 +2279,7 @@ function renderMemberProfile() {
     $("#memberAiSummaryButton").disabled = true;
     $("#memberAiSummaryButton").textContent = "AI Summary";
     $("#memberTimeline").innerHTML = "";
+    $("#memberChatLogs").innerHTML = "";
     $("#memberCases").innerHTML = "";
     $("#memberSignals").innerHTML = "";
     return;
@@ -2372,6 +2377,7 @@ function renderMemberProfile() {
 
   renderMemberAiSummary();
   renderMemberTimeline();
+  renderMemberChatLogs();
   renderMemberDrawer();
 }
 
@@ -2518,6 +2524,40 @@ function renderMemberTimeline() {
     : renderEmptyState("No matching history", "Try a different member history search.");
 }
 
+function renderMemberChatLogs() {
+  const member = state.selectedMember;
+  const container = $("#memberChatLogs");
+  if (!container) return;
+
+  if (!member) {
+    container.innerHTML = renderEmptyState("No member selected", "Search for a member to load recent chat logs.");
+    return;
+  }
+
+  const query = ($("#memberChatSearchInput")?.value || "").trim().toLowerCase();
+  const logs = Array.isArray(state.memberChatLogs) ? state.memberChatLogs : [];
+  const filtered = logs.filter(entry => {
+    if (!query) return true;
+    const haystack = [
+      entry.channelName,
+      entry.content,
+      entry.channelId,
+      entry.createdAt
+    ].join(" ").toLowerCase();
+    return haystack.includes(query);
+  });
+
+  container.innerHTML = filtered.length
+    ? filtered.slice(0, 40).map(entry => `
+      <article class="event">
+        <strong>${escapeHtml(entry.channelName || "Unknown channel")} <span class="badge">${escapeHtml(formatDate(entry.createdAt))}</span></strong>
+        <p>${escapeHtml(entry.content || "No text content")}</p>
+        <p>${escapeHtml(entry.channelMention || entry.channelName || "")}</p>
+      </article>
+    `).join("")
+    : renderEmptyState("No chat logs", "No recent messages matched this member.");
+}
+
 async function loadMemberAiSummary() {
   if (!state.selectedMember) {
     setAlert("Search for a member first.", "error");
@@ -2552,8 +2592,12 @@ async function searchMember() {
 
   localStorage.setItem(storageKeys.lastMemberSearch, query);
   addRecentMemberSearch(query);
-  const payload = await api(`/api/member?query=${encodeURIComponent(query)}`);
-  state.selectedMember = payload.member;
+  const [memberPayload, chatLogsPayload] = await Promise.all([
+    api(`/api/member?query=${encodeURIComponent(query)}`),
+    api(`/api/member-chat-logs?query=${encodeURIComponent(query)}`)
+  ]);
+  state.selectedMember = memberPayload.member;
+  state.memberChatLogs = chatLogsPayload.chatLogs || [];
   state.memberAiSummary = null;
   state.memberDrawerOpen = true;
   renderMemberProfile();
@@ -3606,6 +3650,10 @@ function bindEvents() {
     localStorage.setItem(storageKeys.timelineSearch, $("#timelineSearchInput").value);
     renderMemberTimeline();
     renderRecords();
+  });
+  $("#memberChatSearchInput").addEventListener("input", () => {
+    localStorage.setItem(storageKeys.memberChatSearch, $("#memberChatSearchInput").value);
+    renderMemberChatLogs();
   });
   $("#memberSearchInput").addEventListener("keydown", event => {
     if (event.key === "Enter") {

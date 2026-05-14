@@ -5194,6 +5194,42 @@ async function getRecentMessagesForUser(channel, userId, limit = 5) {
     });
 }
 
+async function getRecentMessagesForUserAcrossGuild(guild, userId, limit = 40) {
+  if (!guild?.channels?.cache) return [];
+
+  const botMember = guild.members.me || await guild.members.fetchMe().catch(() => null);
+  const channels = [...guild.channels.cache.values()].filter(channel => {
+    if (!channel?.isTextBased?.() || typeof channel.messages?.fetch !== "function") return false;
+    if (!botMember || typeof channel.permissionsFor !== "function") return true;
+    const permissions = channel.permissionsFor(botMember);
+    return Boolean(permissions?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory]));
+  });
+
+  const entries = [];
+  for (const channel of channels) {
+    const messages = await channel.messages.fetch({ limit: 50 }).catch(() => null);
+    if (!messages) continue;
+
+    for (const message of messages.values()) {
+      if (message.author?.id !== userId || message.author?.bot) continue;
+      entries.push({
+        id: message.id,
+        channelId: channel.id,
+        channelName: channel.name || channel.toString?.() || "Unknown channel",
+        channelMention: typeof channel.toString === "function" ? channel.toString() : `#${channel.name || channel.id}`,
+        content: (message.content || "").replace(/\n/g, " ").trim().slice(0, 200) || "No text content",
+        createdAt: message.createdAt?.toISOString?.() || new Date(message.createdTimestamp || Date.now()).toISOString(),
+        createdTimestamp: message.createdTimestamp || Date.now()
+      });
+    }
+  }
+
+  return entries
+    .sort((a, b) => b.createdTimestamp - a.createdTimestamp)
+    .slice(0, limit)
+    .map(({ createdTimestamp, ...entry }) => entry);
+}
+
 async function purgeChannelMessages(channel, amount, deleteAll = false) {
   if (!channel?.messages?.fetch) return 0;
 
@@ -7382,6 +7418,20 @@ async function handleWebApi(req, res, pathname) {
     const requestUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     const { member, user } = await resolveWebMember(requestUrl.searchParams.get("query"));
     return sendWebJson(res, 200, { member: serializeWebMember(member, user) });
+  }
+
+  if (req.method === "GET" && pathname === "/api/member-chat-logs") {
+    if (!hasWebAccess(auth, "mod")) {
+      return sendWebJson(res, 403, { error: "Moderator web access is required." });
+    }
+
+    const requestUrl = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    const { guild, member, user } = await resolveWebMember(requestUrl.searchParams.get("query"));
+    const chatLogs = await getRecentMessagesForUserAcrossGuild(guild, user.id, 40).catch(() => []);
+    return sendWebJson(res, 200, {
+      member: serializeWebMember(member, user),
+      chatLogs
+    });
   }
 
   if (req.method === "GET" && pathname === "/api/member-ai-summary") {
