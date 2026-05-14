@@ -113,7 +113,7 @@ const AUTOMOD_RULE_KEYS = [
   "raid-join",
   "nickname"
 ];
-const AUTOMOD_RULE_ACTIONS = new Set(["delete", "alert", "warn", "timeout"]);
+const AUTOMOD_RULE_ACTIONS = new Set(["delete", "alert", "warn", "timeout", "kick", "ban"]);
 const BUILT_IN_SCAM_PHRASES = [
   "free nitro",
   "steam gift",
@@ -212,9 +212,11 @@ function createDefaultConfig() {
       aiModerationEnabled: false,
       aiModerationModel: "omni-moderation-latest",
       aiModerationThreshold: 70,
+      aiModerationAction: "review",
       aiCustomRulesEnabled: false,
       aiCustomRulesModel: "gpt-4o-mini",
       aiCustomRulesThreshold: 75,
+      aiCustomRulesAction: "review",
       aiCustomRules: "",
       aiCustomInstructions: "",
       aiMinMessageLength: 4,
@@ -1019,6 +1021,7 @@ function normalizeRuleAction(value) {
 function getAutoModRuleAction(ruleKey, automod = config.automod) {
   const configured = normalizeRuleAction(automod.ruleActions?.[ruleKey]);
   if (configured) return configured;
+  if (AUTOMOD_RULE_ACTIONS.has(ruleKey)) return ruleKey;
   const alertOnlyRules = Array.isArray(automod.alertOnlyRules) ? automod.alertOnlyRules : [];
   if (alertOnlyRules.includes(ruleKey)) return "alert";
   return "delete";
@@ -1487,6 +1490,19 @@ function getAiCustomRulesModel() {
   return String(config.automod.aiCustomRulesModel || "gpt-4o-mini").trim() || "gpt-4o-mini";
 }
 
+function normalizeAiAutoModAction(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["review", "warn", "timeout", "kick", "ban"].includes(normalized) ? normalized : "review";
+}
+
+function getAiModerationAction() {
+  return normalizeAiAutoModAction(config.automod.aiModerationAction);
+}
+
+function getAiCustomRulesAction() {
+  return normalizeAiAutoModAction(config.automod.aiCustomRulesAction);
+}
+
 function getAiCustomInstructions() {
   return String(config.automod.aiCustomInstructions || "").trim().slice(0, 2000);
 }
@@ -1542,13 +1558,15 @@ async function detectAiModerationIssue(message) {
     if (!result.flagged && score < threshold) return null;
 
     const percent = Math.round(score * 100);
+    const action = getAiModerationAction();
     return {
-      actionLabel: "ai-review",
+      actionLabel: action === "review" ? "ai-review" : action,
       reason: `AI review flagged this message as ${category || "policy risk"} (${percent}% confidence).`,
       details: [
         { name: "AI Category", value: category || "unknown", inline: true },
         { name: "AI Confidence", value: `${percent}%`, inline: true },
-        { name: "AI Model", value: getAiModerationModel().slice(0, 100), inline: true }
+        { name: "AI Model", value: getAiModerationModel().slice(0, 100), inline: true },
+        { name: "AI Action", value: action, inline: true }
       ]
     };
   } catch (error) {
@@ -1637,13 +1655,15 @@ async function detectAiCustomRuleIssue(message) {
     const confidence = Number(result.confidence || 0);
     if (!result.violated || confidence / 100 < getAiCustomRulesThreshold()) return null;
 
+    const action = getAiCustomRulesAction();
     return {
-      actionLabel: "ai-review",
+      actionLabel: action === "review" ? "ai-review" : action,
       reason: `AI custom rule review flagged this message for ${result.ruleName || "server rule"} (${confidence}% confidence).`,
       details: [
         { name: "AI Category", value: result.ruleName || "server-rule", inline: true },
         { name: "AI Confidence", value: `${confidence}%`, inline: true },
         { name: "AI Model", value: getAiCustomRulesModel().slice(0, 100), inline: true },
+        { name: "AI Action", value: action, inline: true },
         { name: "AI Explanation", value: String(result.explanation || "No explanation.").slice(0, 1024), inline: false }
       ]
     };
@@ -3773,6 +3793,74 @@ async function handleAutoModViolation(message, reason, actionLabel, extraDetails
         fields: buildCaseFields(timeoutEntry)
       })
     );
+  } else if (!alertOnly && !dryRun && ruleAction === "kick" && message.member?.kickable) {
+    const kickEntry = addCase({
+      action: "automod:kick",
+      targetId: message.author.id,
+      targetTag: message.author.tag,
+      moderatorTag: "AutoMod",
+      reason: `Automatic kick from the ${actionLabel} rule. Latest: ${reason}`,
+      details: [
+        { name: "Rule action", value: "kick", inline: true }
+      ]
+    });
+
+    escalationText = "Rule action kick applied.";
+
+    await notifyUser(
+      message.author,
+      makeEmbed({
+        title: "Automatic kick",
+        description: `You were automatically kicked from **${message.guild.name}** by AutoMod.`,
+        color: COLORS.red,
+        fields: buildCaseFields(kickEntry)
+      })
+    );
+
+    await message.member.kick(`AutoMod rule action (${actionLabel}): ${reason}`).catch(() => {});
+
+    await logEmbed(
+      makeEmbed({
+        title: `Case #${kickEntry.id}: automod kick`,
+        description: `${message.author.tag} was automatically kicked by rule action.`,
+        color: COLORS.red,
+        fields: buildCaseFields(kickEntry)
+      })
+    );
+  } else if (!alertOnly && !dryRun && ruleAction === "ban") {
+    const banEntry = addCase({
+      action: "automod:ban",
+      targetId: message.author.id,
+      targetTag: message.author.tag,
+      moderatorTag: "AutoMod",
+      reason: `Automatic ban from the ${actionLabel} rule. Latest: ${reason}`,
+      details: [
+        { name: "Rule action", value: "ban", inline: true }
+      ]
+    });
+
+    escalationText = "Rule action ban applied.";
+
+    await notifyUser(
+      message.author,
+      makeEmbed({
+        title: "Automatic ban",
+        description: `You were automatically banned from **${message.guild.name}** by AutoMod.`,
+        color: COLORS.red,
+        fields: buildCaseFields(banEntry)
+      })
+    );
+
+    await message.guild.members.ban(message.author.id, { reason: `AutoMod rule action (${actionLabel}): ${reason}` }).catch(() => {});
+
+    await logEmbed(
+      makeEmbed({
+        title: `Case #${banEntry.id}: automod ban`,
+        description: `${message.author.tag} was automatically banned by rule action.`,
+        color: COLORS.red,
+        fields: buildCaseFields(banEntry)
+      })
+    );
   } else if (!alertOnly && !dryRun && ruleAction === "warn") {
     const warnings = addWarning(
       message.author.id,
@@ -3814,7 +3902,7 @@ async function handleAutoModViolation(message, reason, actionLabel, extraDetails
     );
   }
 
-  if (automod.escalationEnabled && !alertOnly && !dryRun && ruleAction !== "timeout") {
+  if (automod.escalationEnabled && !alertOnly && !dryRun && ruleAction === "delete") {
     if (
       activeOffenseCount >= config.automod.timeoutThreshold &&
       message.member &&
@@ -5219,6 +5307,7 @@ async function getRecentMessagesForUserAcrossGuild(guild, userId, limit = 40) {
         channelMention: typeof channel.toString === "function" ? channel.toString() : `#${channel.name || channel.id}`,
         content: (message.content || "").replace(/\n/g, " ").trim().slice(0, 200) || "No text content",
         createdAt: message.createdAt?.toISOString?.() || new Date(message.createdTimestamp || Date.now()).toISOString(),
+        url: message.url || `https://discord.com/channels/${channel.guild?.id || guild.id}/${channel.id}/${message.id}`,
         createdTimestamp: message.createdTimestamp || Date.now()
       });
     }
@@ -6173,6 +6262,8 @@ async function buildWebDashboardPayload() {
       evasionFilterEnabled: config.automod.evasionFilterEnabled,
       aiModerationEnabled: config.automod.aiModerationEnabled,
       aiCustomRulesEnabled: config.automod.aiCustomRulesEnabled,
+      aiModerationAction: config.automod.aiModerationAction,
+      aiCustomRulesAction: config.automod.aiCustomRulesAction,
       aiIncludeRecentContext: config.automod.aiIncludeRecentContext,
       escalationEnabled: config.automod.escalationEnabled,
       emojiSpamEnabled: config.automod.emojiSpamEnabled
@@ -6375,6 +6466,14 @@ async function updateWebAutomod(auth, payload) {
   }
 
   const stringKeys = ["aiModerationModel", "aiCustomRulesModel", "aiCustomRules", "aiCustomInstructions", "quietHoursStart", "quietHoursEnd", "quietHoursMode", "googleBlockListUrl"];
+  const actionKeys = ["aiModerationAction", "aiCustomRulesAction"];
+  for (const key of actionKeys) {
+    if (Object.prototype.hasOwnProperty.call(payload, key)) {
+      const value = String(payload[key] || "").trim().toLowerCase();
+      config.automod[key] = ["review", "warn", "timeout", "kick", "ban"].includes(value) ? value : "review";
+    }
+  }
+
   for (const key of stringKeys) {
     if (Object.prototype.hasOwnProperty.call(payload, key)) {
       const value = String(payload[key] || "").trim();

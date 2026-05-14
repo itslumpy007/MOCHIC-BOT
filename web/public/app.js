@@ -13,6 +13,8 @@ const state = {
   previewMessage: "",
   timelineSearch: "",
   memberChatSearch: "",
+  memberChatChannelFilter: "all",
+  memberChatDateRange: "7d",
   memberChatLogs: [],
   cases: [],
   warnings: {},
@@ -48,6 +50,8 @@ const storageKeys = {
   memberDuration: "mochiMemberDuration",
   timelineSearch: "mochiTimelineSearch",
   memberChatSearch: "mochiMemberChatSearch",
+  memberChatChannelFilter: "mochiMemberChatChannelFilter",
+  memberChatDateRange: "mochiMemberChatDateRange",
   auditFilter: "mochiAuditFilter",
   appealFilter: "mochiAppealFilter",
   recentActions: "mochiRecentActions",
@@ -212,6 +216,19 @@ const aiModerationLabels = {
   aiModerationModel: "AI moderation model",
   aiCustomRulesModel: "Custom rules model"
 };
+
+const aiActionLabels = {
+  aiModerationAction: "AI moderation action",
+  aiCustomRulesAction: "Custom rules action"
+};
+
+const aiActionOptions = [
+  ["review", "Review only"],
+  ["warn", "Warn"],
+  ["timeout", "Timeout"],
+  ["kick", "Kick"],
+  ["ban", "Ban"]
+];
 
 const aiTextareaLabels = {
   aiCustomRules: "AI custom server rules",
@@ -969,6 +986,8 @@ function restorePanelMemory() {
   $("#memberActionDuration").value = localStorage.getItem(storageKeys.memberDuration) || "";
   $("#timelineSearchInput").value = localStorage.getItem(storageKeys.timelineSearch) || "";
   $("#memberChatSearchInput").value = localStorage.getItem(storageKeys.memberChatSearch) || "";
+  $("#memberChatChannelFilter").value = localStorage.getItem(storageKeys.memberChatChannelFilter) || "all";
+  $("#memberChatDateRange").value = localStorage.getItem(storageKeys.memberChatDateRange) || "7d";
   applyThemePreset(localStorage.getItem(storageKeys.themePreset) || "pastel");
   setSidebarOpen(localStorage.getItem(storageKeys.sidebarOpen) === "true");
   updateAdvancedToolsVisibility();
@@ -1520,6 +1539,17 @@ function renderAutomod() {
       </label>
     `).join("");
 
+  $("#aiActionFields").innerHTML = Object.entries(aiActionLabels)
+    .map(([key, label]) => `
+      <label>${label}
+        <select data-automod-string="${key}">
+          ${aiActionOptions.map(([value, optionLabel]) => `
+            <option value="${escapeHtml(value)}" ${String(automod[key] || "review") === value ? "selected" : ""}>${escapeHtml(optionLabel)}</option>
+          `).join("")}
+        </select>
+      </label>
+    `).join("");
+
   $("#aiAdvancedFields").innerHTML = Object.entries(aiNumberLabels)
     .map(([key, label]) => `
       <label>${label}
@@ -1606,8 +1636,8 @@ function renderAutomodSummary(automod) {
     ["Detections", analytics.totalDetections || 0],
     ["Top Rule", topRule ? `${topRule[0]} (${topRule[1]})` : "None"],
     ["Raid Action", automod.raidAction || "log"],
-    ["AI", automod.aiModerationEnabled ? `${automod.aiModerationThreshold || 70}%` : "Off"],
-    ["Custom AI", automod.aiCustomRulesEnabled ? `${automod.aiCustomRulesThreshold || 75}%` : "Off"],
+    ["AI", automod.aiModerationEnabled ? `${automod.aiModerationThreshold || 70}% / ${automod.aiModerationAction || "review"}` : "Off"],
+    ["Custom AI", automod.aiCustomRulesEnabled ? `${automod.aiCustomRulesThreshold || 75}% / ${automod.aiCustomRulesAction || "review"}` : "Off"],
     ["Dry Run", automod.dryRunEnabled ? "On" : "Off"],
     ["Profiles", (state.ops?.channelProfiles || "").split("\n").filter(Boolean).length || 0],
     ["Overrides", overrideCount],
@@ -2280,6 +2310,7 @@ function renderMemberProfile() {
     $("#memberAiSummaryButton").textContent = "AI Summary";
     $("#memberTimeline").innerHTML = "";
     $("#memberChatLogs").innerHTML = "";
+    state.memberChatLogs = [];
     $("#memberCases").innerHTML = "";
     $("#memberSignals").innerHTML = "";
     return;
@@ -2524,6 +2555,19 @@ function renderMemberTimeline() {
     : renderEmptyState("No matching history", "Try a different member history search.");
 }
 
+function getMemberChatRangeMs(range) {
+  switch (String(range || "7d")) {
+    case "24h":
+      return 24 * 60 * 60 * 1000;
+    case "7d":
+      return 7 * 24 * 60 * 60 * 1000;
+    case "30d":
+      return 30 * 24 * 60 * 60 * 1000;
+    default:
+      return null;
+  }
+}
+
 function renderMemberChatLogs() {
   const member = state.selectedMember;
   const container = $("#memberChatLogs");
@@ -2535,8 +2579,15 @@ function renderMemberChatLogs() {
   }
 
   const query = ($("#memberChatSearchInput")?.value || "").trim().toLowerCase();
+  const channelFilter = $("#memberChatChannelFilter")?.value || "all";
+  const rangeFilter = $("#memberChatDateRange")?.value || "7d";
+  const rangeMs = getMemberChatRangeMs(rangeFilter);
+  const cutoff = rangeMs ? Date.now() - rangeMs : 0;
   const logs = Array.isArray(state.memberChatLogs) ? state.memberChatLogs : [];
+
   const filtered = logs.filter(entry => {
+    if (channelFilter !== "all" && entry.channelId !== channelFilter) return false;
+    if (rangeMs && new Date(entry.createdAt).getTime() < cutoff) return false;
     if (!query) return true;
     const haystack = [
       entry.channelName,
@@ -2547,15 +2598,85 @@ function renderMemberChatLogs() {
     return haystack.includes(query);
   });
 
+  if ($("#memberChatChannelFilter")) {
+    const uniqueChannels = new Map();
+    for (const entry of logs) {
+      if (!entry.channelId) continue;
+      if (!uniqueChannels.has(entry.channelId)) {
+        uniqueChannels.set(entry.channelId, entry.channelName || entry.channelMention || entry.channelId);
+      }
+    }
+    const currentValue = $("#memberChatChannelFilter").value || "all";
+    $("#memberChatChannelFilter").innerHTML = [
+      `<option value="all">All channels</option>`,
+      ...[...uniqueChannels.entries()].map(([id, label]) => `<option value="${escapeHtml(id)}" ${currentValue === id ? "selected" : ""}>${escapeHtml(label)}</option>`)
+    ].join("");
+    $("#memberChatChannelFilter").value = currentValue;
+  }
+
   container.innerHTML = filtered.length
     ? filtered.slice(0, 40).map(entry => `
       <article class="event">
         <strong>${escapeHtml(entry.channelName || "Unknown channel")} <span class="badge">${escapeHtml(formatDate(entry.createdAt))}</span></strong>
         <p>${escapeHtml(entry.content || "No text content")}</p>
-        <p>${escapeHtml(entry.channelMention || entry.channelName || "")}</p>
+        <p>
+          <a href="${escapeHtml(entry.url || "#")}" target="_blank" rel="noreferrer">Open message</a>
+          ${entry.channelMention ? ` | ${escapeHtml(entry.channelMention)}` : ""}
+        </p>
       </article>
     `).join("")
     : renderEmptyState("No chat logs", "No recent messages matched this member.");
+}
+
+function exportMemberChatLogs() {
+  const member = state.selectedMember;
+  if (!member) {
+    setAlert("Search for a member first.", "error");
+    return;
+  }
+
+  const query = ($("#memberChatSearchInput")?.value || "").trim().toLowerCase();
+  const channelFilter = $("#memberChatChannelFilter")?.value || "all";
+  const rangeFilter = $("#memberChatDateRange")?.value || "7d";
+  const rangeMs = getMemberChatRangeMs(rangeFilter);
+  const cutoff = rangeMs ? Date.now() - rangeMs : 0;
+  const logs = Array.isArray(state.memberChatLogs) ? state.memberChatLogs : [];
+  const filtered = logs.filter(entry => {
+    if (channelFilter !== "all" && entry.channelId !== channelFilter) return false;
+    if (rangeMs && new Date(entry.createdAt).getTime() < cutoff) return false;
+    if (!query) return true;
+    const haystack = [
+      entry.channelName,
+      entry.content,
+      entry.channelId,
+      entry.createdAt
+    ].join(" ").toLowerCase();
+    return haystack.includes(query);
+  });
+
+  const payload = {
+    member: {
+      id: member.id,
+      tag: member.tag,
+      username: member.username
+    },
+    filters: {
+      query: $("#memberChatSearchInput")?.value || "",
+      channelId: channelFilter,
+      dateRange: rangeFilter
+    },
+    exportedAt: new Date().toISOString(),
+    logs: filtered
+  };
+
+  const blob = new Blob([`${JSON.stringify(payload, null, 2)}\n`], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `member-chat-logs-${member.id}.json`;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  setAlert(`Exported ${filtered.length} chat logs.`);
 }
 
 async function loadMemberAiSummary() {
@@ -2594,7 +2715,7 @@ async function searchMember() {
   addRecentMemberSearch(query);
   const [memberPayload, chatLogsPayload] = await Promise.all([
     api(`/api/member?query=${encodeURIComponent(query)}`),
-    api(`/api/member-chat-logs?query=${encodeURIComponent(query)}`)
+    api(`/api/member-chat-logs?query=${encodeURIComponent(query)}`).catch(() => ({ chatLogs: [] }))
   ]);
   state.selectedMember = memberPayload.member;
   state.memberChatLogs = chatLogsPayload.chatLogs || [];
@@ -3655,6 +3776,15 @@ function bindEvents() {
     localStorage.setItem(storageKeys.memberChatSearch, $("#memberChatSearchInput").value);
     renderMemberChatLogs();
   });
+  $("#memberChatChannelFilter").addEventListener("change", () => {
+    localStorage.setItem(storageKeys.memberChatChannelFilter, $("#memberChatChannelFilter").value);
+    renderMemberChatLogs();
+  });
+  $("#memberChatDateRange").addEventListener("change", () => {
+    localStorage.setItem(storageKeys.memberChatDateRange, $("#memberChatDateRange").value);
+    renderMemberChatLogs();
+  });
+  $("#exportMemberChatLogs").addEventListener("click", exportMemberChatLogs);
   $("#memberSearchInput").addEventListener("keydown", event => {
     if (event.key === "Enter") {
       event.preventDefault();
