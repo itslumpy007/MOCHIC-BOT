@@ -2826,14 +2826,53 @@ async function resolveVerifyMessageId() {
       saveConfig();
     }
 
-    const messages = await channel.messages.fetch({ limit: 25 });
-    const verifyMessage = messages.find(message =>
-      message.author?.id === client.user.id &&
-      message.embeds?.some(embed =>
+    const isVerifyPanelMessage = message => {
+      if (!message || message.author?.id !== client.user.id) {
+        return false;
+      }
+
+      const hasExpectedEmbed = message.embeds?.some(embed =>
         typeof embed.title === "string" &&
-        embed.title.toLowerCase().includes("welcome to the mochi garden")
-      )
-    );
+        (
+          embed.title.toLowerCase().includes("tiktok name verification") ||
+          embed.title.toLowerCase().includes("welcome to the mochi garden")
+        )
+      );
+
+      const hasExpectedButton = message.components?.some(row =>
+        row.components?.some(component => component.customId === "verify:tiktok-check")
+      );
+
+      return Boolean(hasExpectedEmbed || hasExpectedButton);
+    };
+
+    const fetchVerifyPanelMessage = async () => {
+      let before = null;
+      for (let page = 0; page < 5; page += 1) {
+        const messages = await channel.messages.fetch({
+          limit: 100,
+          ...(before ? { before } : {})
+        });
+
+        if (!messages.size) {
+          return null;
+        }
+
+        const verifyMessage = messages.find(isVerifyPanelMessage);
+        if (verifyMessage) {
+          return verifyMessage;
+        }
+
+        before = [...messages.values()].at(-1)?.id || null;
+        if (!before || messages.size < 100) {
+          return null;
+        }
+      }
+
+      return null;
+    };
+
+    const verifyMessage = await fetchVerifyPanelMessage();
 
     if (!verifyMessage) return null;
 
