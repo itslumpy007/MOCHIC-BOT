@@ -9244,15 +9244,15 @@ client.on("interactionCreate", async interaction => {
             embeds: [
               makeEmbed({
                 title: "Server rules",
-                description: "Please keep everything comfy, safe, and fun for everyone.",
+                description: "A cozy little guide to keep the server kind, comfy, and fun for everyone.",
                 color: COLORS.purple,
                 fields: [
-                  { name: "1", value: "Be kind and respectful to everyone.", inline: false },
-                  { name: "2", value: "No spam, harassment, or drama.", inline: false },
-                  { name: "3", value: "Follow Discord ToS at all times.", inline: false },
-                  { name: "4", value: "Use channels for their correct purpose.", inline: false },
-                  { name: "5", value: "Be active in general chat within two months, or you may be kicked from the server.", inline: false },
-                  { name: "6", value: `Please verify in <#${getVerifyChannelId()}> to access the server.`, inline: false }
+                  { name: "1", value: "Be kind, thoughtful, and respectful to everyone.", inline: false },
+                  { name: "2", value: "Please keep spam, harassment, and drama out of the chat.", inline: false },
+                  { name: "3", value: "Follow Discord's Terms of Service and community rules.", inline: false },
+                  { name: "4", value: "Use each channel for its intended purpose.", inline: false },
+                  { name: "5", value: "Stay active in general chat within two months, or you may be kicked from the server.", inline: false },
+                  { name: "6", value: `Please verify in <#${getVerifyChannelId()}> so you can fully access the server.`, inline: false }
                 ]
               })
             ]
