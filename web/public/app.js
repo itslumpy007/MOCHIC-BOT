@@ -271,6 +271,7 @@ const settingLabels = {
   rulesChannelId: "Rules channel ID",
   welcomeChannelId: "Welcome channel ID",
   generalChatChannelId: "General chat channel ID",
+  generalChatInactivityEnabled: "General chat inactivity",
   logChannelId: "Log channel ID",
   automodLogChannelId: "AutoMod log channel ID",
   mutedRoleId: "Muted role ID"
@@ -1281,11 +1282,17 @@ function renderAttentionBoard() {
   const googleError = state.config?.automod?.googleBlockListLastError;
   const automationIssues = Array.isArray(reactionRoles.issues) ? reactionRoles.issues : [];
   const generalChatChannelId = state.config?.settings?.generalChatChannelId || "";
+  const generalRuleEnabled = state.config?.settings?.generalChatInactivityEnabled !== false;
 
   if (!generalChatChannelId) {
     alerts.push({
       title: "General chat activity check",
       detail: "Set a General chat channel ID in Settings so the two-month inactivity kick rule can run."
+    });
+  } else if (!generalRuleEnabled) {
+    alerts.push({
+      title: "General chat inactivity rule paused",
+      detail: "The inactivity kick rule is temporarily disabled. Re-enable it when you're ready."
     });
   }
 
@@ -1343,6 +1350,48 @@ function renderAttentionBoard() {
         : renderEmptyState("All calm", "No active attention cards right now.")}
     </div>
   `;
+}
+
+function renderGeneralChatRulePanel() {
+  const rule = state.dashboard?.generalChatRule || {};
+  const enabled = rule.enabled !== false;
+  const channelLabel = rule.channelId ? (rule.channelName ? `#${rule.channelName}` : rule.channelId) : "Not set";
+  const membersAtRisk = Array.isArray(rule.membersAtRisk) ? rule.membersAtRisk : [];
+
+  $("#generalChatRuleSummary").innerHTML = [
+    ["Status", enabled ? "Enabled" : "Disabled"],
+    ["Channel", channelLabel],
+    ["At Risk", rule.atRiskCount ?? membersAtRisk.length ?? 0],
+    ["Threshold", `${rule.thresholdDays || 60} days`],
+    ["Last Checked", rule.checkedAt ? formatDate(rule.checkedAt) : "Never"],
+    ["Last Run", rule.lastRun?.ranAt ? formatDate(rule.lastRun.ranAt) : "Not yet"]
+  ].map(([label, value]) => `<article class="summary-item"><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`).join("");
+
+  $("#toggleGeneralChatRule").textContent = enabled ? "Disable Rule Temporarily" : "Enable Rule";
+  $("#runGeneralChatCheck").disabled = !rule.channelId;
+  $("#refreshGeneralChatWatchlist").disabled = false;
+
+  if (!rule.channelId) {
+    $("#generalChatRiskList").innerHTML = renderEmptyState("No general chat channel", "Set the channel first to see the at-risk list and run the inactivity check.");
+    return;
+  }
+
+  if (!enabled) {
+    $("#generalChatRiskList").innerHTML = renderEmptyState("Rule paused", "Turn the inactivity rule back on to refresh the watchlist and resume kicking inactive members.");
+    return;
+  }
+
+  if (!membersAtRisk.length) {
+    $("#generalChatRiskList").innerHTML = renderEmptyState("All caught up", "Nobody is currently past the two-month activity threshold.");
+    return;
+  }
+
+  $("#generalChatRiskList").innerHTML = membersAtRisk.map(member => `
+    <article class="event">
+      <strong>${escapeHtml(member.tag)} <span class="badge">${escapeHtml(member.daysInactive)}d inactive</span>${member.kickable ? "" : ' <span class="badge">Not kickable</span>'}</strong>
+      <p>${escapeHtml(member.lastActiveText || "No activity found")}<br>${escapeHtml(member.userId)}</p>
+    </article>
+  `).join("");
 }
 
 function renderWorkloadSummary() {
@@ -1747,11 +1796,24 @@ function renderSettings() {
   const automod = state.config?.automod || {};
 
   $("#generalSettingsFields").innerHTML = Object.entries(settingLabels)
-    .map(([key, label]) => `
-      <label>${label}
-        <input data-setting="${key}" value="${escapeHtml(settings[key] || "")}">
-      </label>
-    `).join("");
+    .map(([key, label]) => {
+      if (key === "generalChatInactivityEnabled") {
+        return `
+          <label>${label}
+            <select data-setting="${key}">
+              <option value="true" ${String(settings[key] ?? true) === "true" ? "selected" : ""}>On</option>
+              <option value="false" ${String(settings[key] ?? true) === "false" ? "selected" : ""}>Off</option>
+            </select>
+          </label>
+        `;
+      }
+
+      return `
+        <label>${label}
+          <input data-setting="${key}" value="${escapeHtml(settings[key] || "")}" placeholder="${key === "tiktokHandle" ? "Paste @yourhandle or tiktok.com/@yourhandle" : (key === "welcomeChannelId" || key === "generalChatChannelId" || key === "anonymousAffirmationsChannelId" ? "Channel ID" : "")}">
+        </label>
+      `;
+    }).join("");
 
   $("#affirmationsSettingsFields").innerHTML = Object.entries(affirmationsSettingLabels)
     .map(([key, label]) => {
@@ -2933,10 +2995,22 @@ function renderEmptyState(title, description) {
   `;
 }
 
+async function updateGeneralChatRule(action) {
+  const response = await api("/api/general-chat-rule", {
+    method: "POST",
+    body: JSON.stringify({ action })
+  });
+  state.dashboard = state.dashboard || {};
+  state.dashboard.generalChatRule = response.rule || state.dashboard.generalChatRule;
+  renderAll();
+  return response;
+}
+
 function renderAll() {
   renderMetrics();
   renderQuickActions();
   renderAttentionBoard();
+  renderGeneralChatRulePanel();
   renderWorkloadSummary();
   renderActivityFilters();
   renderActivityStream();
@@ -3696,6 +3770,9 @@ function bindEvents() {
   $("#repostRolePanel").addEventListener("click", () => repostRolePanel().catch(error => setAlert(error.message, "error")));
   $("#repairVerifyPanel").addEventListener("click", () => repairVerifyPanel().catch(error => setAlert(error.message, "error")));
   $("#repairRolePanel").addEventListener("click", () => repairRolePanel().catch(error => setAlert(error.message, "error")));
+  $("#runGeneralChatCheck").addEventListener("click", () => updateGeneralChatRule("run-now").catch(error => setAlert(error.message, "error")));
+  $("#toggleGeneralChatRule").addEventListener("click", () => updateGeneralChatRule("toggle").catch(error => setAlert(error.message, "error")));
+  $("#refreshGeneralChatWatchlist").addEventListener("click", () => loadAll().catch(error => setAlert(error.message, "error")));
   $("#lockVerifiedCurrent").addEventListener("click", () => setVerifiedVisibility(true, "current").catch(error => setAlert(error.message, "error")));
   $("#unlockVerifiedCurrent").addEventListener("click", () => setVerifiedVisibility(false, "current").catch(error => setAlert(error.message, "error")));
   $("#lockVerifiedAll").addEventListener("click", () => setVerifiedVisibility(true, "all").catch(error => setAlert(error.message, "error")));

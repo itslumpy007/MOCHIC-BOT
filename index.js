@@ -271,6 +271,7 @@ function createDefaultConfig() {
       rulesChannelId: null,
       welcomeChannelId: null,
       generalChatChannelId: null,
+      generalChatInactivityEnabled: true,
       anonymousAffirmationsEnabled: true,
       anonymousAffirmationsChannelId: null,
       anonymousAffirmationsCooldownMs: 60 * 1000,
@@ -349,6 +350,10 @@ function getWelcomeChannelId() {
 
 function getGeneralChatChannelId() {
   return config.settings?.generalChatChannelId || null;
+}
+
+function isGeneralChatInactivityEnabled() {
+  return config.settings?.generalChatInactivityEnabled !== false;
 }
 
 function isAnonymousAffirmationsEnabled() {
@@ -742,7 +747,96 @@ async function buildGeneralChatActivityMap(channel, cutoffTimestamp) {
   return latestByUser;
 }
 
-async function enforceGeneralChatActivity(guild = null) {
+async function buildGeneralChatRuleStatus(guild = null, limit = 10) {
+  const targetGuild = guild || await client.guilds.fetch(GUILD_ID).catch(() => client.guilds.cache.get(GUILD_ID) || null);
+  if (!targetGuild) {
+    return {
+      enabled: isGeneralChatInactivityEnabled(),
+      channelId: getGeneralChatChannelId(),
+      channelName: null,
+      thresholdDays: 60,
+      checkedAt: new Date().toISOString(),
+      skipped: "guild-missing",
+      membersAtRisk: [],
+      atRiskCount: 0,
+      lastRun: null
+    };
+  }
+
+  const generalChannel = await resolveGeneralChatChannel(targetGuild);
+  if (!generalChannel) {
+    return {
+      enabled: isGeneralChatInactivityEnabled(),
+      channelId: getGeneralChatChannelId(),
+      channelName: null,
+      thresholdDays: 60,
+      checkedAt: new Date().toISOString(),
+      skipped: "general-channel-missing",
+      membersAtRisk: [],
+      atRiskCount: 0,
+      lastRun: null
+    };
+  }
+
+  const botMember = targetGuild.members.me || await targetGuild.members.fetchMe().catch(() => null);
+  const permissions = typeof generalChannel.permissionsFor === "function" ? generalChannel.permissionsFor(botMember) : null;
+  if (!permissions?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory])) {
+    return {
+      enabled: isGeneralChatInactivityEnabled(),
+      channelId: getGeneralChatChannelId() || null,
+      channelName: generalChannel.name || null,
+      thresholdDays: 60,
+      checkedAt: new Date().toISOString(),
+      skipped: "missing-channel-permissions",
+      membersAtRisk: [],
+      atRiskCount: 0,
+      lastRun: null
+    };
+  }
+
+  const cutoffTimestamp = Date.now() - getGeneralChatInactiveThresholdMs();
+  const recentActivity = await buildGeneralChatActivityMap(generalChannel, cutoffTimestamp);
+  const members = await targetGuild.members.fetch().catch(() => targetGuild.members.cache);
+  const membersAtRisk = [];
+
+  for (const member of members.values()) {
+    if (isGeneralChatKickExempt(member)) continue;
+
+    const lastChatAt = recentActivity.get(member.id) || member.joinedTimestamp || 0;
+    if (lastChatAt && lastChatAt >= cutoffTimestamp) continue;
+
+    const lastActiveText = lastChatAt ? `<t:${Math.floor(lastChatAt / 1000)}:F>` : "their join date";
+    membersAtRisk.push({
+      userId: member.user.id,
+      tag: member.user.tag,
+      lastActiveAt: lastChatAt ? new Date(lastChatAt).toISOString() : null,
+      lastActiveText,
+      daysInactive: Math.max(0, Math.ceil((Date.now() - lastChatAt) / (24 * 60 * 60 * 1000))),
+      kickable: Boolean(member.kickable)
+    });
+  }
+
+  membersAtRisk.sort((a, b) => b.daysInactive - a.daysInactive || a.tag.localeCompare(b.tag));
+
+  return {
+    enabled: isGeneralChatInactivityEnabled(),
+    channelId: generalChannel.id,
+    channelName: generalChannel.name || null,
+    thresholdDays: 60,
+    checkedAt: new Date().toISOString(),
+    skipped: null,
+    membersAtRisk: membersAtRisk.slice(0, limit),
+    atRiskCount: membersAtRisk.length,
+    lastRun: null
+  };
+}
+
+async function enforceGeneralChatActivity(guild = null, options = {}) {
+  const force = Boolean(options.force);
+  if (!force && !isGeneralChatInactivityEnabled()) {
+    return { checked: 0, kicked: 0, skipped: "disabled" };
+  }
+
   const targetGuild = guild || await client.guilds.fetch(GUILD_ID).catch(() => client.guilds.cache.get(GUILD_ID) || null);
   if (!targetGuild) return { checked: 0, kicked: 0, skipped: "guild-missing" };
 
@@ -4462,6 +4556,7 @@ function buildSettingsSummary() {
     `Verify channel: ${getVerifyChannelId() ? `<#${getVerifyChannelId()}>` : "Not set"}`,
     `Rules channel: ${getRulesChannelId() ? `<#${getRulesChannelId()}>` : "Not set"}`,
     `General chat: ${getGeneralChatChannelId() ? `<#${getGeneralChatChannelId()}>` : "Not set"}`,
+    `General chat inactivity: ${isGeneralChatInactivityEnabled() ? "Enabled" : "Disabled"}`,
     `Anonymous affirmations: ${isAnonymousAffirmationsEnabled() ? "Enabled" : "Disabled"} (${getAnonymousAffirmationsChannelId() ? `<#${getAnonymousAffirmationsChannelId()}>` : "Not set"})`,
     `Muted role: ${getMutedRoleId() ? `<@&${getMutedRoleId()}>` : "Not set"}`,
     buildTikTokVerificationSummary()
@@ -6629,6 +6724,17 @@ async function buildWebDashboardPayload() {
     .slice(-25)
     .reverse();
   const reactionRoleHealth = await buildReactionRoleHealth();
+  const generalChatRule = await buildGeneralChatRuleStatus(null, 10).catch(() => ({
+    enabled: isGeneralChatInactivityEnabled(),
+    channelId: getGeneralChatChannelId() || null,
+    channelName: null,
+    thresholdDays: 60,
+    checkedAt: new Date().toISOString(),
+    skipped: "unavailable",
+    membersAtRisk: [],
+    atRiskCount: 0,
+    lastRun: null
+  }));
 
   return {
     client: {
@@ -6655,6 +6761,7 @@ async function buildWebDashboardPayload() {
       log: getLogChannelId(),
       automodLog: getAutoModLogChannelId()
     },
+    generalChatRule,
     automod: {
       invites: config.automod.invites,
       spam: config.automod.spam,
@@ -6694,6 +6801,7 @@ function buildWebConfigPayload() {
       rulesChannelId: config.settings.rulesChannelId || "",
       welcomeChannelId: getWelcomeChannelId() || "",
       generalChatChannelId: getGeneralChatChannelId() || "",
+      generalChatInactivityEnabled: isGeneralChatInactivityEnabled(),
       anonymousAffirmationsEnabled: isAnonymousAffirmationsEnabled(),
       anonymousAffirmationsChannelId: getAnonymousAffirmationsChannelId() || "",
       anonymousAffirmationsCooldownMs: getAnonymousAffirmationsCooldownMs(),
@@ -6728,6 +6836,7 @@ function updateWebSettings(auth, payload) {
     "rulesChannelId",
     "welcomeChannelId",
     "generalChatChannelId",
+    "generalChatInactivityEnabled",
     "anonymousAffirmationsEnabled",
     "anonymousAffirmationsChannelId",
     "anonymousAffirmationsCooldownMs",
@@ -6759,6 +6868,9 @@ function updateWebSettings(auth, payload) {
   const nextGeneralChatChannelId = Object.prototype.hasOwnProperty.call(payload, "generalChatChannelId")
     ? String(payload.generalChatChannelId || "").trim() || null
     : config.settings.generalChatChannelId || null;
+  const nextGeneralChatInactivityEnabled = Object.prototype.hasOwnProperty.call(payload, "generalChatInactivityEnabled")
+    ? ["true", "1", "yes", "on"].includes(String(payload.generalChatInactivityEnabled).toLowerCase())
+    : isGeneralChatInactivityEnabled();
   const nextAffirmationsEnabled = Object.prototype.hasOwnProperty.call(payload, "anonymousAffirmationsEnabled")
     ? ["true", "1", "yes", "on"].includes(String(payload.anonymousAffirmationsEnabled).toLowerCase())
     : isAnonymousAffirmationsEnabled();
@@ -6776,6 +6888,7 @@ function updateWebSettings(auth, payload) {
     rulesChannelId: config.settings.rulesChannelId,
     welcomeChannelId: config.settings.welcomeChannelId,
     generalChatChannelId: config.settings.generalChatChannelId,
+    generalChatInactivityEnabled: config.settings.generalChatInactivityEnabled,
     anonymousAffirmationsEnabled: config.settings.anonymousAffirmationsEnabled,
     anonymousAffirmationsChannelId: config.settings.anonymousAffirmationsChannelId,
     anonymousAffirmationsCooldownMs: config.settings.anonymousAffirmationsCooldownMs,
@@ -6802,6 +6915,8 @@ function updateWebSettings(auth, payload) {
         config.settings[key] = nextAffirmationsCooldownMs;
       } else if (key === "generalChatChannelId") {
         config.settings[key] = nextGeneralChatChannelId;
+      } else if (key === "generalChatInactivityEnabled") {
+        config.settings[key] = nextGeneralChatInactivityEnabled;
       } else if (key === "messageArchiveEnabled") {
         config.settings[key] = nextMessageArchiveEnabled;
       } else if (key === "messageArchiveRetentionDays") {
@@ -6825,6 +6940,7 @@ function updateWebSettings(auth, payload) {
     rulesChannelId: config.settings.rulesChannelId,
     welcomeChannelId: config.settings.welcomeChannelId,
     generalChatChannelId: config.settings.generalChatChannelId,
+    generalChatInactivityEnabled: config.settings.generalChatInactivityEnabled,
     anonymousAffirmationsEnabled: config.settings.anonymousAffirmationsEnabled,
     anonymousAffirmationsChannelId: config.settings.anonymousAffirmationsChannelId,
     anonymousAffirmationsCooldownMs: config.settings.anonymousAffirmationsCooldownMs,
@@ -7843,6 +7959,16 @@ async function handleWebApi(req, res, pathname) {
     return sendWebJson(res, 200, buildWebConfigPayload());
   }
 
+  if (req.method === "GET" && pathname === "/api/general-chat-rule") {
+    if (!hasWebAccess(auth, "mod")) {
+      return sendWebJson(res, 403, { error: "Moderator web access is required." });
+    }
+
+    return sendWebJson(res, 200, {
+      rule: await buildGeneralChatRuleStatus(null, 10)
+    });
+  }
+
   if (req.method === "GET" && pathname === "/api/web-accounts") {
     if (!hasWebAccess(auth, "admin")) {
       return sendWebJson(res, 403, { error: "Admin web access is required." });
@@ -7920,6 +8046,52 @@ async function handleWebApi(req, res, pathname) {
       ok: true,
       member: serializeWebMember(member, user)
     });
+  }
+
+  if (req.method === "POST" && pathname === "/api/general-chat-rule") {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
+
+    const body = await readWebJsonBody(req);
+    const action = String(body.action || "").trim().toLowerCase();
+
+    if (action === "toggle") {
+      config.settings.generalChatInactivityEnabled = !isGeneralChatInactivityEnabled();
+      saveConfig();
+      recordAuditLog(getWebModeratorTag(auth), config.settings.generalChatInactivityEnabled
+        ? "general-chat-inactivity-enabled"
+        : "general-chat-inactivity-disabled", {
+        generalChatChannelId: getGeneralChatChannelId(),
+        enabled: config.settings.generalChatInactivityEnabled
+      });
+      return sendWebJson(res, 200, {
+        ok: true,
+        rule: await buildGeneralChatRuleStatus(null, 10)
+      });
+    }
+
+    if (action === "run-now") {
+      const result = await enforceGeneralChatActivity(null, { force: true });
+      const rule = await buildGeneralChatRuleStatus(null, 10);
+      rule.lastRun = {
+        ...result,
+        ranAt: new Date().toISOString(),
+        forced: true
+      };
+      recordAuditLog(getWebModeratorTag(auth), "general-chat-inactivity-ran", {
+        ...result,
+        generalChatChannelId: getGeneralChatChannelId(),
+        forced: true
+      });
+      return sendWebJson(res, 200, {
+        ok: true,
+        result,
+        rule
+      });
+    }
+
+    return sendWebJson(res, 400, { error: "Choose a valid general chat action." });
   }
 
   if (req.method === "POST" && pathname === "/api/affirmations-panel") {
