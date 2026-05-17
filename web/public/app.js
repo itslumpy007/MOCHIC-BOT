@@ -1279,6 +1279,14 @@ function renderAttentionBoard() {
   const reactionRoles = state.dashboard?.reactionRoles || {};
   const googleError = state.config?.automod?.googleBlockListLastError;
   const automationIssues = Array.isArray(reactionRoles.issues) ? reactionRoles.issues : [];
+  const generalChatChannelId = state.config?.settings?.generalChatChannelId || "";
+
+  if (!generalChatChannelId) {
+    alerts.push({
+      title: "General chat activity check",
+      detail: "Set a General chat channel ID in Settings so the two-month inactivity kick rule can run."
+    });
+  }
 
   if (!reactionRoles.ready || !reactionRoles.botManageRoles || !reactionRoles.roleHierarchyOk) {
     alerts.push({
