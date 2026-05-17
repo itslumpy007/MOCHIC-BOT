@@ -9243,8 +9243,8 @@ client.on("interactionCreate", async interaction => {
           await rulesChannel.send({
             embeds: [
               makeEmbed({
-                title: "Server rules",
-                description: "A cozy little guide to keep the server kind, comfy, and fun for everyone.",
+                title: "Server rules ✿",
+                description: "A cozy little guide to keep the server kind, comfy, and fun for everyone. Thanks for helping keep Mochi sweet and safe.",
                 color: COLORS.purple,
                 fields: [
                   { name: "1", value: "Be kind, thoughtful, and respectful to everyone.", inline: false },
