@@ -1124,6 +1124,7 @@ function renderRuntime() {
     ["Uptime", `${Math.floor((client.uptimeSeconds || 0) / 60)} minutes`],
     ["Verify Channel", channels.verify || "Not set"],
     ["Rules Channel", channels.rules || "Not set"],
+    ["General Chat", channels.general || "Not set"],
     ["Affirmations Channel", channels.affirmations || "Not set"],
     ["Log Channel", channels.log || "Not set"],
     ["AutoMod Log", channels.automodLog || "Not set"]
