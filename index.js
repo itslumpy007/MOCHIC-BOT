@@ -2894,6 +2894,149 @@ function makeEmbed({ title, description, color = COLORS.pink, fields = [], thumb
   return embed;
 }
 
+function buildCuteRulesCardAttachment() {
+  const canvas = createCanvas(1280, 480);
+  const ctx = canvas.getContext("2d");
+
+  const roundedRect = (x, y, w, h, r) => {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  };
+
+  const fillRoundedRect = (x, y, w, h, r, fill) => {
+    ctx.save();
+    roundedRect(x, y, w, h, r);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.restore();
+  };
+
+  const strokeRoundedRect = (x, y, w, h, r, stroke, width = 2) => {
+    ctx.save();
+    roundedRect(x, y, w, h, r);
+    ctx.lineWidth = width;
+    ctx.strokeStyle = stroke;
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  const background = ctx.createLinearGradient(0, 0, 1280, 480);
+  background.addColorStop(0, "#fff4fb");
+  background.addColorStop(0.5, "#f6f0ff");
+  background.addColorStop(1, "#eef9ff");
+  ctx.fillStyle = background;
+  ctx.fillRect(0, 0, 1280, 480);
+
+  ctx.globalAlpha = 0.22;
+  ctx.fillStyle = "#ffffff";
+  for (const [x, y, r] of [[120, 92, 86], [1140, 92, 110], [1070, 390, 96], [220, 392, 104]]) {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  for (const [x, y, s] of [[86, 86, 18], [104, 128, 10], [1160, 92, 16], [1120, 132, 12], [1000, 382, 14], [250, 374, 12], [190, 116, 12], [1070, 112, 11]]) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(Math.PI / 4);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.78)";
+    ctx.fillRect(-s / 2, -2, s, 4);
+    ctx.fillRect(-2, -s / 2, 4, s);
+    ctx.restore();
+  }
+
+  fillRoundedRect(44, 38, 1192, 404, 38, "rgba(255, 255, 255, 0.58)");
+  strokeRoundedRect(44, 38, 1192, 404, 38, "rgba(216, 189, 255, 0.55)", 3);
+  fillRoundedRect(92, 82, 1096, 316, 30, "rgba(255, 255, 255, 0.78)");
+  strokeRoundedRect(92, 82, 1096, 316, 30, "rgba(247, 217, 240, 0.72)", 2);
+
+  ctx.save();
+  ctx.translate(210, 238);
+  ctx.fillStyle = "#f5cfe8";
+  ctx.beginPath();
+  ctx.arc(0, 0, 78, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#fff6fb";
+  ctx.beginPath();
+  ctx.arc(0, 0, 61, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#f19ec3";
+  ctx.font = "bold 54px sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("✿", 0, 18);
+  ctx.restore();
+
+  ctx.fillStyle = "#775b86";
+  ctx.font = "bold 58px sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText("Mochi Server Rules", 336, 166);
+  ctx.fillStyle = "#9a7fa8";
+  ctx.font = "24px sans-serif";
+  ctx.fillText("A tiny guide for keeping things sweet, safe, and cozy.", 336, 214);
+  ctx.fillStyle = "#b58ec0";
+  ctx.font = "22px sans-serif";
+  ctx.fillText("Please read the rules below, then enjoy your stay.", 336, 254);
+
+  ctx.fillStyle = "#d9c2ea";
+  ctx.font = "20px sans-serif";
+  ctx.fillText("Thank you for helping keep the garden lovely ✨", 336, 304);
+
+  ctx.strokeStyle = "rgba(214, 183, 235, 0.65)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(336, 280);
+  ctx.lineTo(932, 280);
+  ctx.stroke();
+
+  ctx.fillStyle = "#f5c2dc";
+  ctx.beginPath();
+  ctx.arc(1038, 232, 82, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#fff7fb";
+  ctx.beginPath();
+  ctx.arc(1038, 232, 62, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#ee99c2";
+  ctx.beginPath();
+  ctx.moveTo(1016, 226);
+  ctx.bezierCurveTo(1016, 204, 1040, 196, 1038, 218);
+  ctx.bezierCurveTo(1036, 196, 1060, 204, 1060, 226);
+  ctx.bezierCurveTo(1060, 252, 1038, 264, 1038, 264);
+  ctx.bezierCurveTo(1038, 264, 1016, 252, 1016, 226);
+  ctx.fill();
+
+  return {
+    attachment: canvas.toBuffer("image/png"),
+    name: "cute-rules-card.png"
+  };
+}
+
+function buildCuteRulesMessage() {
+  const attachment = buildCuteRulesCardAttachment();
+  const embed = makeEmbed({
+    title: "Server rules ✿",
+    description: "A cozy little guide to keep the server kind, comfy, and fun for everyone. Thanks for helping keep Mochi sweet and safe.",
+    color: COLORS.purple,
+    fields: [
+      { name: "1", value: "Be kind, thoughtful, and respectful to everyone.", inline: false },
+      { name: "2", value: "Please keep spam, harassment, and drama out of the chat.", inline: false },
+      { name: "3", value: "Follow Discord's Terms of Service and community rules.", inline: false },
+      { name: "4", value: "Use each channel for its intended purpose.", inline: false },
+      { name: "5", value: "Stay active in general chat within two months, or you may be kicked from the server.", inline: false },
+      { name: "6", value: `Please verify in <#${getVerifyChannelId()}> so you can fully access the server.`, inline: false }
+    ],
+    image: { url: `attachment://${attachment.name}` }
+  });
+
+  return { attachment, embed };
+}
+
 async function logEmbed(embed) {
   try {
     const logChannelId = getLogChannelId();
@@ -9240,22 +9383,10 @@ client.on("interactionCreate", async interaction => {
         }
         if (action === "setuprules") {
           const rulesChannel = await client.channels.fetch(getRulesChannelId());
+          const { attachment, embed } = buildCuteRulesMessage();
           await rulesChannel.send({
-            embeds: [
-              makeEmbed({
-                title: "Server rules ✿",
-                description: "A cozy little guide to keep the server kind, comfy, and fun for everyone. Thanks for helping keep Mochi sweet and safe.",
-                color: COLORS.purple,
-                fields: [
-                  { name: "1", value: "Be kind, thoughtful, and respectful to everyone.", inline: false },
-                  { name: "2", value: "Please keep spam, harassment, and drama out of the chat.", inline: false },
-                  { name: "3", value: "Follow Discord's Terms of Service and community rules.", inline: false },
-                  { name: "4", value: "Use each channel for its intended purpose.", inline: false },
-                  { name: "5", value: "Stay active in general chat within two months, or you may be kicked from the server.", inline: false },
-                  { name: "6", value: `Please verify in <#${getVerifyChannelId()}> so you can fully access the server.`, inline: false }
-                ]
-              })
-            ]
+            files: [attachment],
+            embeds: [embed]
           });
           return interaction.reply({ content: "Rules posted.", ephemeral: true });
         }
@@ -10176,22 +10307,11 @@ client.on("interactionCreate", async interaction => {
 
     if (interaction.commandName === "setuprules") {
       const rulesChannel = await client.channels.fetch(getRulesChannelId());
+      const { attachment, embed } = buildCuteRulesMessage();
 
       await rulesChannel.send({
-        embeds: [
-          makeEmbed({
-            title: "Server rules",
-            description: "Please keep everything comfy, safe, and fun for everyone.",
-            color: COLORS.purple,
-            fields: [
-              { name: "1", value: "Be kind and respectful to everyone.", inline: false },
-              { name: "2", value: "No spam, harassment, or drama.", inline: false },
-              { name: "3", value: "Follow Discord ToS at all times.", inline: false },
-              { name: "4", value: "Use channels for their correct purpose.", inline: false },
-              { name: "5", value: `Please verify in <#${getVerifyChannelId()}> to access the server.`, inline: false }
-            ]
-          })
-        ]
+        files: [attachment],
+        embeds: [embed]
       });
 
       return interaction.reply({ content: "Rules posted.", ephemeral: true });
