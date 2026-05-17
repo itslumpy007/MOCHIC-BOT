@@ -272,6 +272,7 @@ function createDefaultConfig() {
       welcomeChannelId: null,
       generalChatChannelId: null,
       generalChatInactivityEnabled: true,
+      generalChatInactivityWarnings: {},
       anonymousAffirmationsEnabled: true,
       anonymousAffirmationsChannelId: null,
       anonymousAffirmationsCooldownMs: 60 * 1000,
@@ -354,6 +355,36 @@ function getGeneralChatChannelId() {
 
 function isGeneralChatInactivityEnabled() {
   return config.settings?.generalChatInactivityEnabled !== false;
+}
+
+function getGeneralChatInactivityWarningStore() {
+  if (!config.generalChatInactivityWarnings || typeof config.generalChatInactivityWarnings !== "object") {
+    config.generalChatInactivityWarnings = {};
+  }
+  return config.generalChatInactivityWarnings;
+}
+
+function wasGeneralChatWarningSent(memberId, lastActiveAt) {
+  if (!memberId || !lastActiveAt) return false;
+  const entry = getGeneralChatInactivityWarningStore()[memberId];
+  return Boolean(entry && entry.lastActiveAt === lastActiveAt);
+}
+
+function markGeneralChatWarningSent(memberId, lastActiveAt) {
+  if (!memberId || !lastActiveAt) return;
+  getGeneralChatInactivityWarningStore()[memberId] = {
+    lastActiveAt,
+    warnedAt: new Date().toISOString()
+  };
+  saveConfig();
+}
+
+function clearGeneralChatWarning(memberId) {
+  if (!memberId) return;
+  if (config.generalChatInactivityWarnings && typeof config.generalChatInactivityWarnings === "object") {
+    delete config.generalChatInactivityWarnings[memberId];
+    saveConfig();
+  }
 }
 
 function isAnonymousAffirmationsEnabled() {
@@ -493,6 +524,9 @@ function loadConfig() {
       notes: parsed.notes && typeof parsed.notes === "object" ? parsed.notes : {},
       cases: Array.isArray(parsed.cases) ? parsed.cases : [],
       appeals: Array.isArray(parsed.appeals) ? parsed.appeals : [],
+      generalChatInactivityWarnings: parsed.generalChatInactivityWarnings && typeof parsed.generalChatInactivityWarnings === "object"
+        ? parsed.generalChatInactivityWarnings
+        : {},
       auditLog: Array.isArray(parsed.auditLog) ? parsed.auditLog.slice(-200) : [],
       modTemplates: Array.isArray(parsed.modTemplates) ? parsed.modTemplates : defaults.modTemplates,
       webAccounts: Array.isArray(parsed.webAccounts)
@@ -795,6 +829,7 @@ async function buildGeneralChatRuleStatus(guild = null, limit = 10) {
   }
 
   const cutoffTimestamp = Date.now() - getGeneralChatInactiveThresholdMs();
+  const warningTimestamp = Date.now() - (53 * 24 * 60 * 60 * 1000);
   const recentActivity = await buildGeneralChatActivityMap(generalChannel, cutoffTimestamp);
   const members = await targetGuild.members.fetch().catch(() => targetGuild.members.cache);
   const membersAtRisk = [];
@@ -806,13 +841,17 @@ async function buildGeneralChatRuleStatus(guild = null, limit = 10) {
     if (lastChatAt && lastChatAt >= cutoffTimestamp) continue;
 
     const lastActiveText = lastChatAt ? `<t:${Math.floor(lastChatAt / 1000)}:F>` : "their join date";
+    const warningSent = wasGeneralChatWarningSent(member.id, lastChatAt);
+    const warningDue = Boolean(lastChatAt && lastChatAt < warningTimestamp && lastChatAt >= cutoffTimestamp);
     membersAtRisk.push({
       userId: member.user.id,
       tag: member.user.tag,
       lastActiveAt: lastChatAt ? new Date(lastChatAt).toISOString() : null,
       lastActiveText,
       daysInactive: Math.max(0, Math.ceil((Date.now() - lastChatAt) / (24 * 60 * 60 * 1000))),
-      kickable: Boolean(member.kickable)
+      kickable: Boolean(member.kickable),
+      warningSent,
+      warningDue
     });
   }
 
@@ -823,10 +862,13 @@ async function buildGeneralChatRuleStatus(guild = null, limit = 10) {
     channelId: generalChannel.id,
     channelName: generalChannel.name || null,
     thresholdDays: 60,
+    warningDays: 53,
     checkedAt: new Date().toISOString(),
     skipped: null,
     membersAtRisk: membersAtRisk.slice(0, limit),
     atRiskCount: membersAtRisk.length,
+    warningDueCount: membersAtRisk.filter(member => member.warningDue).length,
+    warningSentCount: membersAtRisk.filter(member => member.warningSent).length,
     lastRun: null
   };
 }
@@ -850,9 +892,11 @@ async function enforceGeneralChatActivity(guild = null, options = {}) {
   }
 
   const cutoffTimestamp = Date.now() - getGeneralChatInactiveThresholdMs();
+  const warningTimestamp = Date.now() - (53 * 24 * 60 * 60 * 1000);
   const recentActivity = await buildGeneralChatActivityMap(generalChannel, cutoffTimestamp);
   const members = await targetGuild.members.fetch().catch(() => targetGuild.members.cache);
   let checked = 0;
+  let warned = 0;
   let kicked = 0;
 
   for (const member of members.values()) {
@@ -861,9 +905,56 @@ async function enforceGeneralChatActivity(guild = null, options = {}) {
 
     const lastChatAt = recentActivity.get(member.id) || member.joinedTimestamp || 0;
     if (lastChatAt && lastChatAt >= cutoffTimestamp) continue;
-    if (!member.kickable) continue;
 
     const lastActiveText = lastChatAt ? `<t:${Math.floor(lastChatAt / 1000)}:F>` : "their join date";
+    const shouldWarn = Boolean(lastChatAt && lastChatAt < warningTimestamp && lastChatAt >= cutoffTimestamp);
+    const warningAlreadySent = wasGeneralChatWarningSent(member.id, lastChatAt);
+
+    if (shouldWarn && !warningAlreadySent) {
+      const warningReason = `No activity in ${generalChannel.name || "general chat"} for nearly 2 months. Last activity: ${lastActiveText}.`;
+      const warningEntry = addCase({
+        action: "automod:inactive-general-chat-warning",
+        targetId: member.user.id,
+        targetTag: member.user.tag,
+        moderatorTag: "AutoMod",
+        reason: warningReason,
+        details: [
+          { name: "Channel", value: `#${generalChannel.name || generalChannel.id}`, inline: true },
+          { name: "Last activity", value: lastActiveText, inline: true },
+          { name: "Follow-up", value: "Kick in about one week if there is still no activity.", inline: false }
+        ]
+      });
+
+      await member.user.send({
+        embeds: [
+          makeEmbed({
+            title: "A gentle reminder",
+            description: `You have about one week before you may be kicked from **${targetGuild.name}** for not chatting in ${generalChannel}.`,
+            color: COLORS.yellow,
+            fields: [
+              { name: "Last activity", value: lastActiveText, inline: true },
+              { name: "Channel", value: `${generalChannel}`, inline: true },
+              { name: "What to do", value: "Send a message in general chat to keep your spot.", inline: false }
+            ]
+          })
+        ]
+      }).catch(() => {});
+
+      markGeneralChatWarningSent(member.id, lastChatAt);
+      recordAutoModAnalytics("inactive-general-chat-warning", warningReason, member.user.tag);
+      warned += 1;
+
+      await logAutoModEmbed(
+        makeEmbed({
+          title: `Auto mod case #${warningEntry.id}`,
+          description: `${member.user.tag} was warned about general chat inactivity.`,
+          color: COLORS.yellow,
+          fields: buildCaseFields(warningEntry)
+        })
+      );
+    }
+
+    if (!member.kickable) continue;
     const reason = `No activity in ${generalChannel.name || "general chat"} for 2 months. Last activity: ${lastActiveText}.`;
     const entry = addCase({
       action: "automod:inactive-general-chat",
@@ -875,7 +966,7 @@ async function enforceGeneralChatActivity(guild = null, options = {}) {
         { name: "Channel", value: `#${generalChannel.name || generalChannel.id}`, inline: true },
         { name: "Last activity", value: lastActiveText, inline: true }
       ]
-    });
+      });
 
     await member.user.send({
       embeds: [
@@ -888,6 +979,7 @@ async function enforceGeneralChatActivity(guild = null, options = {}) {
     }).catch(() => {});
 
     await member.kick(reason).catch(() => {});
+    clearGeneralChatWarning(member.user.id);
     recordAutoModAnalytics("inactive-general-chat", reason, member.user.tag);
     kicked += 1;
 
@@ -901,7 +993,7 @@ async function enforceGeneralChatActivity(guild = null, options = {}) {
     );
   }
 
-  return { checked, kicked, skipped: null };
+  return { checked, warned, kicked, skipped: null };
 }
 
 function startGeneralChatSweep() {

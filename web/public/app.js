@@ -1362,7 +1362,10 @@ function renderGeneralChatRulePanel() {
     ["Status", enabled ? "Enabled" : "Disabled"],
     ["Channel", channelLabel],
     ["At Risk", rule.atRiskCount ?? membersAtRisk.length ?? 0],
+    ["Warnings Due", rule.warningDueCount ?? membersAtRisk.filter(member => member.warningDue).length ?? 0],
+    ["Warnings Sent", rule.warningSentCount ?? membersAtRisk.filter(member => member.warningSent).length ?? 0],
     ["Threshold", `${rule.thresholdDays || 60} days`],
+    ["Warning At", `${rule.warningDays || 53} days`],
     ["Last Checked", rule.checkedAt ? formatDate(rule.checkedAt) : "Never"],
     ["Last Run", rule.lastRun?.ranAt ? formatDate(rule.lastRun.ranAt) : "Not yet"]
   ].map(([label, value]) => `<article class="summary-item"><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`).join("");
@@ -1388,7 +1391,7 @@ function renderGeneralChatRulePanel() {
 
   $("#generalChatRiskList").innerHTML = membersAtRisk.map(member => `
     <article class="event">
-      <strong>${escapeHtml(member.tag)} <span class="badge">${escapeHtml(member.daysInactive)}d inactive</span>${member.kickable ? "" : ' <span class="badge">Not kickable</span>'}</strong>
+      <strong>${escapeHtml(member.tag)} <span class="badge">${escapeHtml(member.daysInactive)}d inactive</span>${member.warningSent ? ' <span class="badge">Warning sent</span>' : ''}${member.warningDue ? ' <span class="badge">Warning due</span>' : ''}${member.kickable ? "" : ' <span class="badge">Not kickable</span>'}</strong>
       <p>${escapeHtml(member.lastActiveText || "No activity found")}<br>${escapeHtml(member.userId)}</p>
     </article>
   `).join("");
