@@ -9251,7 +9251,7 @@ client.on("interactionCreate", async interaction => {
                   { name: "2", value: "No spam, harassment, or drama.", inline: false },
                   { name: "3", value: "Follow Discord ToS at all times.", inline: false },
                   { name: "4", value: "Use channels for their correct purpose.", inline: false },
-                  { name: "5", value: "Rate in general chat within two months, or you may be kicked from the server.", inline: false },
+                  { name: "5", value: "Be active in general chat within two months, or you may be kicked from the server.", inline: false },
                   { name: "6", value: `Please verify in <#${getVerifyChannelId()}> to access the server.`, inline: false }
                 ]
               })
