@@ -1361,12 +1361,12 @@ function renderGeneralChatRulePanel() {
   $("#generalChatRuleSummary").innerHTML = [
     ["Status", enabled ? "Enabled" : "Disabled"],
     ["Channel", channelLabel],
-    ["Notice", `Warn at ${rule.warningDays || 53} days, kick at ${rule.thresholdDays || 60} days`],
+    ["Notice", `Gentle reminder at ${rule.warningDays || 53} days, kick at ${rule.thresholdDays || 60} days`],
     ["At Risk", rule.atRiskCount ?? membersAtRisk.length ?? 0],
     ["Warnings Due", rule.warningDueCount ?? membersAtRisk.filter(member => member.warningDue).length ?? 0],
     ["Warnings Sent", rule.warningSentCount ?? membersAtRisk.filter(member => member.warningSent).length ?? 0],
     ["Threshold", `${rule.thresholdDays || 60} days`],
-    ["Warning At", `${rule.warningDays || 53} days`],
+    ["Gentle Reminder", `${rule.warningDays || 53} days`],
     ["Last Checked", rule.checkedAt ? formatDate(rule.checkedAt) : "Never"],
     ["Last Run", rule.lastRun?.ranAt ? formatDate(rule.lastRun.ranAt) : "Not yet"]
   ].map(([label, value]) => `<article class="summary-item"><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`).join("");
