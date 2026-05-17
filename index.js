@@ -5427,6 +5427,7 @@ function buildStatusEmbed() {
   const uptimeSeconds = Math.floor(startedAt / 1000);
   const verifyChannelId = getVerifyChannelId();
   const rulesChannelId = getRulesChannelId();
+  const generalChatChannelId = getGeneralChatChannelId();
   const logChannelId = getLogChannelId();
 
   return makeEmbed({
@@ -5439,7 +5440,7 @@ function buildStatusEmbed() {
       { name: "Ping", value: `${Math.round(client.ws.ping)}ms`, inline: true },
       { name: "Verify Channel", value: verifyChannelId ? `<#${verifyChannelId}>` : "Not set", inline: true },
       { name: "Rules Channel", value: rulesChannelId ? `<#${rulesChannelId}>` : "Not set", inline: true },
-      { name: "General Chat", value: getGeneralChatChannelId() ? `<#${getGeneralChatChannelId()}>` : "Not set", inline: true },
+      { name: "General Chat", value: generalChatChannelId ? `<#${generalChatChannelId}>` : "Not set", inline: true },
       { name: "Log Channel", value: logChannelId ? `<#${logChannelId}>` : "Not set", inline: true },
       { name: "AutoMod Log Channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
       { name: "TikTok Verify", value: isTikTokVerificationEnabled() ? `@${getTikTokHandle()}` : "Disabled", inline: true },
