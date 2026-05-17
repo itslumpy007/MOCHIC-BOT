@@ -295,7 +295,7 @@
                 <h3>Chat Logs</h3>
                 <label class="inline-search">Search chat<input id="memberChatSearchInput" placeholder="channel, content, moderator"></label>
               </div>
-              <p class="panel-note">Shows recent messages across readable server channels for the selected member.</p>
+              <p class="panel-note">Shows recent messages across readable server channels for the selected member. If the archive is enabled, this also includes stored history captured from that point forward.</p>
               <div class="button-row" style="margin-bottom: 12px;">
                 <label class="inline-search">Channel
                   <select id="memberChatChannelFilter">
@@ -571,6 +571,16 @@
               </div>
               <div class="form-grid" id="verificationSettingsFields"></div>
             </section>
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Panel Repair</h3>
+              </div>
+              <p class="panel-note">Use these if the verify panel or reaction role panel is missing, stale, or missing reactions.</p>
+              <div class="button-row">
+                <button class="ghost-button" id="repairVerifyPanel" type="button">Repair Verify Panel</button>
+                <button class="ghost-button" id="repairRolePanel" type="button">Repair Role Panel</button>
+              </div>
+            </section>
           </div>
 
           <div class="view-stack hidden" data-view-subtab-group="settings" data-subtab="safety">
@@ -584,6 +594,14 @@
                 <label>Roles<textarea id="exemptRoleIds" rows="4"></textarea></label>
                 <label>Users<textarea id="exemptUserIds" rows="4"></textarea></label>
               </div>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Message Archive</h3>
+                <button class="save-button" id="savePrivacySettings" type="button">Save</button>
+              </div>
+              <p class="panel-note">Stored member chat logs are captured for history search and retained for the window you set here.</p>
+              <div class="form-grid" id="privacySettingsFields"></div>
             </section>
           </div>
         </section>

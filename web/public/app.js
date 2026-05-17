@@ -275,6 +275,11 @@ const settingLabels = {
   mutedRoleId: "Muted role ID"
 };
 
+const privacySettingLabels = {
+  messageArchiveEnabled: "Archive member chat logs",
+  messageArchiveRetentionDays: "Archive retention (days)"
+};
+
 const affirmationsSettingLabels = {
   anonymousAffirmationsEnabled: "Anonymous affirmations enabled",
   anonymousAffirmationsChannelId: "Anonymous affirmations channel ID",
@@ -1769,6 +1774,26 @@ function renderSettings() {
       </label>
     `).join("");
 
+  $("#privacySettingsFields").innerHTML = Object.entries(privacySettingLabels)
+    .map(([key, label]) => {
+      if (key === "messageArchiveEnabled") {
+        return `
+          <label>${label}
+            <select data-setting="${key}">
+              <option value="true" ${String(settings[key] ?? true) === "true" ? "selected" : ""}>On</option>
+              <option value="false" ${String(settings[key] ?? true) === "false" ? "selected" : ""}>Off</option>
+            </select>
+          </label>
+        `;
+      }
+
+      return `
+        <label>${label}
+          <input type="number" min="1" max="3650" step="1" data-setting="${key}" value="${escapeHtml(settings[key] ?? 30)}" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="30">
+        </label>
+      `;
+    }).join("");
+
   $("#exemptChannelIds").value = (automod.exemptChannelIds || []).join(", ");
   $("#exemptRoleIds").value = (automod.exemptRoleIds || []).join(", ");
   $("#exemptUserIds").value = (automod.exemptUserIds || []).join(", ");
@@ -2519,8 +2544,16 @@ function buildMemberTimelineEntries(member) {
     moderatorTag: entry.moderatorTag,
     details: entry.details || []
   }));
+  const chatLogs = (state.memberChatLogs || []).map(entry => ({
+    type: "Chat",
+    createdAt: entry.createdAt,
+    title: `${entry.channelName || "Chat"} message`,
+    text: entry.content,
+    moderatorTag: entry.channelMention || "",
+    details: entry.url ? [`Open message: ${entry.url}`] : []
+  }));
 
-  return [...cases, ...warnings, ...notes]
+  return [...cases, ...warnings, ...notes, ...chatLogs]
     .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 }
 
@@ -2550,6 +2583,7 @@ function renderMemberTimeline() {
       <article class="event">
         <strong>${escapeHtml(entry.title)} <span class="badge">${escapeHtml(entry.type)}</span></strong>
         <p>${escapeHtml(formatDate(entry.createdAt))}<br>${escapeHtml(entry.text || "No details")}<br>${escapeHtml(entry.moderatorTag || "")}</p>
+        ${Array.isArray(entry.details) && entry.details.length ? `<p>${entry.details.map(detail => escapeHtml(detail)).join("<br>")}</p>` : ""}
       </article>
     `).join("")
     : renderEmptyState("No matching history", "Try a different member history search.");
@@ -3123,6 +3157,27 @@ async function saveSettings() {
   await loadAll();
 }
 
+async function savePrivacySettings() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to change privacy settings.", "error");
+    return;
+  }
+
+  const payload = collectSettingsPayload([
+    "messageArchiveEnabled",
+    "messageArchiveRetentionDays"
+  ]);
+
+  const result = await api("/api/settings", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+
+  state.config.settings = result.settings;
+  await loadAll();
+  setAlert("Archive settings saved.");
+}
+
 async function saveAllSettings() {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change server settings.", "error");
@@ -3365,6 +3420,31 @@ async function repostRolePanel() {
   setAlert("Role panel reposted.");
 }
 
+async function repairVerifyPanel() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to repair the verify panel.", "error");
+    return;
+  }
+
+  await api("/api/verification-panel", {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+
+  await loadAll();
+  setAlert("Verify panel repaired.");
+}
+
+async function repairRolePanel() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to repair the role panel.", "error");
+    return;
+  }
+
+  await repostRolePanel();
+  setAlert("Role panel repaired.");
+}
+
 async function setVerifiedVisibility(locked, scope) {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change verified visibility.", "error");
@@ -3568,6 +3648,7 @@ function bindEvents() {
   $("#syncGoogleBlockListButton").addEventListener("click", () => syncGoogleBlockList().catch(error => setAlert(error.message, "error")));
   $("#saveAllSettings").addEventListener("click", () => saveAllSettings().catch(error => setAlert(error.message, "error")));
   $("#saveSettings").addEventListener("click", () => saveSettings().catch(error => setAlert(error.message, "error")));
+  $("#savePrivacySettings").addEventListener("click", () => savePrivacySettings().catch(error => setAlert(error.message, "error")));
   $("#saveWebAccountButton").addEventListener("click", () => saveWebAccount().catch(error => setAlert(error.message, "error")));
   $("#deleteWebAccountButton").addEventListener("click", () => deleteWebAccount().catch(error => setAlert(error.message, "error")));
   $("#resetWebAccountPasswordButton").addEventListener("click", () => resetWebAccountPassword().catch(error => setAlert(error.message, "error")));
@@ -3603,6 +3684,8 @@ function bindEvents() {
   $("#postAffirmationsPanel").addEventListener("click", () => postAffirmationsPanel().catch(error => setAlert(error.message, "error")));
   $("#saveVerificationSettings").addEventListener("click", () => saveVerificationSettings().catch(error => setAlert(error.message, "error")));
   $("#repostRolePanel").addEventListener("click", () => repostRolePanel().catch(error => setAlert(error.message, "error")));
+  $("#repairVerifyPanel").addEventListener("click", () => repairVerifyPanel().catch(error => setAlert(error.message, "error")));
+  $("#repairRolePanel").addEventListener("click", () => repairRolePanel().catch(error => setAlert(error.message, "error")));
   $("#lockVerifiedCurrent").addEventListener("click", () => setVerifiedVisibility(true, "current").catch(error => setAlert(error.message, "error")));
   $("#unlockVerifiedCurrent").addEventListener("click", () => setVerifiedVisibility(false, "current").catch(error => setAlert(error.message, "error")));
   $("#lockVerifiedAll").addEventListener("click", () => setVerifiedVisibility(true, "all").catch(error => setAlert(error.message, "error")));

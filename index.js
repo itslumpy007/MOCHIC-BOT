@@ -155,6 +155,8 @@ let googleBlockListInterval = null;
 
 const dataDir = path.join(__dirname, "data");
 const configPath = path.join(dataDir, "config.json");
+const messageArchivePath = path.join(dataDir, "message-archive.jsonl");
+let messageArchiveLastPruneAt = 0;
 
 function createDefaultConfig() {
   return {
@@ -272,6 +274,8 @@ function createDefaultConfig() {
       logChannelId: null,
       automodLogChannelId: null,
       mutedRoleId: null,
+      messageArchiveEnabled: true,
+      messageArchiveRetentionDays: 30,
       tiktokHandle: "",
       tiktokNicknameAliases: [],
       verifiedRoleId: null,
@@ -556,6 +560,24 @@ function saveConfig() {
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 }
 
+function cloneAuditValue(value) {
+  if (value == null) return value;
+  if (Array.isArray(value)) return value.slice();
+  if (typeof value === "object") return JSON.parse(JSON.stringify(value));
+  return value;
+}
+
+function buildAuditDiff(before = {}, after = {}, keys = []) {
+  const changes = [];
+  for (const key of keys) {
+    const previous = cloneAuditValue(before?.[key]);
+    const next = cloneAuditValue(after?.[key]);
+    if (JSON.stringify(previous) === JSON.stringify(next)) continue;
+    changes.push({ key, before: previous, after: next });
+  }
+  return changes;
+}
+
 function recordAuditLog(actorTag, action, details = {}) {
   if (!Array.isArray(config.auditLog)) config.auditLog = [];
   config.auditLog.push({
@@ -566,6 +588,82 @@ function recordAuditLog(actorTag, action, details = {}) {
   });
   config.auditLog = config.auditLog.slice(-200);
   saveConfig();
+}
+
+function isMessageArchiveEnabled() {
+  return Boolean(config.settings?.messageArchiveEnabled);
+}
+
+function getMessageArchiveRetentionDays() {
+  const days = Number(config.settings?.messageArchiveRetentionDays);
+  if (!Number.isFinite(days)) return 30;
+  return Math.max(1, Math.min(3650, Math.floor(days)));
+}
+
+function buildDiscordMessageUrl(guildId, channelId, messageId) {
+  return `https://discord.com/channels/${guildId}/${channelId}/${messageId}`;
+}
+
+function parseMessageArchiveLine(line) {
+  if (!line || !line.trim()) return null;
+  try {
+    const parsed = JSON.parse(line);
+    if (!parsed || typeof parsed !== "object") return null;
+    if (!parsed.id || !parsed.userId || !parsed.channelId || !parsed.createdAt) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function readMessageArchiveEntries() {
+  if (!fs.existsSync(messageArchivePath)) return [];
+  const raw = fs.readFileSync(messageArchivePath, "utf8");
+  return raw
+    .split(/\r?\n/)
+    .map(parseMessageArchiveLine)
+    .filter(Boolean);
+}
+
+function pruneMessageArchive(force = false) {
+  if (!isMessageArchiveEnabled()) return;
+  const retentionDays = getMessageArchiveRetentionDays();
+  if (!retentionDays) return;
+  if (!force && Date.now() - messageArchiveLastPruneAt < 5 * 60 * 1000) return;
+  if (!fs.existsSync(messageArchivePath)) return;
+
+  const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
+  const kept = readMessageArchiveEntries().filter(entry => Number(entry.createdTimestamp || 0) >= cutoff);
+  const output = kept.map(entry => JSON.stringify(entry)).join("\n");
+  fs.writeFileSync(messageArchivePath, output ? `${output}\n` : "");
+  messageArchiveLastPruneAt = Date.now();
+}
+
+function recordMessageArchive(message) {
+  if (!message?.guild || !message.author || message.author.bot || !message.member) return;
+  if (!isMessageArchiveEnabled()) return;
+
+  fs.mkdirSync(dataDir, { recursive: true });
+  const entry = {
+    id: message.id,
+    userId: message.author.id,
+    userTag: message.author.tag || `${message.author.username || "Unknown"}#0000`,
+    guildId: message.guild.id,
+    channelId: message.channel?.id || null,
+    channelName: message.channel?.name || message.channel?.parent?.name || "Unknown channel",
+    channelMention: typeof message.channel?.toString === "function"
+      ? message.channel.toString()
+      : message.channel?.id
+        ? `<#${message.channel.id}>`
+        : "Unknown channel",
+    content: String(message.content || "").replace(/\r?\n/g, " ").trim().slice(0, 2000) || "No text content",
+    createdAt: message.createdAt?.toISOString?.() || new Date(message.createdTimestamp || Date.now()).toISOString(),
+    createdTimestamp: message.createdTimestamp || Date.now(),
+    url: message.url || buildDiscordMessageUrl(message.guild.id, message.channel?.id || "unknown", message.id)
+  };
+
+  fs.appendFileSync(messageArchivePath, `${JSON.stringify(entry)}\n`);
+  pruneMessageArchive();
 }
 
 function getVerifyChannelId() {
@@ -2989,6 +3087,7 @@ function isPanelAuditAction(action) {
     "backup-downloaded",
     "backup-restored",
     "tiktok-verify-posted",
+    "verification-panel-repaired",
     "verified-visibility-locked",
     "verified-visibility-unlocked",
     "verification-mark-unverified",
@@ -5285,6 +5384,15 @@ async function getRecentMessagesForUser(channel, userId, limit = 5) {
 async function getRecentMessagesForUserAcrossGuild(guild, userId, limit = 40) {
   if (!guild?.channels?.cache) return [];
 
+  const entriesById = new Map();
+  for (const archived of readMessageArchiveEntries()) {
+    if (archived.userId !== userId) continue;
+    entriesById.set(archived.id, {
+      ...archived,
+      channelMention: archived.channelMention || (archived.channelId ? `<#${archived.channelId}>` : "Unknown channel")
+    });
+  }
+
   const botMember = guild.members.me || await guild.members.fetchMe().catch(() => null);
   const channels = [...guild.channels.cache.values()].filter(channel => {
     if (!channel?.isTextBased?.() || typeof channel.messages?.fetch !== "function") return false;
@@ -5300,7 +5408,7 @@ async function getRecentMessagesForUserAcrossGuild(guild, userId, limit = 40) {
 
     for (const message of messages.values()) {
       if (message.author?.id !== userId || message.author?.bot) continue;
-      entries.push({
+      entriesById.set(message.id, {
         id: message.id,
         channelId: channel.id,
         channelName: channel.name || channel.toString?.() || "Unknown channel",
@@ -5313,7 +5421,7 @@ async function getRecentMessagesForUserAcrossGuild(guild, userId, limit = 40) {
     }
   }
 
-  return entries
+  return [...entriesById.values()]
     .sort((a, b) => b.createdTimestamp - a.createdTimestamp)
     .slice(0, limit)
     .map(({ createdTimestamp, ...entry }) => entry);
@@ -6291,6 +6399,8 @@ function buildWebConfigPayload() {
       logChannelId: config.settings.logChannelId || "",
       automodLogChannelId: config.settings.automodLogChannelId || "",
       mutedRoleId: config.settings.mutedRoleId || "",
+      messageArchiveEnabled: Boolean(config.settings.messageArchiveEnabled),
+      messageArchiveRetentionDays: Number(config.settings.messageArchiveRetentionDays || 30),
       tiktokHandle: getTikTokHandle(),
       tiktokNicknameAliases: Array.isArray(config.settings.tiktokNicknameAliases)
         ? config.settings.tiktokNicknameAliases.join(", ")
@@ -6322,6 +6432,8 @@ function updateWebSettings(auth, payload) {
     "logChannelId",
     "automodLogChannelId",
     "mutedRoleId",
+    "messageArchiveEnabled",
+    "messageArchiveRetentionDays",
     "tiktokHandle",
     "tiktokNicknameAliases",
     "verifiedRoleId",
@@ -6348,6 +6460,29 @@ function updateWebSettings(auth, payload) {
   const nextAffirmationsCooldownMs = Object.prototype.hasOwnProperty.call(payload, "anonymousAffirmationsCooldownMs")
     ? Math.max(5000, Math.min(10 * 60 * 1000, Number(payload.anonymousAffirmationsCooldownMs) || 0))
     : getAnonymousAffirmationsCooldownMs();
+  const nextMessageArchiveEnabled = Object.prototype.hasOwnProperty.call(payload, "messageArchiveEnabled")
+    ? ["true", "1", "yes", "on"].includes(String(payload.messageArchiveEnabled).toLowerCase())
+    : Boolean(config.settings.messageArchiveEnabled);
+  const nextMessageArchiveRetentionDays = Object.prototype.hasOwnProperty.call(payload, "messageArchiveRetentionDays")
+    ? Math.max(1, Math.min(3650, Number(payload.messageArchiveRetentionDays) || 30))
+    : Number(config.settings.messageArchiveRetentionDays || 30);
+  const before = {
+    verifyChannelId: config.settings.verifyChannelId,
+    rulesChannelId: config.settings.rulesChannelId,
+    welcomeChannelId: config.settings.welcomeChannelId,
+    anonymousAffirmationsEnabled: config.settings.anonymousAffirmationsEnabled,
+    anonymousAffirmationsChannelId: config.settings.anonymousAffirmationsChannelId,
+    anonymousAffirmationsCooldownMs: config.settings.anonymousAffirmationsCooldownMs,
+    logChannelId: config.settings.logChannelId,
+    automodLogChannelId: config.settings.automodLogChannelId,
+    mutedRoleId: config.settings.mutedRoleId,
+    messageArchiveEnabled: config.settings.messageArchiveEnabled,
+    messageArchiveRetentionDays: config.settings.messageArchiveRetentionDays,
+    tiktokHandle: config.settings.tiktokHandle,
+    tiktokNicknameAliases: config.settings.tiktokNicknameAliases,
+    verifiedRoleId: config.settings.verifiedRoleId,
+    unverifiedRoleId: config.settings.unverifiedRoleId
+  };
 
   for (const key of allowed) {
     if (Object.prototype.hasOwnProperty.call(payload, key)) {
@@ -6359,6 +6494,10 @@ function updateWebSettings(auth, payload) {
         config.settings[key] = nextAffirmationsEnabled;
       } else if (key === "anonymousAffirmationsCooldownMs") {
         config.settings[key] = nextAffirmationsCooldownMs;
+      } else if (key === "messageArchiveEnabled") {
+        config.settings[key] = nextMessageArchiveEnabled;
+      } else if (key === "messageArchiveRetentionDays") {
+        config.settings[key] = nextMessageArchiveRetentionDays;
       } else {
         config.settings[key] = String(payload[key] || "").trim() || null;
       }
@@ -6368,8 +6507,12 @@ function updateWebSettings(auth, payload) {
     }
   }
 
+  pruneMessageArchive(true);
   saveConfig();
-  recordAuditLog(getWebModeratorTag(auth), "settings-updated", {
+  if (!config.settings.messageArchiveEnabled && fs.existsSync(messageArchivePath)) {
+    fs.writeFileSync(messageArchivePath, "");
+  }
+  const after = {
     verifyChannelId: config.settings.verifyChannelId,
     rulesChannelId: config.settings.rulesChannelId,
     welcomeChannelId: config.settings.welcomeChannelId,
@@ -6379,10 +6522,15 @@ function updateWebSettings(auth, payload) {
     logChannelId: config.settings.logChannelId,
     automodLogChannelId: config.settings.automodLogChannelId,
     mutedRoleId: config.settings.mutedRoleId,
+    messageArchiveEnabled: config.settings.messageArchiveEnabled,
+    messageArchiveRetentionDays: config.settings.messageArchiveRetentionDays,
     tiktokHandle: config.settings.tiktokHandle,
     tiktokNicknameAliases: config.settings.tiktokNicknameAliases,
     verifiedRoleId: config.settings.verifiedRoleId,
     unverifiedRoleId: config.settings.unverifiedRoleId
+  };
+  recordAuditLog(getWebModeratorTag(auth), "settings-updated", {
+    changes: buildAuditDiff(before, after, Object.keys(after))
   });
   if (Object.prototype.hasOwnProperty.call(payload, "anonymousAffirmationsChannelId")) {
     postAnonymousAffirmationsPanel("web").catch(error => {
@@ -6393,6 +6541,22 @@ function updateWebSettings(auth, payload) {
 }
 
 async function updateWebAutomod(auth, payload) {
+  const before = {
+    aiModerationEnabled: config.automod.aiModerationEnabled,
+    aiModerationThreshold: config.automod.aiModerationThreshold,
+    aiModerationAction: config.automod.aiModerationAction,
+    aiModerationModel: config.automod.aiModerationModel,
+    aiCustomRulesEnabled: config.automod.aiCustomRulesEnabled,
+    aiCustomRulesThreshold: config.automod.aiCustomRulesThreshold,
+    aiCustomRulesAction: config.automod.aiCustomRulesAction,
+    aiCustomRulesModel: config.automod.aiCustomRulesModel,
+    aiCustomRulesLength: String(config.automod.aiCustomRules || "").length,
+    aiCustomInstructionsLength: String(config.automod.aiCustomInstructions || "").length,
+    aiIncludeRecentContext: config.automod.aiIncludeRecentContext,
+    dryRunEnabled: config.automod.dryRunEnabled,
+    escalationEnabled: config.automod.escalationEnabled,
+    emojiSpamEnabled: config.automod.emojiSpamEnabled
+  };
   const booleanKeys = [
     "invites",
     "spam",
@@ -6547,7 +6711,23 @@ async function updateWebAutomod(auth, payload) {
       .slice(0, 20),
     exemptChannels: config.automod.exemptChannelIds.length,
     exemptRoles: config.automod.exemptRoleIds.length,
-    exemptUsers: config.automod.exemptUserIds.length
+    exemptUsers: config.automod.exemptUserIds.length,
+    changes: buildAuditDiff(before, {
+      aiModerationEnabled: config.automod.aiModerationEnabled,
+      aiModerationThreshold: config.automod.aiModerationThreshold,
+      aiModerationAction: config.automod.aiModerationAction,
+      aiModerationModel: config.automod.aiModerationModel,
+      aiCustomRulesEnabled: config.automod.aiCustomRulesEnabled,
+      aiCustomRulesThreshold: config.automod.aiCustomRulesThreshold,
+      aiCustomRulesAction: config.automod.aiCustomRulesAction,
+      aiCustomRulesModel: config.automod.aiCustomRulesModel,
+      aiCustomRulesLength: String(config.automod.aiCustomRules || "").length,
+      aiCustomInstructionsLength: String(config.automod.aiCustomInstructions || "").length,
+      aiIncludeRecentContext: config.automod.aiIncludeRecentContext,
+      dryRunEnabled: config.automod.dryRunEnabled,
+      escalationEnabled: config.automod.escalationEnabled,
+      emojiSpamEnabled: config.automod.emojiSpamEnabled
+    }, Object.keys(before))
   });
 
   if (
@@ -7529,7 +7709,11 @@ async function handleWebApi(req, res, pathname) {
     const chatLogs = await getRecentMessagesForUserAcrossGuild(guild, user.id, 40).catch(() => []);
     return sendWebJson(res, 200, {
       member: serializeWebMember(member, user),
-      chatLogs
+      chatLogs,
+      archive: {
+        enabled: isMessageArchiveEnabled(),
+        retentionDays: getMessageArchiveRetentionDays()
+      }
     });
   }
 
@@ -7580,6 +7764,23 @@ async function handleWebApi(req, res, pathname) {
         aliases: config.settings.tiktokNicknameAliases
       });
       return sendWebJson(res, 200, { ok: true, settings, posted });
+    }
+
+    if (req.method === "POST" && pathname === "/api/verification-panel") {
+      if (!hasWebAccess(auth, "admin")) {
+        return sendWebJson(res, 403, { error: "Admin web access is required." });
+      }
+      await readWebJsonBody(req).catch(() => null);
+      const posted = await postTikTokVerifyPanel("web");
+      recordAuditLog(getWebModeratorTag(auth), "verification-panel-repaired", {
+        channelId: posted.channelId,
+        messageId: posted.messageId,
+        tiktokHandle: config.settings.tiktokHandle,
+        verifiedRoleId: config.settings.verifiedRoleId,
+        unverifiedRoleId: config.settings.unverifiedRoleId,
+        aliases: config.settings.tiktokNicknameAliases
+      });
+      return sendWebJson(res, 200, { ok: true, posted });
     }
 
     if (req.method === "POST" && pathname === "/api/reaction-role-panel") {
@@ -11356,6 +11557,7 @@ client.on("messageCreate", async message => {
   try {
     if (!ENABLE_CORE_BOT) return;
     if (!message.guild || message.author.bot || !message.member) return;
+    recordMessageArchive(message);
     if (isAutoModExempt(message)) return;
     const policy = resolveAutoModPolicy(message);
     const evaluation = await evaluateAutoModMessage(message, policy, false);
