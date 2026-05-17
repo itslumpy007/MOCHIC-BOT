@@ -5628,7 +5628,7 @@ function buildStatusEmbed() {
       { name: "Verify Channel", value: verifyChannelId ? `<#${verifyChannelId}>` : "Not set", inline: true },
       { name: "Rules Channel", value: rulesChannelId ? `<#${rulesChannelId}>` : "Not set", inline: true },
       { name: "General Chat", value: generalChatChannelId ? `<#${generalChatChannelId}>` : "Not set", inline: true },
-      { name: "General Chat Rule", value: `Warn at 53 days, kick at 60 days.`, inline: false },
+      { name: "General Chat Rule", value: `Gentle reminder at 53 days, kick at 60 days.`, inline: false },
       { name: "Log Channel", value: logChannelId ? `<#${logChannelId}>` : "Not set", inline: true },
       { name: "AutoMod Log Channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
       { name: "TikTok Verify", value: isTikTokVerificationEnabled() ? `@${getTikTokHandle()}` : "Disabled", inline: true },
