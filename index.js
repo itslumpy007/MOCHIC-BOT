@@ -142,6 +142,7 @@ const SUSPICIOUS_SCAM_DOMAINS = [
 const spamTracker = new Map();
 const joinTracker = new Map();
 const anonymousAffirmationCooldowns = new Map();
+const generalChatActivityCache = new Map();
 const googleBlockListSyncState = {
   running: false,
   lastSyncAt: null
@@ -152,6 +153,7 @@ const webOauthStates = new Map();
 let tempBanInterval = null;
 let scheduledReportInterval = null;
 let googleBlockListInterval = null;
+let generalChatSweepInterval = null;
 
 const dataDir = path.join(__dirname, "data");
 const configPath = path.join(dataDir, "config.json");
@@ -268,6 +270,7 @@ function createDefaultConfig() {
       verifyChannelId: null,
       rulesChannelId: null,
       welcomeChannelId: null,
+      generalChatChannelId: null,
       anonymousAffirmationsEnabled: true,
       anonymousAffirmationsChannelId: null,
       anonymousAffirmationsCooldownMs: 60 * 1000,
@@ -342,6 +345,10 @@ function getUnverifiedRoleId() {
 
 function getWelcomeChannelId() {
   return config.settings?.welcomeChannelId || null;
+}
+
+function getGeneralChatChannelId() {
+  return config.settings?.generalChatChannelId || null;
 }
 
 function isAnonymousAffirmationsEnabled() {
@@ -664,6 +671,152 @@ function recordMessageArchive(message) {
 
   fs.appendFileSync(messageArchivePath, `${JSON.stringify(entry)}\n`);
   pruneMessageArchive();
+}
+
+function getGeneralChatInactiveThresholdMs() {
+  return 60 * 24 * 60 * 60 * 1000;
+}
+
+function isGeneralChatKickExempt(member) {
+  if (!member || member.user?.bot) return true;
+  if (member.id === member.guild?.ownerId) return true;
+  if (member.permissions?.has(PermissionFlagsBits.Administrator)) return true;
+  if (member.permissions?.has(PermissionFlagsBits.ManageGuild)) return true;
+  if (member.permissions?.has(PermissionFlagsBits.ManageMessages)) return true;
+  if (config.automod?.exemptUserIds?.includes(member.id)) return true;
+  return member.roles?.cache?.some(role => config.automod?.exemptRoleIds?.includes(role.id)) || false;
+}
+
+async function resolveGeneralChatChannel(guild) {
+  const configuredId = getGeneralChatChannelId();
+  if (configuredId) {
+    const channel = await guild.channels.fetch(configuredId).catch(() => null);
+    if (channel) return channel;
+  }
+
+  const fallbackNames = new Set(["general", "general-chat", "main-chat", "chat"]);
+  const channel = [...guild.channels.cache.values()].find(item => {
+    if (!item || !item.isTextBased?.()) return false;
+    const name = String(item.name || "").toLowerCase();
+    return fallbackNames.has(name);
+  }) || null;
+
+  return channel;
+}
+
+async function buildGeneralChatActivityMap(channel, cutoffTimestamp) {
+  if (!channel?.messages?.fetch) return new Map();
+
+  const latestByUser = new Map();
+  let before = null;
+
+  for (let page = 0; page < 25; page += 1) {
+    const messages = await channel.messages.fetch({
+      limit: 100,
+      ...(before ? { before } : {})
+    }).catch(() => null);
+
+    if (!messages?.size) break;
+
+    for (const message of messages.values()) {
+      if (message.author?.bot) continue;
+      const timestamp = message.createdTimestamp || Date.now();
+      if (timestamp < cutoffTimestamp) continue;
+      const current = latestByUser.get(message.author.id) || 0;
+      if (timestamp > current) {
+        latestByUser.set(message.author.id, timestamp);
+      }
+    }
+
+    const oldest = [...messages.values()].reduce((min, message) => {
+      if (!min) return message;
+      return message.createdTimestamp < min.createdTimestamp ? message : min;
+    }, null);
+
+    before = oldest?.id || null;
+    if (!before || (oldest?.createdTimestamp || 0) < cutoffTimestamp || messages.size < 100) {
+      break;
+    }
+  }
+
+  return latestByUser;
+}
+
+async function enforceGeneralChatActivity(guild = null) {
+  const targetGuild = guild || await client.guilds.fetch(GUILD_ID).catch(() => client.guilds.cache.get(GUILD_ID) || null);
+  if (!targetGuild) return { checked: 0, kicked: 0, skipped: "guild-missing" };
+
+  const generalChannel = await resolveGeneralChatChannel(targetGuild);
+  if (!generalChannel) return { checked: 0, kicked: 0, skipped: "general-channel-missing" };
+
+  const botMember = targetGuild.members.me || await targetGuild.members.fetchMe().catch(() => null);
+  const permissions = typeof generalChannel.permissionsFor === "function" ? generalChannel.permissionsFor(botMember) : null;
+  if (!permissions?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory])) {
+    return { checked: 0, kicked: 0, skipped: "missing-channel-permissions" };
+  }
+
+  const cutoffTimestamp = Date.now() - getGeneralChatInactiveThresholdMs();
+  const recentActivity = await buildGeneralChatActivityMap(generalChannel, cutoffTimestamp);
+  const members = await targetGuild.members.fetch().catch(() => targetGuild.members.cache);
+  let checked = 0;
+  let kicked = 0;
+
+  for (const member of members.values()) {
+    if (isGeneralChatKickExempt(member)) continue;
+    checked += 1;
+
+    const lastChatAt = recentActivity.get(member.id) || member.joinedTimestamp || 0;
+    if (lastChatAt && lastChatAt >= cutoffTimestamp) continue;
+    if (!member.kickable) continue;
+
+    const lastActiveText = lastChatAt ? `<t:${Math.floor(lastChatAt / 1000)}:F>` : "their join date";
+    const reason = `No activity in ${generalChannel.name || "general chat"} for 2 months. Last activity: ${lastActiveText}.`;
+    const entry = addCase({
+      action: "automod:inactive-general-chat",
+      targetId: member.user.id,
+      targetTag: member.user.tag,
+      moderatorTag: "AutoMod",
+      reason,
+      details: [
+        { name: "Channel", value: `#${generalChannel.name || generalChannel.id}`, inline: true },
+        { name: "Last activity", value: lastActiveText, inline: true }
+      ]
+    });
+
+    await member.user.send({
+      embeds: [
+        makeEmbed({
+          title: "A gentle goodbye",
+          description: `You were removed from **${targetGuild.name}** because there was no activity in ${generalChannel} for more than two months.`,
+          color: COLORS.purple
+        })
+      ]
+    }).catch(() => {});
+
+    await member.kick(reason).catch(() => {});
+    recordAutoModAnalytics("inactive-general-chat", reason, member.user.tag);
+    kicked += 1;
+
+    await logAutoModEmbed(
+      makeEmbed({
+        title: `Auto mod case #${entry.id}`,
+        description: `${member.user.tag} was kicked for inactivity in ${generalChannel.name || "general chat"}.`,
+        color: COLORS.red,
+        fields: buildCaseFields(entry)
+      })
+    );
+  }
+
+  return { checked, kicked, skipped: null };
+}
+
+function startGeneralChatSweep() {
+  if (generalChatSweepInterval) clearInterval(generalChatSweepInterval);
+  generalChatSweepInterval = setInterval(() => {
+    enforceGeneralChatActivity().catch(error => {
+      console.error("General chat sweep error:", error.message);
+    });
+  }, 6 * 60 * 60 * 1000);
 }
 
 function getVerifyChannelId() {
@@ -4308,6 +4461,7 @@ function buildSettingsSummary() {
     `Log channel: ${getLogChannelId() ? `<#${getLogChannelId()}>` : "Not set"}`,
     `Verify channel: ${getVerifyChannelId() ? `<#${getVerifyChannelId()}>` : "Not set"}`,
     `Rules channel: ${getRulesChannelId() ? `<#${getRulesChannelId()}>` : "Not set"}`,
+    `General chat: ${getGeneralChatChannelId() ? `<#${getGeneralChatChannelId()}>` : "Not set"}`,
     `Anonymous affirmations: ${isAnonymousAffirmationsEnabled() ? "Enabled" : "Disabled"} (${getAnonymousAffirmationsChannelId() ? `<#${getAnonymousAffirmationsChannelId()}>` : "Not set"})`,
     `Muted role: ${getMutedRoleId() ? `<@&${getMutedRoleId()}>` : "Not set"}`,
     buildTikTokVerificationSummary()
@@ -5285,6 +5439,7 @@ function buildStatusEmbed() {
       { name: "Ping", value: `${Math.round(client.ws.ping)}ms`, inline: true },
       { name: "Verify Channel", value: verifyChannelId ? `<#${verifyChannelId}>` : "Not set", inline: true },
       { name: "Rules Channel", value: rulesChannelId ? `<#${rulesChannelId}>` : "Not set", inline: true },
+      { name: "General Chat", value: getGeneralChatChannelId() ? `<#${getGeneralChatChannelId()}>` : "Not set", inline: true },
       { name: "Log Channel", value: logChannelId ? `<#${logChannelId}>` : "Not set", inline: true },
       { name: "AutoMod Log Channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
       { name: "TikTok Verify", value: isTikTokVerificationEnabled() ? `@${getTikTokHandle()}` : "Disabled", inline: true },
@@ -6494,6 +6649,7 @@ async function buildWebDashboardPayload() {
     channels: {
       verify: getVerifyChannelId(),
       rules: getRulesChannelId(),
+      general: getGeneralChatChannelId(),
       affirmations: getAnonymousAffirmationsChannelId(),
       log: getLogChannelId(),
       automodLog: getAutoModLogChannelId()
@@ -6536,6 +6692,7 @@ function buildWebConfigPayload() {
       verifyChannelId: config.settings.verifyChannelId || "",
       rulesChannelId: config.settings.rulesChannelId || "",
       welcomeChannelId: getWelcomeChannelId() || "",
+      generalChatChannelId: getGeneralChatChannelId() || "",
       anonymousAffirmationsEnabled: isAnonymousAffirmationsEnabled(),
       anonymousAffirmationsChannelId: getAnonymousAffirmationsChannelId() || "",
       anonymousAffirmationsCooldownMs: getAnonymousAffirmationsCooldownMs(),
@@ -6569,6 +6726,7 @@ function updateWebSettings(auth, payload) {
     "verifyChannelId",
     "rulesChannelId",
     "welcomeChannelId",
+    "generalChatChannelId",
     "anonymousAffirmationsEnabled",
     "anonymousAffirmationsChannelId",
     "anonymousAffirmationsCooldownMs",
@@ -6597,6 +6755,9 @@ function updateWebSettings(auth, payload) {
   const nextWelcomeChannelId = Object.prototype.hasOwnProperty.call(payload, "welcomeChannelId")
     ? String(payload.welcomeChannelId || "").trim() || null
     : config.settings.welcomeChannelId || null;
+  const nextGeneralChatChannelId = Object.prototype.hasOwnProperty.call(payload, "generalChatChannelId")
+    ? String(payload.generalChatChannelId || "").trim() || null
+    : config.settings.generalChatChannelId || null;
   const nextAffirmationsEnabled = Object.prototype.hasOwnProperty.call(payload, "anonymousAffirmationsEnabled")
     ? ["true", "1", "yes", "on"].includes(String(payload.anonymousAffirmationsEnabled).toLowerCase())
     : isAnonymousAffirmationsEnabled();
@@ -6613,6 +6774,7 @@ function updateWebSettings(auth, payload) {
     verifyChannelId: config.settings.verifyChannelId,
     rulesChannelId: config.settings.rulesChannelId,
     welcomeChannelId: config.settings.welcomeChannelId,
+    generalChatChannelId: config.settings.generalChatChannelId,
     anonymousAffirmationsEnabled: config.settings.anonymousAffirmationsEnabled,
     anonymousAffirmationsChannelId: config.settings.anonymousAffirmationsChannelId,
     anonymousAffirmationsCooldownMs: config.settings.anonymousAffirmationsCooldownMs,
@@ -6637,6 +6799,8 @@ function updateWebSettings(auth, payload) {
         config.settings[key] = nextAffirmationsEnabled;
       } else if (key === "anonymousAffirmationsCooldownMs") {
         config.settings[key] = nextAffirmationsCooldownMs;
+      } else if (key === "generalChatChannelId") {
+        config.settings[key] = nextGeneralChatChannelId;
       } else if (key === "messageArchiveEnabled") {
         config.settings[key] = nextMessageArchiveEnabled;
       } else if (key === "messageArchiveRetentionDays") {
@@ -6659,6 +6823,7 @@ function updateWebSettings(auth, payload) {
     verifyChannelId: config.settings.verifyChannelId,
     rulesChannelId: config.settings.rulesChannelId,
     welcomeChannelId: config.settings.welcomeChannelId,
+    generalChatChannelId: config.settings.generalChatChannelId,
     anonymousAffirmationsEnabled: config.settings.anonymousAffirmationsEnabled,
     anonymousAffirmationsChannelId: config.settings.anonymousAffirmationsChannelId,
     anonymousAffirmationsCooldownMs: config.settings.anonymousAffirmationsCooldownMs,
@@ -8194,6 +8359,10 @@ async function shutdownProcess(signal) {
     client.destroy();
   }
 
+  if (generalChatSweepInterval) {
+    clearInterval(generalChatSweepInterval);
+  }
+
   process.exit(0);
 }
 
@@ -8213,6 +8382,9 @@ client.once("clientReady", async () => {
       await resolveVerifyMessageId();
       await enforceFlavorRoleVisibility(client.guilds.cache.get(GUILD_ID)).catch(() => null);
       await processExpiredTempBans();
+      await enforceGeneralChatActivity().catch(error => {
+        console.error("General chat startup sweep error:", error.message);
+      });
       await syncGoogleBlockList("startup").catch(error => {
         console.error("Google block list startup sync error:", error.message);
       });
@@ -8227,6 +8399,7 @@ client.once("clientReady", async () => {
       }, 60 * 1000);
       startScheduledReports();
       startGoogleBlockListSync();
+      startGeneralChatSweep();
     }
   } catch (error) {
     console.error("Ready error:", error);
@@ -11679,6 +11852,10 @@ client.on("messageCreate", async message => {
     if (!ENABLE_CORE_BOT) return;
     if (!message.guild || message.author.bot || !message.member) return;
     recordMessageArchive(message);
+    const generalChatChannelId = getGeneralChatChannelId();
+    if (generalChatChannelId && message.channel.id === generalChatChannelId) {
+      generalChatActivityCache.set(message.author.id, message.createdTimestamp || Date.now());
+    }
     if (isAutoModExempt(message)) return;
     const policy = resolveAutoModPolicy(message);
     const evaluation = await evaluateAutoModMessage(message, policy, false);
