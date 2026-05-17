@@ -1361,6 +1361,7 @@ function renderGeneralChatRulePanel() {
   $("#generalChatRuleSummary").innerHTML = [
     ["Status", enabled ? "Enabled" : "Disabled"],
     ["Channel", channelLabel],
+    ["Notice", `Warn at ${rule.warningDays || 53} days, kick at ${rule.thresholdDays || 60} days`],
     ["At Risk", rule.atRiskCount ?? membersAtRisk.length ?? 0],
     ["Warnings Due", rule.warningDueCount ?? membersAtRisk.filter(member => member.warningDue).length ?? 0],
     ["Warnings Sent", rule.warningSentCount ?? membersAtRisk.filter(member => member.warningSent).length ?? 0],
