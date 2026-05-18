@@ -3055,6 +3055,11 @@ async function loadAll() {
       return;
     }
 
+    if (state.me.authenticated || state.token) {
+      setLoginVisible(false);
+      updateApiState("Loading");
+    }
+
     const requests = [
       api("/api/dashboard"),
       api("/api/config"),
@@ -3683,7 +3688,12 @@ function bindEvents() {
   $("#loginSaveToken").addEventListener("click", () => {
     state.token = $("#loginTokenInput").value.trim();
     localStorage.setItem("mochiAdminToken", state.token);
-    loadAll();
+    $("#loginStatus").textContent = "Unlocking...";
+    setLoginVisible(false);
+    loadAll().catch(error => {
+      setLoginVisible(true, error.message);
+      setAlert(error.message, "error");
+    });
   });
   $("#themeSelect").addEventListener("change", () => {
     applyThemePreset($("#themeSelect").value);
