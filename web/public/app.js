@@ -3070,7 +3070,7 @@ async function loadAll() {
     }
 
     if (state.me.authenticated) {
-      setLoginVisible(true, "Loading your dashboard...");
+      setLoginVisible(false);
       setLoginBusy(true);
       updateApiState("Loading");
     }
@@ -3110,7 +3110,7 @@ async function loadAll() {
   } catch (error) {
     updateApiState("Locked", "error");
     setLoginBusy(false);
-    setLoginVisible(true, error.message);
+    setLoginVisible(!state.me?.authenticated, error.message);
     setAlert(error.message, "error");
   }
 }
