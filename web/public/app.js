@@ -3051,7 +3051,11 @@ async function loadAll() {
     state.me = await api("/api/me");
     updateAuthPanel();
 
-    if (!state.me.authenticated && !state.token) {
+    if (!state.me.authenticated) {
+      if (state.token) {
+        state.token = "";
+        localStorage.removeItem("mochiAdminToken");
+      }
       updateApiState("Login required");
       const loginMessage = state.me.oauthConfigured && state.me.localLoginConfigured
         ? "Login with Discord, your personal account, or the backup admin token."
@@ -3065,7 +3069,7 @@ async function loadAll() {
       return;
     }
 
-    if (state.me.authenticated || state.token) {
+    if (state.me.authenticated) {
       setLoginVisible(true, "Loading your dashboard...");
       setLoginBusy(true);
       updateApiState("Loading");
