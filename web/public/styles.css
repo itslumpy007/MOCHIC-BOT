@@ -1103,6 +1103,17 @@ button:active,
   min-height: 2.6em;
 }
 
+.login-screen[data-busy="true"] .discord-login,
+.login-screen[data-busy="true"] .token-row button,
+.login-screen[data-busy="true"] input {
+  pointer-events: none;
+}
+
+.login-screen[data-busy="true"] .discord-login,
+.login-screen[data-busy="true"] .token-row button {
+  opacity: 0.7;
+}
+
 .logout-link {
   display: inline-block;
   color: #d96aa0;

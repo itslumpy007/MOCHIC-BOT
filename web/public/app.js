@@ -1026,6 +1026,15 @@ function setLoginVisible(visible, message = "") {
   if (message) $("#loginStatus").textContent = message;
 }
 
+function setLoginBusy(busy) {
+  $("#loginScreen").dataset.busy = busy ? "true" : "false";
+  $("#loginSaveToken").disabled = busy;
+  $("#localLoginButton").disabled = busy;
+  $("#loginTokenInput").disabled = busy;
+  $("#localUsernameInput").disabled = busy;
+  $("#localPasswordInput").disabled = busy;
+}
+
 function fillWebAccountForm(account = null) {
   state.webAccountEditing = account ? account.username : null;
   $("#webAccountUsername").value = account?.username || "";
@@ -3052,11 +3061,13 @@ async function loadAll() {
             ? "Use your personal login or the backup admin token."
             : "Enter the backup admin token to load the dashboard.";
       setLoginVisible(true, loginMessage);
+      setLoginBusy(false);
       return;
     }
 
     if (state.me.authenticated || state.token) {
-      setLoginVisible(false);
+      setLoginVisible(true, "Loading your dashboard...");
+      setLoginBusy(true);
       updateApiState("Loading");
     }
 
@@ -3088,12 +3099,14 @@ async function loadAll() {
     applyRoleAwareWorkspace();
     renderAll();
     applyAccessRestrictions();
+    setLoginBusy(false);
     setLoginVisible(false);
     updateApiState("Live", "ok");
     setAlert("");
   } catch (error) {
     updateApiState("Locked", "error");
-    setLoginVisible(!state.me?.authenticated, error.message);
+    setLoginBusy(false);
+    setLoginVisible(true, error.message);
     setAlert(error.message, "error");
   }
 }
@@ -3320,6 +3333,7 @@ async function loginLocalAccount() {
   });
 
   $("#localPasswordInput").value = "";
+  setLoginBusy(true);
   await loadAll();
 }
 
@@ -3689,8 +3703,10 @@ function bindEvents() {
     state.token = $("#loginTokenInput").value.trim();
     localStorage.setItem("mochiAdminToken", state.token);
     $("#loginStatus").textContent = "Unlocking...";
-    setLoginVisible(false);
+    setLoginVisible(true);
+    setLoginBusy(true);
     loadAll().catch(error => {
+      setLoginBusy(false);
       setLoginVisible(true, error.message);
       setAlert(error.message, "error");
     });
