@@ -337,6 +337,22 @@ function getTikTokNicknameAliases() {
     .filter(Boolean);
 }
 
+function addTikTokNicknameAlias(alias) {
+  const normalizedAlias = normalizeVerificationText(alias);
+  if (!normalizedAlias) return false;
+
+  const currentAliases = Array.isArray(config.settings.tiktokNicknameAliases)
+    ? config.settings.tiktokNicknameAliases
+    : splitTikTokVerificationInput(config.settings.tiktokNicknameAliases || "");
+
+  const alreadySaved = currentAliases.some(item => normalizeVerificationText(item) === normalizedAlias);
+  if (alreadySaved) return false;
+
+  config.settings.tiktokNicknameAliases = [...currentAliases, alias];
+  saveConfig();
+  return true;
+}
+
 function getVerificationRoleId() {
   return config.settings?.verifiedRoleId || null;
 }
@@ -10053,12 +10069,13 @@ client.on("interactionCreate", async interaction => {
 
         try {
           await member.setNickname(enteredName, "TikTok name verification");
+          const savedAlias = addTikTokNicknameAlias(enteredName);
           const finalNickname = member.displayName || enteredName;
           const result = await syncTikTokVerification(member, "modal");
           const replyEmbed = makeEmbed({
             title: result.matched ? "Nickname updated" : "Name updated",
             description: result.matched
-              ? `Your final nickname is @${finalNickname}. Enjoy the garden!`
+              ? `Your final nickname is @${finalNickname}. Enjoy the garden!${savedAlias ? " I also saved that name to the verified-name list." : ""}`
               : `I set your nickname to @${enteredName}, but it does not match the configured TikTok handle yet.`,
             color: result.matched ? COLORS.mint : COLORS.yellow,
             fields: [
