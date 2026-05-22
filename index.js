@@ -8124,19 +8124,42 @@ async function handleWebApi(req, res, pathname) {
 
     const records = kind === "warning" ? getWarnings(userId) : getNotes(userId);
     if (!Number.isInteger(index) || index < 0 || index >= records.length) {
-      return sendWebJson(res, 400, { error: "That record could not be found." });
+      if (mode !== "restore") {
+        return sendWebJson(res, 400, { error: "That record could not be found." });
+      }
     }
 
     if (mode === "delete") {
-      records.splice(index, 1);
+      const removed = records.splice(index, 1)[0] || null;
+      if (!removed) {
+        return sendWebJson(res, 400, { error: "That record could not be found." });
+      }
+      body.deletedRecord = removed;
+      body.deletedIndex = index;
     } else if (kind === "warning") {
-      records[index].reason = String(body.reason || "").trim().slice(0, 1000);
-      records[index].editedBy = getWebModeratorTag(auth);
-      records[index].editedAt = new Date().toISOString();
+      if (mode === "restore") {
+        const restored = body.record && typeof body.record === "object" ? { ...body.record } : null;
+        if (!restored) {
+          return sendWebJson(res, 400, { error: "A record snapshot is required to restore it." });
+        }
+        records.splice(Math.max(0, Math.min(index, records.length)), 0, restored);
+      } else {
+        records[index].reason = String(body.reason || "").trim().slice(0, 1000);
+        records[index].editedBy = getWebModeratorTag(auth);
+        records[index].editedAt = new Date().toISOString();
+      }
     } else {
-      records[index].content = String(body.content || "").trim().slice(0, 1000);
-      records[index].editedBy = getWebModeratorTag(auth);
-      records[index].editedAt = new Date().toISOString();
+      if (mode === "restore") {
+        const restored = body.record && typeof body.record === "object" ? { ...body.record } : null;
+        if (!restored) {
+          return sendWebJson(res, 400, { error: "A record snapshot is required to restore it." });
+        }
+        records.splice(Math.max(0, Math.min(index, records.length)), 0, restored);
+      } else {
+        records[index].content = String(body.content || "").trim().slice(0, 1000);
+        records[index].editedBy = getWebModeratorTag(auth);
+        records[index].editedAt = new Date().toISOString();
+      }
     }
 
     if (kind === "warning") {
@@ -8145,7 +8168,7 @@ async function handleWebApi(req, res, pathname) {
       config.notes[userId] = records;
     }
     saveConfig();
-    recordAuditLog(getWebModeratorTag(auth), `member-${kind}-${mode === "delete" ? "deleted" : "updated"}`, {
+    recordAuditLog(getWebModeratorTag(auth), `member-${kind}-${mode === "delete" ? "deleted" : mode === "restore" ? "restored" : "updated"}`, {
       userId,
       index
     });
@@ -8153,7 +8176,9 @@ async function handleWebApi(req, res, pathname) {
     const { member, user } = await resolveWebMember(userId);
     return sendWebJson(res, 200, {
       ok: true,
-      member: serializeWebMember(member, user)
+      member: serializeWebMember(member, user),
+      deletedRecord: body.deletedRecord || null,
+      deletedIndex: body.deletedIndex ?? null
     });
   }
 

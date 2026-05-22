@@ -13,12 +13,12 @@
             <div class="brand-mark" aria-hidden="true">M</div>
             <div>
               <h1>Mochi Moderation</h1>
-              <p>Soft staff access</p>
+              <p>Command center access</p>
             </div>
           </div>
           <div class="login-copy">
-          <p class="eyebrow">Sweet control panel</p>
-          <h2>Sign in to continue</h2>
+          <p class="eyebrow">Command center</p>
+          <h2>Sign in to the panel</h2>
         </div>
         <a class="discord-login" href="/auth/login">Login with Discord</a>
         <div class="login-divider"><span>Personal login</span></div>
@@ -51,7 +51,7 @@
           </div>
         </div>
 
-        <p class="sidebar-note">Basic tools stay visible first. Open the cozy extras only when you need them.</p>
+        <p class="sidebar-note">Core tools stay up front. Everything else is one click away when you need it.</p>
 
         <nav class="tabs" aria-label="Dashboard sections">
           <button class="tab is-active" data-view="overview" type="button">Overview</button>
@@ -77,8 +77,9 @@
       <main class="content">
         <header class="topbar">
           <div>
-            <p class="eyebrow">Sweet control panel</p>
+            <p class="eyebrow">Command center</p>
             <h2 id="viewTitle">Overview</h2>
+            <p class="topbar-copy">Live moderation, records, and admin controls in one place.</p>
           </div>
           <div class="topbar-actions">
             <span class="pill" id="apiState">Locked</span>
@@ -341,7 +342,7 @@
           <div class="view-stack" data-view-subtab-group="automod" data-subtab="rules">
             <section class="panel">
               <div class="panel-header">
-                <h3>AutoMod Mode</h3>
+                <h3>AutoMod Mode <span class="header-status" id="automodDirtyStatus"></span></h3>
                 <div class="button-row">
                   <button class="ghost-button" type="button" data-automod-preset="light">Light</button>
                   <button class="ghost-button" type="button" data-automod-preset="standard">Standard</button>
@@ -352,7 +353,7 @@
             </section>
             <div class="panel" data-required-access="admin">
               <div class="panel-header">
-                <h3>Rule Switches</h3>
+                <h3>Rule Switches <span class="header-status" id="automodRuleDirtyStatus"></span></h3>
                 <button class="save-button" id="saveAutomod" type="button">Save</button>
               </div>
               <div class="switch-grid" id="automodSwitches"></div>
@@ -485,7 +486,7 @@
           <div class="view-stack" data-view-subtab-group="settings" data-subtab="general">
             <section class="panel">
               <div class="panel-header">
-                <h3>Server Settings</h3>
+                <h3>Server Settings <span class="header-status" id="settingsDirtyStatus"></span></h3>
                 <button class="save-button" id="saveSettings" type="button">Save</button>
               </div>
               <p class="panel-note">Set the main server channels here.</p>
@@ -495,7 +496,7 @@
 
             <section class="panel">
               <div class="panel-header">
-                <h3>Anonymous Affirmations</h3>
+                <h3>Anonymous Affirmations <span class="header-status" id="affirmationsDirtyStatus"></span></h3>
                 <div class="button-row">
                   <button class="ghost-button" id="postAffirmationsPanel" type="button">Post Panel</button>
                 </div>
@@ -508,7 +509,7 @@
           <div class="view-stack hidden" data-view-subtab-group="settings" data-subtab="accounts">
             <section class="panel" data-required-access="admin">
               <div class="panel-header">
-                <h3>Web Accounts</h3>
+                <h3>Web Accounts <span class="header-status" id="webAccountDirtyStatus"></span></h3>
                 <button class="save-button" id="saveWebAccountButton" type="button">Save Account</button>
               </div>
               <p class="panel-note">Create personal logins for the web panel. You can use Discord, a password, or both for the same staff member, then reset passwords, disable access, and review recent sign-ins.</p>
@@ -564,7 +565,7 @@
           <div class="view-stack hidden" data-view-subtab-group="settings" data-subtab="verification">
             <section class="panel">
               <div class="panel-header">
-                <h3>Verification</h3>
+                <h3>Verification <span class="header-status" id="verificationDirtyStatus"></span></h3>
                 <div class="button-row">
                   <button class="save-button" id="saveVerificationSettings" type="button">Save Verification</button>
                   <button class="ghost-button" id="repostRolePanel" type="button">Repost Role Panel</button>
@@ -599,7 +600,7 @@
           <div class="view-stack hidden" data-view-subtab-group="settings" data-subtab="safety">
             <section class="panel">
               <div class="panel-header">
-                <h3>Exemptions</h3>
+                <h3>Exemptions <span class="header-status" id="exemptionsDirtyStatus"></span></h3>
                 <button class="save-button" id="saveExemptions" type="button">Save</button>
               </div>
               <div class="form-grid three">
@@ -610,7 +611,7 @@
             </section>
             <section class="panel">
               <div class="panel-header">
-                <h3>Message Archive</h3>
+                <h3>Message Archive <span class="header-status" id="privacyDirtyStatus"></span></h3>
                 <button class="save-button" id="savePrivacySettings" type="button">Save</button>
               </div>
               <p class="panel-note">Stored member chat logs are captured for history search and retained for the window you set here.</p>
@@ -627,7 +628,7 @@
           <div class="view-stack" data-view-subtab-group="staff" data-subtab="access">
             <section class="panel">
               <div class="panel-header">
-                <h3>Staff Access</h3>
+                <h3>Staff Access <span class="header-status" id="staffDirtyStatus"></span></h3>
                 <button class="save-button" id="saveStaff" type="button">Save</button>
               </div>
               <div class="form-grid">
@@ -656,7 +657,7 @@
           <div class="view-stack" data-view-subtab-group="ops" data-subtab="templates">
             <section class="panel">
               <div class="panel-header">
-                <h3>Moderator Operations</h3>
+                <h3>Moderator Operations <span class="header-status" id="opsDirtyStatus"></span></h3>
                 <button class="save-button" id="saveOps" type="button">Save</button>
               </div>
               <div class="split">
@@ -753,6 +754,8 @@
             <button class="view-tab" type="button" data-subtab-view="records" data-subtab="warnings">Warnings</button>
             <button class="view-tab" type="button" data-subtab-view="records" data-subtab="timeline">Timeline</button>
           </div>
+
+          <div id="recordsSummary" class="summary-grid"></div>
 
           <section class="panel">
             <div class="panel-header">

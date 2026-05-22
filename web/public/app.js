@@ -1,3 +1,52 @@
+function createSafeStorage(source) {
+  const memory = new Map();
+  let backing = null;
+  try {
+    backing = typeof source === "function" ? source() : source;
+  } catch {
+    backing = null;
+  }
+
+  const hasBacking = Boolean(backing && typeof backing.getItem === "function" && typeof backing.setItem === "function");
+  return {
+    getItem(key) {
+      if (hasBacking) {
+        try {
+          return backing.getItem(key);
+        } catch {
+          // Fall through to the in-memory cache.
+        }
+      }
+      return memory.has(key) ? memory.get(key) : null;
+    },
+    setItem(key, value) {
+      const next = String(value);
+      if (hasBacking) {
+        try {
+          backing.setItem(key, next);
+          return;
+        } catch {
+          // Fall through to the in-memory cache.
+        }
+      }
+      memory.set(key, next);
+    },
+    removeItem(key) {
+      if (hasBacking) {
+        try {
+          backing.removeItem(key);
+        } catch {
+          // Fall through to the in-memory cache.
+        }
+      }
+      memory.delete(key);
+    }
+  };
+}
+
+const localStorage = createSafeStorage(() => window.localStorage);
+const sessionStorage = createSafeStorage(() => window.sessionStorage);
+
 const state = {
   token: localStorage.getItem("mochiAdminToken") || "",
   me: null,
@@ -21,8 +70,11 @@ const state = {
   notes: {},
   webAccounts: [],
   webAccountEditing: null,
+  lastDeletedMemberRecord: null,
   templateEditorDrafts: [],
-  templateEditorIndex: 0
+  templateEditorIndex: 0,
+  loading: false,
+  refreshIntervalId: null
 };
 
 const titles = {
@@ -56,6 +108,14 @@ const storageKeys = {
   appealFilter: "mochiAppealFilter",
   recentActions: "mochiRecentActions",
   activityFilters: "mochiActivityFilters",
+  settingsDraft: "mochiSettingsDraft",
+  automodDraft: "mochiAutomodDraft",
+  staffDraft: "mochiStaffDraft",
+  opsDraft: "mochiOpsDraft",
+  exemptionsDraft: "mochiExemptionsDraft",
+  ruleActionsDraft: "mochiRuleActionsDraft",
+  previewDraft: "mochiPreviewDraft",
+  templateEditorDrafts: "mochiTemplateEditorDrafts",
   templateEditorIndex: "mochiTemplateEditorIndex",
   commandPaletteOpen: "mochiCommandPaletteOpen"
 };
@@ -73,26 +133,26 @@ const subtabDefaults = {
 
 const themePresets = {
   pastel: {
-    bg: "#fff7fb",
-    bgAlt: "#f5fbff",
-    surface: "rgba(255, 255, 255, 0.88)",
+    bg: "#f2eee8",
+    bgAlt: "#edf3fb",
+    surface: "rgba(255, 255, 255, 0.82)",
     surfaceStrong: "rgba(255, 255, 255, 0.96)",
-    surfaceSoft: "#fff0f7",
-    surfaceWarm: "#fffaf4",
-    line: "rgba(230, 211, 225, 0.96)",
-    lineStrong: "rgba(217, 106, 160, 0.26)",
-    text: "#2b2634",
-    muted: "#766682",
-    mutedSoft: "#a08fb0",
-    accent: "#d96aa0",
-    accentDark: "#c04f88",
-    accentSoft: "#fde4ef",
-    mint: "#5fae9f",
-    blue: "#6f85f7",
-    yellow: "#c98a2a",
-    red: "#d8636f",
-    shadow: "0 18px 42px rgba(117, 69, 99, 0.12)",
-    shadowSoft: "0 10px 28px rgba(117, 69, 99, 0.08)"
+    surfaceSoft: "#f6ecef",
+    surfaceWarm: "#f8f3ea",
+    line: "rgba(214, 205, 198, 0.96)",
+    lineStrong: "rgba(28, 42, 78, 0.18)",
+    text: "#1f2430",
+    muted: "#66707f",
+    mutedSoft: "#8a95a5",
+    accent: "#4d67ff",
+    accentDark: "#344dd6",
+    accentSoft: "#e6ecff",
+    mint: "#3fa78f",
+    blue: "#5277e6",
+    yellow: "#c58a2a",
+    red: "#d35f6e",
+    shadow: "0 24px 56px rgba(28, 40, 66, 0.11)",
+    shadowSoft: "0 12px 30px rgba(28, 40, 66, 0.08)"
   },
   ocean: {
     bg: "#f4fbff",
@@ -565,6 +625,8 @@ const commandPaletteEntries = [
   { kind: "action", label: "Appeal review", value: "view:ops:workflow", advanced: true, adminOnly: true },
   { kind: "action", label: "Open member drawer", value: "open-member-drawer" },
   { kind: "action", label: "Search member", value: "search-member:prompt" },
+  { kind: "action", label: "Copy member ID", value: "copy-member-id" },
+  { kind: "action", label: "Undo last delete", value: "undo-last-member-delete" },
   { kind: "action", label: "New template", value: "new-template", advanced: true, adminOnly: true },
   { kind: "action", label: "Save filter", value: "save-filter" },
   { kind: "action", label: "Clear recent actions", value: "clear-recent-actions" },
@@ -599,6 +661,323 @@ function readStoredArray(key, fallback = []) {
 
 function writeStoredArray(key, items) {
   writeStoredJson(key, Array.isArray(items) ? items : []);
+}
+
+function getElementValue(element) {
+  if (!element) return "";
+  if (element.type === "checkbox") return element.checked;
+  return element.value;
+}
+
+function setElementValue(element, value) {
+  if (!element) return;
+  if (element.type === "checkbox") {
+    element.checked = Boolean(value);
+    return;
+  }
+  element.value = value ?? "";
+}
+
+function getScopedElements(selectors) {
+  return selectors.flatMap(selector => Array.from(document.querySelectorAll(selector)));
+}
+
+function getElementDraftSelector(element) {
+  if (!element) return null;
+  if (element.id) return `#${CSS.escape(element.id)}`;
+  if (element.dataset.setting) return `[data-setting="${CSS.escape(element.dataset.setting)}"]`;
+  if (element.dataset.automodBool) return `[data-automod-bool="${CSS.escape(element.dataset.automodBool)}"]`;
+  if (element.dataset.automodNumber) return `[data-automod-number="${CSS.escape(element.dataset.automodNumber)}"]`;
+  if (element.dataset.automodList) return `[data-automod-list="${CSS.escape(element.dataset.automodList)}"]`;
+  if (element.dataset.automodDuration) return `[data-automod-duration="${CSS.escape(element.dataset.automodDuration)}"]`;
+  if (element.dataset.automodString) return `[data-automod-string="${CSS.escape(element.dataset.automodString)}"]`;
+  return null;
+}
+
+function readScopedDraft(selectors) {
+  return getScopedElements(selectors).map(element => ({
+    selector: getElementDraftSelector(element),
+    value: getElementValue(element)
+  })).filter(item => item.selector);
+}
+
+function restoreScopedDraft(selectors, draft) {
+  if (!Array.isArray(draft) || !draft.length) return;
+  draft.forEach(item => {
+    if (!item?.selector) return;
+    const element = document.querySelector(item.selector);
+    if (element) setElementValue(element, item.value);
+  });
+}
+
+function updateSaveButton(buttonId, mode = "idle") {
+  const button = document.getElementById(buttonId);
+  if (!button) return;
+  if (!button.dataset.baseLabel) {
+    button.dataset.baseLabel = button.textContent.trim();
+  }
+  if (mode === "saving") {
+    button.textContent = "Saving...";
+    button.classList.add("is-saving");
+    button.classList.remove("is-saved");
+  } else if (mode === "saved") {
+    button.textContent = "Saved";
+    button.classList.remove("is-saving");
+    button.classList.add("is-saved");
+  } else {
+    button.textContent = button.dataset.baseLabel || button.textContent;
+    button.classList.remove("is-saving", "is-saved");
+  }
+}
+
+function setPanelBusy(busy) {
+  state.loading = busy;
+  document.body.classList.toggle("is-loading", busy);
+  const refreshButton = $("#refreshButton");
+  if (refreshButton) {
+    refreshButton.disabled = busy;
+    refreshButton.textContent = busy ? "Refreshing..." : "Refresh";
+  }
+}
+
+function ensureAutoRefresh() {
+  if (!state.me?.authenticated) {
+    if (state.refreshIntervalId) {
+      clearInterval(state.refreshIntervalId);
+      state.refreshIntervalId = null;
+    }
+    return;
+  }
+
+  if (state.refreshIntervalId) return;
+  state.refreshIntervalId = window.setInterval(() => {
+    if (document.hidden || state.loading) return;
+    loadAll().catch(() => {});
+  }, 5 * 60 * 1000);
+}
+
+const autosaveTimers = new Map();
+const autosaveInFlight = new Map();
+const debounceTimers = new Map();
+const autosaveScopes = {
+  settings: {
+    key: storageKeys.settingsDraft,
+    selectors: () => ["[data-setting]"],
+    save: () => saveSettings({ auto: true })
+  },
+  automod: {
+    key: storageKeys.automodDraft,
+    selectors: () => [
+      "[data-automod-bool]",
+      "[data-automod-number]",
+      "[data-automod-list]",
+      "[data-automod-duration]",
+      "[data-automod-string]"
+    ],
+    save: () => saveAutomod({ auto: true })
+  },
+  staff: {
+    key: storageKeys.staffDraft,
+    selectors: () => ["#modRoleIds", "#adminRoleIds"],
+    save: () => saveStaff({ auto: true })
+  },
+  ops: {
+    key: storageKeys.opsDraft,
+    selectors: () => ["#modTemplates", "#channelProfiles", "#reportEnabled", "#reportChannelId", "#reportFrequency"],
+    save: () => saveOps({ auto: true })
+  },
+  exemptions: {
+    key: storageKeys.exemptionsDraft,
+    selectors: () => ["#exemptChannelIds", "#exemptRoleIds", "#exemptUserIds"],
+    save: () => saveExemptions({ auto: true })
+  },
+  ruleActions: {
+    key: storageKeys.ruleActionsDraft,
+    selectors: () => ["#alertRules", "#warnRules", "#timeoutRules", "#raidAction"],
+    save: () => saveRuleActions({ auto: true })
+  },
+  preview: {
+    key: storageKeys.previewDraft,
+    selectors: () => ["#previewChannelId", "#previewMessage"],
+    save: null
+  }
+};
+
+function persistAutosaveDraft(scope) {
+  const config = autosaveScopes[scope];
+  if (!config) return;
+  const selectors = config.selectors();
+  const draft = readScopedDraft(selectors);
+  if (!draft.length) {
+    localStorage.removeItem(config.key);
+    return;
+  }
+  writeStoredJson(config.key, draft);
+}
+
+function restoreAutosaveDraft(scope) {
+  const config = autosaveScopes[scope];
+  if (!config) return;
+  const draft = readStoredJson(config.key, []);
+  restoreScopedDraft(config.selectors(), draft);
+  if (scope === "preview") {
+    state.previewChannelId = $("#previewChannelId")?.value || state.previewChannelId;
+    state.previewMessage = $("#previewMessage")?.value || state.previewMessage;
+  }
+}
+
+function clearAutosaveDraft(scope) {
+  const config = autosaveScopes[scope];
+  if (!config) return;
+  localStorage.removeItem(config.key);
+}
+
+function hasAutosaveDraft(scope) {
+  const config = autosaveScopes[scope];
+  if (!config) return false;
+  const draft = readStoredJson(config.key, []);
+  if (Array.isArray(draft) && draft.length > 0) return true;
+  if (scope === "ops") {
+    const templateDrafts = readStoredJson(storageKeys.templateEditorDrafts, []);
+    return Array.isArray(templateDrafts) && templateDrafts.length > 0;
+  }
+  return false;
+}
+
+function renderDirtyBadge(scope, label) {
+  return hasAutosaveDraft(scope) ? `<span class="badge dirty-badge">${escapeHtml(label || "Unsaved")}</span>` : "";
+}
+
+function updateDirtyIndicators() {
+  const mapping = {
+    automodDirtyStatus: ["automod", "Unsaved"],
+    automodRuleDirtyStatus: ["automod", "Unsaved"],
+    settingsDirtyStatus: ["settings", "Unsaved"],
+    affirmationsDirtyStatus: ["settings", "Unsaved"],
+    verificationDirtyStatus: ["settings", "Unsaved"],
+    exemptionsDirtyStatus: ["exemptions", "Unsaved"],
+    privacyDirtyStatus: ["settings", "Unsaved"],
+    staffDirtyStatus: ["staff", "Unsaved"],
+    opsDirtyStatus: ["ops", "Unsaved"]
+  };
+
+  Object.entries(mapping).forEach(([id, [scope, label]]) => {
+    const element = document.getElementById(id);
+    if (!element) return;
+    element.innerHTML = hasAutosaveDraft(scope) ? `<span class="badge dirty-badge">${escapeHtml(label)}</span>` : "";
+  });
+}
+
+function renderSkeletonCards(count = 4) {
+  return Array.from({ length: count }, (_, index) => `
+    <article class="skeleton-card" aria-hidden="true">
+      <span class="skeleton-line short"></span>
+      <span class="skeleton-line"></span>
+      <span class="skeleton-line"></span>
+    </article>
+  `).join("");
+}
+
+function renderSkeletonList(count = 3) {
+  return Array.from({ length: count }, () => `
+    <article class="event skeleton-event" aria-hidden="true">
+      <span class="skeleton-line short"></span>
+      <span class="skeleton-line"></span>
+      <span class="skeleton-line"></span>
+    </article>
+  `).join("");
+}
+
+function revealStyle(index = 0) {
+  return `style="--reveal-index:${Math.max(0, Number(index) || 0)}"`;
+}
+
+function debounce(key, fn, delay = 180) {
+  clearTimeout(debounceTimers.get(key));
+  debounceTimers.set(key, setTimeout(fn, delay));
+}
+
+async function copyToClipboard(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getAutosaveScopeForElement(element) {
+  if (!element) return null;
+  return Object.entries(autosaveScopes).find(([, config]) => {
+    if (!config.save && config.key !== storageKeys.previewDraft) return false;
+    return config.selectors().some(selector => element.matches(selector));
+  })?.[0] || null;
+}
+
+function handleAutosaveInput(event) {
+  const element = event.target?.closest?.("input, textarea, select");
+  if (!element) return;
+  const scope = getAutosaveScopeForElement(element);
+  if (!scope) return;
+  persistAutosaveDraft(scope);
+  if (scope === "preview") {
+    state.previewChannelId = $("#previewChannelId")?.value || "";
+    state.previewMessage = $("#previewMessage")?.value || "";
+  }
+  if (scope === "preview") return;
+  queueAutosave(scope);
+}
+
+function queueAutosave(scope) {
+  const config = autosaveScopes[scope];
+  if (!config?.save) return;
+  persistAutosaveDraft(scope);
+  clearTimeout(autosaveTimers.get(scope));
+  autosaveTimers.set(scope, setTimeout(() => {
+    performAutosave(scope).catch(error => setAlert(error.message, "error"));
+  }, 900));
+}
+
+async function performAutosave(scope) {
+  const config = autosaveScopes[scope];
+  if (!config?.save) return;
+  if (autosaveInFlight.get(scope)) return autosaveInFlight.get(scope);
+
+  const promise = (async () => {
+    const buttonId = config.buttonId || ({
+      settings: "saveSettings",
+      automod: "saveAutomod",
+      staff: "saveStaff",
+      ops: "saveOps",
+      exemptions: "saveExemptions",
+      ruleActions: "saveRuleActions"
+    })[scope];
+    if (buttonId) updateSaveButton(buttonId, "saving");
+    try {
+      const result = await config.save({ auto: true });
+      clearAutosaveDraft(scope);
+      if (buttonId) updateSaveButton(buttonId, "saved");
+      window.setTimeout(() => {
+        if (buttonId) updateSaveButton(buttonId, "idle");
+      }, 700);
+      return result;
+    } finally {
+      autosaveInFlight.delete(scope);
+    }
+  })();
+
+  autosaveInFlight.set(scope, promise);
+  return promise;
+}
+
+function restoreAutosaveDrafts() {
+  Object.keys(autosaveScopes).forEach(scope => restoreAutosaveDraft(scope));
+}
+
+function clearAutosaveDrafts() {
+  Object.keys(autosaveScopes).forEach(scope => clearAutosaveDraft(scope));
 }
 
 function addRecentMemberSearch(query) {
@@ -1094,6 +1473,10 @@ async function api(path, options = {}) {
 }
 
 function renderMetrics() {
+  if (state.loading && !state.dashboard) {
+    $("#metricGrid").innerHTML = renderSkeletonCards(8);
+    return;
+  }
   const counts = state.dashboard?.counts || {};
   const metrics = [
     ["Cases", counts.cases || 0],
@@ -1107,7 +1490,7 @@ function renderMetrics() {
   ];
 
   $("#metricGrid").innerHTML = metrics
-    .map(([label, value]) => `<article class="metric"><span>${label}</span><strong>${value}</strong><small>${getMetricHint(label)}</small></article>`)
+    .map(([label, value], index) => `<article class="metric" ${revealStyle(index)}><span>${label}</span><strong>${value}</strong><small>${getMetricHint(label)}</small></article>`)
     .join("");
 }
 
@@ -1159,10 +1542,10 @@ function renderReactionRoleHealth() {
     ["Hierarchy", health.roleHierarchyOk ? "Good" : "Bad"],
     ["Roles Configured", roles.filter(role => role.roleId).length],
     ["Roles Present", roles.filter(role => role.roleExists).length]
-  ].map(([label, value]) => `<article class="summary-item"><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`).join("");
+  ].map(([label, value], index) => `<article class="summary-item" ${revealStyle(index)}><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`).join("");
 
   $("#reactionRoleIssues").innerHTML = roles.length
-    ? roles.map(role => {
+    ? roles.map((role, index) => {
         const warnings = [
           role.roleId ? null : "No role ID",
           role.roleExists ? null : "Role missing",
@@ -1171,7 +1554,7 @@ function renderReactionRoleHealth() {
         ].filter(Boolean);
 
         return `
-          <article class="event">
+          <article class="event" ${revealStyle(index)}>
             <strong>${escapeHtml(role.label)} <span class="badge">${escapeHtml(role.emoji)}</span></strong>
             <p>
               Role: ${role.roleId ? escapeHtml(role.roleId) : "Not set"}<br>
@@ -1185,15 +1568,15 @@ function renderReactionRoleHealth() {
     : renderEmptyState("No reaction roles", "The reaction role mapping is empty.");
 
   if (!roles.length && issues.length) {
-    $("#reactionRoleIssues").innerHTML = issues.map(issue => `
-      <article class="event">
+    $("#reactionRoleIssues").innerHTML = issues.map((issue, index) => `
+      <article class="event" ${revealStyle(index)}>
         <strong>Setup issue</strong>
         <p>${escapeHtml(issue)}</p>
       </article>
     `).join("");
   } else if (issues.length) {
-    $("#reactionRoleIssues").innerHTML += issues.slice(0, 5).map(issue => `
-      <article class="event">
+    $("#reactionRoleIssues").innerHTML += issues.slice(0, 5).map((issue, index) => `
+      <article class="event" ${revealStyle(index + roles.length)}>
         <strong>Setup issue</strong>
         <p>${escapeHtml(issue)}</p>
       </article>
@@ -1203,9 +1586,13 @@ function renderReactionRoleHealth() {
 
 function renderRecentViolations() {
   const items = state.dashboard?.analytics?.recentViolations || [];
+  if (state.loading && !items.length) {
+    $("#recentViolations").innerHTML = renderSkeletonList(4);
+    return;
+  }
   $("#recentViolations").innerHTML = items.length
-    ? items.slice(0, 8).map(item => `
-      <article class="event">
+    ? items.slice(0, 8).map((item, index) => `
+      <article class="event" ${revealStyle(index)}>
         <strong><span class="status-dot red"></span>${escapeHtml(item.action)} - ${escapeHtml(item.userTag)}</strong>
         <p>${escapeHtml(item.reason)}</p>
       </article>
@@ -1220,8 +1607,8 @@ function renderQuickActions() {
     return true;
   });
 
-  $("#quickActions").innerHTML = visibleActions.map(action => `
-    <button class="quick-action" type="button" data-quick-action="${escapeHtml(action.id)}">
+  $("#quickActions").innerHTML = visibleActions.map((action, index) => `
+    <button class="quick-action" type="button" data-quick-action="${escapeHtml(action.id)}" ${revealStyle(index)}>
       <strong>${escapeHtml(action.title)}</strong>
       <span>${escapeHtml(action.description)}</span>
     </button>
@@ -1231,8 +1618,8 @@ function renderQuickActions() {
 function renderPanelChanges() {
   const panelChanges = state.dashboard?.panelChanges || [];
   $("#panelChangesList").innerHTML = panelChanges.length
-    ? panelChanges.map(entry => `
-      <article class="event">
+    ? panelChanges.map((entry, index) => `
+      <article class="event" ${revealStyle(index)}>
         <strong>${escapeHtml(entry.action)} <span class="badge">${escapeHtml(entry.actorTag || "System")}</span></strong>
         <p>${escapeHtml(formatDate(entry.createdAt))}<br>${escapeHtml(JSON.stringify(entry.details || {}))}</p>
       </article>
@@ -1276,8 +1663,8 @@ function renderActivityStream() {
     .slice(0, 12);
 
   $("#activityStream").innerHTML = items.length
-    ? items.map(item => `
-      <article class="event">
+    ? items.map((item, index) => `
+      <article class="event" ${revealStyle(index)}>
         <strong>${escapeHtml(item.title)} <span class="badge">${escapeHtml(item.kind)}</span></strong>
         <p>${escapeHtml(item.actorTag || formatDate(item.createdAt) || "Recent")}<br>${escapeHtml(item.detail || "")}</p>
       </article>
@@ -1346,12 +1733,12 @@ function renderAttentionBoard() {
 
   $("#attentionBoard").innerHTML = `
     <div class="summary-grid">
-      ${pulse.map(([label, value]) => `<article class="summary-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`).join("")}
+      ${pulse.map(([label, value], index) => `<article class="summary-item" ${revealStyle(index)}><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`).join("")}
     </div>
     <div class="event-list">
       ${alerts.length
-        ? alerts.map(alert => `
-          <article class="event">
+        ? alerts.map((alert, index) => `
+          <article class="event" ${revealStyle(index)}>
             <strong>${escapeHtml(alert.title)}</strong>
             <p>${escapeHtml(alert.detail)}</p>
           </article>
@@ -1378,7 +1765,7 @@ function renderGeneralChatRulePanel() {
     ["Gentle Reminder", `${rule.warningDays || 53} days`],
     ["Last Checked", rule.checkedAt ? formatDate(rule.checkedAt) : "Never"],
     ["Last Run", rule.lastRun?.ranAt ? formatDate(rule.lastRun.ranAt) : "Not yet"]
-  ].map(([label, value]) => `<article class="summary-item"><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`).join("");
+  ].map(([label, value], index) => `<article class="summary-item" ${revealStyle(index)}><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`).join("");
 
   $("#toggleGeneralChatRule").textContent = enabled ? "Disable Rule Temporarily" : "Enable Rule";
   $("#runGeneralChatCheck").disabled = !rule.channelId;
@@ -1399,8 +1786,8 @@ function renderGeneralChatRulePanel() {
     return;
   }
 
-  $("#generalChatRiskList").innerHTML = membersAtRisk.map(member => `
-    <article class="event">
+  $("#generalChatRiskList").innerHTML = membersAtRisk.map((member, index) => `
+    <article class="event" ${revealStyle(index)}>
       <strong>${escapeHtml(member.tag)} <span class="badge">${escapeHtml(member.daysInactive)}d inactive</span>${member.warningSent ? ' <span class="badge">Warning sent</span>' : ''}${member.warningDue ? ' <span class="badge">Warning due</span>' : ''}${member.kickable ? "" : ' <span class="badge">Not kickable</span>'}</strong>
       <p>${escapeHtml(member.lastActiveText || "No activity found")}<br>${escapeHtml(member.userId)}</p>
     </article>
@@ -1424,7 +1811,7 @@ function renderWorkloadSummary() {
     ["Quick Templates", (state.ops?.templates || []).length],
     ["Recent Searches", readStoredArray(storageKeys.recentMemberSearches).length]
   ]
-    .map(([label, value]) => `<article class="summary-item"><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`)
+    .map(([label, value], index) => `<article class="summary-item" ${revealStyle(index)}><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`)
     .join("");
 }
 
@@ -1507,12 +1894,31 @@ function renderCommandPaletteList(query = "") {
     return [entry.label, entry.kind, entry.value].join(" ").toLowerCase().includes(term);
   });
 
-  $("#commandPaletteList").innerHTML = items.length
-    ? items.map(entry => `
-      <button class="command-item" type="button" data-command-kind="${escapeHtml(entry.kind)}" data-command-value="${escapeHtml(entry.value)}">
-        <strong>${escapeHtml(entry.label)}</strong>
-        <span>${escapeHtml(entry.kind === "view" ? "Navigate" : "Action")}</span>
-      </button>
+  const groups = [
+    ["Navigate", items.filter(entry => entry.kind === "view")],
+    ["Actions", items.filter(entry => entry.kind !== "view" && !["template", "filter", "member-search", "recent"].includes(entry.kind))],
+    ["Templates", items.filter(entry => entry.kind === "template")],
+    ["Saved Filters", items.filter(entry => entry.kind === "filter")],
+    ["Recent Searches", items.filter(entry => entry.kind === "member-search")],
+    ["Recent Actions", items.filter(entry => entry.kind === "recent")]
+  ].filter(([, groupItems]) => groupItems.length);
+
+  $("#commandPaletteList").innerHTML = groups.length
+    ? groups.map(([label, groupItems]) => `
+      <section class="command-group">
+        <div class="command-group-head">
+          <strong>${escapeHtml(label)}</strong>
+          <span class="badge">${escapeHtml(groupItems.length)}</span>
+        </div>
+        <div class="command-group-items">
+          ${groupItems.map(entry => `
+            <button class="command-item" type="button" data-command-kind="${escapeHtml(entry.kind)}" data-command-value="${escapeHtml(entry.value)}">
+              <strong>${escapeHtml(entry.label)}</strong>
+              <span>${escapeHtml(entry.kind === "view" ? "Navigate" : entry.kind === "template" ? "Template" : entry.kind === "filter" ? "Saved filter" : entry.kind === "member-search" ? "Recent search" : entry.kind === "recent" ? "Recent action" : "Action")}</span>
+            </button>
+          `).join("")}
+        </div>
+      </section>
     `).join("")
     : renderEmptyState("No matches", "Try a different search.");
 }
@@ -1587,6 +1993,15 @@ function runPaletteCommand(kind, value) {
   } else if (value === "open-member-drawer") {
     state.memberDrawerOpen = true;
     renderMemberDrawer();
+  } else if (value === "copy-member-id") {
+    const memberId = state.selectedMember?.id || window.prompt("Enter a member ID to copy");
+    if (memberId) {
+      copyToClipboard(memberId).then(copied => {
+        setAlert(copied ? "Member ID copied." : "Copy failed.", copied ? "info" : "error");
+      });
+    }
+  } else if (value === "undo-last-member-delete") {
+    restoreLastDeletedMemberRecord().catch(error => setAlert(error.message, "error"));
   }
   closeCommandPalette();
 }
@@ -2000,10 +2415,10 @@ function renderStaff() {
 function renderOps() {
   const ops = state.ops || {};
   const templates = ops.templates || [];
-  state.templateEditorDrafts = normalizeTemplates(templates);
-  if (!state.templateEditorDrafts.length) {
-    state.templateEditorDrafts = [];
-  }
+  const storedTemplateDrafts = readStoredJson(storageKeys.templateEditorDrafts, null);
+  state.templateEditorDrafts = Array.isArray(storedTemplateDrafts) && storedTemplateDrafts.length
+    ? normalizeTemplates(storedTemplateDrafts)
+    : normalizeTemplates(templates);
   state.templateEditorIndex = Math.min(
     Number(localStorage.getItem(storageKeys.templateEditorIndex) || 0),
     Math.max(0, state.templateEditorDrafts.length - 1)
@@ -2068,6 +2483,15 @@ function syncTemplateEditorTextarea() {
   $("#modTemplates").value = serializeTemplates(state.templateEditorDrafts);
 }
 
+function persistTemplateEditorDrafts() {
+  writeStoredJson(storageKeys.templateEditorDrafts, state.templateEditorDrafts);
+  localStorage.setItem(storageKeys.templateEditorIndex, String(state.templateEditorIndex));
+}
+
+function clearTemplateEditorDrafts() {
+  localStorage.removeItem(storageKeys.templateEditorDrafts);
+}
+
 function getSelectedTemplateDraft() {
   return state.templateEditorDrafts[state.templateEditorIndex] || null;
 }
@@ -2078,11 +2502,13 @@ function updateSelectedTemplateDraft(field, value) {
   template[field] = value;
   state.templateEditorDrafts = [...state.templateEditorDrafts];
   syncTemplateEditorTextarea();
+  persistTemplateEditorDrafts();
 }
 
 function selectTemplateEditorIndex(index) {
   state.templateEditorIndex = Math.max(0, Math.min(index, Math.max(0, state.templateEditorDrafts.length - 1)));
   localStorage.setItem(storageKeys.templateEditorIndex, String(state.templateEditorIndex));
+  persistTemplateEditorDrafts();
   renderTemplateEditor();
 }
 
@@ -2093,6 +2519,7 @@ function addTemplateDraft() {
   ];
   selectTemplateEditorIndex(state.templateEditorDrafts.length - 1);
   syncTemplateEditorTextarea();
+  persistTemplateEditorDrafts();
 }
 
 function deleteTemplateDraft() {
@@ -2101,6 +2528,7 @@ function deleteTemplateDraft() {
   state.templateEditorIndex = Math.max(0, Math.min(state.templateEditorIndex, state.templateEditorDrafts.length - 1));
   localStorage.setItem(storageKeys.templateEditorIndex, String(state.templateEditorIndex));
   syncTemplateEditorTextarea();
+  persistTemplateEditorDrafts();
   renderTemplateEditor();
 }
 
@@ -2113,6 +2541,7 @@ function duplicateTemplateDraft() {
   ];
   selectTemplateEditorIndex(state.templateEditorDrafts.length - 1);
   syncTemplateEditorTextarea();
+  persistTemplateEditorDrafts();
 }
 
 function renderTemplateEditor() {
@@ -2229,9 +2658,42 @@ async function saveMemberRecord(kind, index, mode = "update") {
     body: JSON.stringify(body)
   });
 
+  if (mode === "delete" && result.deletedRecord) {
+    state.lastDeletedMemberRecord = {
+      userId: state.selectedMember.id,
+      kind,
+      index: result.deletedIndex ?? index,
+      record: result.deletedRecord
+    };
+  }
+
   state.selectedMember = result.member;
   await loadAll();
   setAlert(`${kind === "warning" ? "Warning" : "Note"} ${mode === "delete" ? "deleted" : "saved"}.`);
+}
+
+async function restoreLastDeletedMemberRecord() {
+  const snapshot = state.lastDeletedMemberRecord;
+  if (!snapshot || !state.selectedMember || snapshot.userId !== state.selectedMember.id) {
+    setAlert("There is no deleted record to restore for this member.", "error");
+    return;
+  }
+
+  const result = await api("/api/member-record", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: snapshot.userId,
+      kind: snapshot.kind,
+      index: snapshot.index,
+      mode: "restore",
+      record: snapshot.record
+    })
+  });
+
+  state.lastDeletedMemberRecord = null;
+  state.selectedMember = result.member;
+  await loadAll();
+  setAlert(`Restored the deleted ${snapshot.kind}.`);
 }
 
 function clearRecentActions() {
@@ -2249,6 +2711,15 @@ function renderTemplates() {
 
 function renderRecords() {
   const filteredCases = getFilteredCases();
+  const warningUsers = Object.keys(state.warnings || {}).length;
+  const noteUsers = Object.keys(state.notes || {}).length;
+  const totalCases = (state.cases || []).length;
+  $("#recordsSummary").innerHTML = [
+    ["Cases", totalCases],
+    ["Warnings", warningUsers],
+    ["Notes", noteUsers],
+    ["Visible", filteredCases.length]
+  ].map(([label, value], index) => `<article class="summary-item" ${revealStyle(index)}><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`).join("");
   $("#casesTable").innerHTML = filteredCases.slice(0, 120).map(entry => `
     <tr>
       <td>${escapeHtml(entry.id || "")}</td>
@@ -2414,7 +2885,9 @@ function renderTimeline(filteredCases) {
 function renderMemberProfile() {
   const member = state.selectedMember;
   if (!member) {
-    $("#memberProfile").innerHTML = "Search for a member to load their moderation profile.";
+    $("#memberProfile").innerHTML = state.loading
+      ? `<div class="profile-card">${renderSkeletonCards(1)}</div>`
+      : "Search for a member to load their moderation profile.";
     $("#memberAiSummary").innerHTML = "";
     $("#memberAiSummaryButton").disabled = true;
     $("#memberAiSummaryButton").textContent = "AI Summary";
@@ -2444,6 +2917,9 @@ function renderMemberProfile() {
           <strong>${escapeHtml(member.tag)}</strong>
           <span>${escapeHtml(member.id)}</span>
         </div>
+        <div class="profile-tools">
+          <button class="ghost-button" type="button" data-copy-id="${escapeHtml(member.id)}">Copy ID</button>
+        </div>
       </div>
       <dl class="detail-list">
         <dt>In Server</dt><dd>${member.inGuild ? "Yes" : "No"}</dd>
@@ -2463,6 +2939,15 @@ function renderMemberProfile() {
       <div class="button-row profile-actions">
         <button class="ghost-button" type="button" id="openMemberDrawerButton">Open Drawer</button>
       </div>
+      ${state.lastDeletedMemberRecord && state.lastDeletedMemberRecord.userId === member.id ? `
+        <div class="undo-banner">
+          <div>
+            <strong>Last deleted ${escapeHtml(state.lastDeletedMemberRecord.kind)}</strong>
+            <p>Restore the most recently deleted record for this member.</p>
+          </div>
+          <button class="ghost-button" type="button" data-undo-member-record-delete>Undo delete</button>
+        </div>
+      ` : ""}
       <div class="action-shortcuts">
         ${memberActionShortcuts.map(shortcut => `
           <button class="ghost-button" type="button" data-member-shortcut="${escapeHtml(shortcut.action)}">${escapeHtml(shortcut.label)}</button>
@@ -2541,7 +3026,10 @@ function renderMemberDrawer() {
     <div class="drawer-panel">
       <div class="panel-header">
         <h3>Member Drawer</h3>
-        <button class="ghost-button" type="button" id="closeMemberDrawerButton">Close</button>
+        <div class="button-row">
+          <button class="ghost-button" type="button" data-copy-id="${escapeHtml(member.id)}">Copy ID</button>
+          <button class="ghost-button" type="button" id="closeMemberDrawerButton">Close</button>
+        </div>
       </div>
       <article class="profile-card compact">
         <div class="profile-title">
@@ -2900,6 +3388,42 @@ function applyMemberShortcut(action) {
   setAlert(`Loaded ${shortcut.label.toLowerCase()} shortcut. Review it before applying.`);
 }
 
+async function saveCurrentView() {
+  const view = localStorage.getItem(storageKeys.activeView) || getDefaultView();
+  const subtab = getActiveSubtab(view);
+
+  if (view === "automod") {
+    await saveAutomod();
+    return;
+  }
+
+  if (view === "staff") {
+    await saveStaff();
+    return;
+  }
+
+  if (view === "ops") {
+    await saveOps();
+    return;
+  }
+
+  if (view === "settings") {
+    if (subtab === "verification") {
+      await saveVerificationSettings();
+    } else if (subtab === "safety") {
+      await savePrivacySettings();
+    } else if (subtab === "accounts") {
+      if (state.webAccountEditing || $("#webAccountUsername").value.trim()) {
+        await saveWebAccount();
+      } else {
+        await saveSettings();
+      }
+    } else {
+      await saveSettings();
+    }
+  }
+}
+
 async function toggleSelectedMemberExemption(enabled) {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change exemptions.", "error");
@@ -3043,11 +3567,14 @@ function renderAll() {
   renderRecentActions();
   if (state.selectedMember) renderMemberProfile();
   else renderMemberDrawer();
+  updateDirtyIndicators();
+  restoreAutosaveDrafts();
 }
 
 async function loadAll() {
   try {
-    updateApiState("Loading");
+    setPanelBusy(true);
+    updateApiState("Loading", "loading");
     state.me = await api("/api/me");
     updateAuthPanel();
 
@@ -3066,13 +3593,14 @@ async function loadAll() {
             : "Enter the backup admin token to load the dashboard.";
       setLoginVisible(true, loginMessage);
       setLoginBusy(false);
+      ensureAutoRefresh();
       return;
     }
 
     if (state.me.authenticated) {
       setLoginVisible(false);
       setLoginBusy(true);
-      updateApiState("Loading");
+      updateApiState("Loading", "loading");
     }
 
     const requests = [
@@ -3103,6 +3631,7 @@ async function loadAll() {
     applyRoleAwareWorkspace();
     renderAll();
     applyAccessRestrictions();
+    ensureAutoRefresh();
     setLoginBusy(false);
     setLoginVisible(false);
     updateApiState("Live", "ok");
@@ -3112,14 +3641,17 @@ async function loadAll() {
     setLoginBusy(false);
     setLoginVisible(!state.me?.authenticated, error.message);
     setAlert(error.message, "error");
+  } finally {
+    setPanelBusy(false);
   }
 }
 
-async function saveAutomod() {
+async function saveAutomod(options = {}) {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change AutoMod settings.", "error");
     return;
   }
+  const auto = Boolean(options.auto);
   const payload = {};
   document.querySelectorAll("[data-automod-bool]").forEach(input => {
     payload[input.dataset.automodBool] = input.checked;
@@ -3143,7 +3675,13 @@ async function saveAutomod() {
   });
   state.config.automod = result.automod;
   state.automodPreview = null;
-  await loadAll();
+  clearAutosaveDraft("automod");
+  renderAll();
+  if (!auto) {
+    updateSaveButton("saveAutomod", "saved");
+    window.setTimeout(() => updateSaveButton("saveAutomod", "idle"), 700);
+    setAlert("AutoMod settings saved.");
+  }
 }
 
 async function syncGoogleBlockList() {
@@ -3212,15 +3750,16 @@ async function applyAutomodPreviewOverride(mode, ruleKey = "") {
   });
 
   state.config.automod.channelRuleOverrides = result.channelRuleOverrides || {};
-  await loadAll();
+  renderAll();
   setAlert(mode === "rule" ? `Ignored ${ruleKey} in that channel.` : "Channel override saved.");
 }
 
-async function saveStaff() {
+async function saveStaff(options = {}) {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change staff access.", "error");
     return;
   }
+  const auto = Boolean(options.auto);
   const result = await api("/api/permissions", {
     method: "POST",
     body: JSON.stringify({
@@ -3229,7 +3768,13 @@ async function saveStaff() {
     })
   });
   state.config.permissions = result.permissions;
-  await loadAll();
+  clearAutosaveDraft("staff");
+  renderAll();
+  if (!auto) {
+    updateSaveButton("saveStaff", "saved");
+    window.setTimeout(() => updateSaveButton("saveStaff", "idle"), 700);
+    setAlert("Staff access saved.");
+  }
 }
 
 function applyAutomodPreset(name) {
@@ -3252,26 +3797,35 @@ function applyAutomodPreset(name) {
   setAlert(`${name[0].toUpperCase()}${name.slice(1)} AutoMod mode is ready. Save to apply it.`);
 }
 
-async function saveSettings() {
+async function saveSettings(options = {}) {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change server settings.", "error");
     return;
   }
-  const payload = collectSettingsPayload();
+  const auto = Boolean(options.auto);
+  const allowedKeys = Array.isArray(options.allowedKeys) ? options.allowedKeys : null;
+  const nextPayload = allowedKeys ? collectSettingsPayload(allowedKeys) : collectSettingsPayload();
 
   const result = await api("/api/settings", {
     method: "POST",
-    body: JSON.stringify(payload)
+    body: JSON.stringify(nextPayload)
   });
   state.config.settings = result.settings;
-  await loadAll();
+  clearAutosaveDraft("settings");
+  renderAll();
+  if (!auto && !allowedKeys) {
+    updateSaveButton("saveSettings", "saved");
+    window.setTimeout(() => updateSaveButton("saveSettings", "idle"), 700);
+    setAlert("Server settings saved.");
+  }
 }
 
-async function savePrivacySettings() {
+async function savePrivacySettings(options = {}) {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change privacy settings.", "error");
     return;
   }
+  const auto = Boolean(options.auto);
 
   const payload = collectSettingsPayload([
     "messageArchiveEnabled",
@@ -3284,15 +3838,21 @@ async function savePrivacySettings() {
   });
 
   state.config.settings = result.settings;
-  await loadAll();
-  setAlert("Archive settings saved.");
+  clearAutosaveDraft("settings");
+  renderAll();
+  if (!auto) {
+    updateSaveButton("savePrivacySettings", "saved");
+    window.setTimeout(() => updateSaveButton("savePrivacySettings", "idle"), 700);
+    setAlert("Archive settings saved.");
+  }
 }
 
-async function saveAllSettings() {
+async function saveAllSettings(options = {}) {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change server settings.", "error");
     return;
   }
+  const auto = Boolean(options.auto);
 
   const settingsPayload = collectSettingsPayload();
   const settingsResult = await api("/api/settings", {
@@ -3311,8 +3871,15 @@ async function saveAllSettings() {
 
   state.config.settings = settingsResult.settings;
   state.config.automod = automodResult.automod;
-  await loadAll();
-  setAlert("All settings saved.");
+  clearAutosaveDraft("settings");
+  clearAutosaveDraft("automod");
+  clearAutosaveDraft("exemptions");
+  renderAll();
+  if (!auto) {
+    updateSaveButton("saveAllSettings", "saved");
+    window.setTimeout(() => updateSaveButton("saveAllSettings", "idle"), 700);
+    setAlert("All settings saved.");
+  }
 }
 
 function generateWebPassword(length = 18) {
@@ -3379,7 +3946,8 @@ async function saveWebAccount() {
 
   state.webAccounts = result.accounts || state.webAccounts;
   fillWebAccountForm(result.account || null);
-  await loadAll();
+  renderWebAccounts();
+  renderWebAccountAudit(result.account || null);
   setAlert(`Saved web account for ${username}.`);
 }
 
@@ -3406,7 +3974,8 @@ async function deleteWebAccount() {
 
   state.webAccounts = result.accounts || state.webAccounts;
   fillWebAccountForm(null);
-  await loadAll();
+  renderWebAccounts();
+  renderWebAccountAudit(null);
   setAlert(`Deleted web account ${username}.`);
 }
 
@@ -3434,7 +4003,8 @@ async function toggleWebAccountEnabled(username = state.webAccountEditing) {
   state.webAccounts = result.accounts || state.webAccounts;
   const updated = (state.webAccounts || []).find(item => item.username === account.username) || null;
   fillWebAccountForm(updated);
-  await loadAll();
+  renderWebAccounts();
+  renderWebAccountAudit(updated);
   setAlert(`${updated?.enabled ? "Enabled" : "Disabled"} ${account.username}.`);
 }
 
@@ -3477,7 +4047,8 @@ async function resetWebAccountPassword(username = state.webAccountEditing) {
   } else {
     setAlert(`Password reset for ${account.username}.`);
   }
-  await loadAll();
+  renderWebAccounts();
+  renderWebAccountAudit(updated);
 }
 
 async function postAffirmationsPanel() {
@@ -3494,11 +4065,12 @@ async function postAffirmationsPanel() {
   setAlert("Anonymous affirmations panel posted.");
 }
 
-async function saveVerificationSettings() {
+async function saveVerificationSettings(options = {}) {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change server settings.", "error");
     return;
   }
+  const auto = Boolean(options.auto);
 
   const payload = collectSettingsPayload([
     "tiktokHandle",
@@ -3512,8 +4084,13 @@ async function saveVerificationSettings() {
   });
 
   state.config.settings = result.settings;
-  await loadAll();
-  setAlert("Verification settings saved.");
+  clearAutosaveDraft("settings");
+  renderAll();
+  if (!auto) {
+    updateSaveButton("saveVerificationSettings", "saved");
+    window.setTimeout(() => updateSaveButton("saveVerificationSettings", "idle"), 700);
+    setAlert("Verification settings saved.");
+  }
 }
 
 async function repostRolePanel() {
@@ -3592,11 +4169,12 @@ async function markAllUnverified() {
   setAlert(`Marked ${result.updated} member${result.updated === 1 ? "" : "s"} as unverified. Skipped ${result.skipped}, failed ${result.failed}.`);
 }
 
-async function saveExemptions() {
+async function saveExemptions(options = {}) {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change exemptions.", "error");
     return;
   }
+  const auto = Boolean(options.auto);
   const result = await api("/api/automod", {
     method: "POST",
     body: JSON.stringify({
@@ -3606,14 +4184,21 @@ async function saveExemptions() {
     })
   });
   state.config.automod = result.automod;
-  await loadAll();
+  clearAutosaveDraft("exemptions");
+  renderAll();
+  if (!auto) {
+    updateSaveButton("saveExemptions", "saved");
+    window.setTimeout(() => updateSaveButton("saveExemptions", "idle"), 700);
+    setAlert("Exemptions saved.");
+  }
 }
 
-async function saveRuleActions() {
+async function saveRuleActions(options = {}) {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change rule actions.", "error");
     return;
   }
+  const auto = Boolean(options.auto);
   await api("/api/rule-actions", {
     method: "POST",
     body: JSON.stringify({
@@ -3623,14 +4208,21 @@ async function saveRuleActions() {
       raidAction: $("#raidAction").value
     })
   });
-  await loadAll();
+  clearAutosaveDraft("ruleActions");
+  renderAll();
+  if (!auto) {
+    updateSaveButton("saveRuleActions", "saved");
+    window.setTimeout(() => updateSaveButton("saveRuleActions", "idle"), 700);
+    setAlert("Rule actions saved.");
+  }
 }
 
-async function saveOps() {
+async function saveOps(options = {}) {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change operations settings.", "error");
     return;
   }
+  const auto = Boolean(options.auto);
   syncTemplateEditorTextarea();
   state.ops = await api("/api/ops", {
     method: "POST",
@@ -3643,8 +4235,15 @@ async function saveOps() {
     })
   });
   state.automodPreview = null;
-  renderOps();
-  setAlert("Operations settings saved.");
+  clearAutosaveDraft("ops");
+  clearTemplateEditorDrafts();
+  localStorage.removeItem(storageKeys.templateEditorIndex);
+  renderAll();
+  if (!auto) {
+    updateSaveButton("saveOps", "saved");
+    window.setTimeout(() => updateSaveButton("saveOps", "idle"), 700);
+    setAlert("Operations settings saved.");
+  }
 }
 
 async function updateAppealStatus(appealId, status) {
@@ -3659,7 +4258,7 @@ async function updateAppealStatus(appealId, status) {
   });
 
   state.ops = result.ops || state.ops;
-  await loadAll();
+  renderOps();
   setAlert(`Appeal #${appealId} marked ${status}.`);
 }
 
@@ -3702,6 +4301,8 @@ function bindEvents() {
   $("#loginTokenInput").value = state.token;
   updateAuthPanel();
   restorePanelMemory();
+  document.addEventListener("input", handleAutosaveInput, true);
+  document.addEventListener("change", handleAutosaveInput, true);
 
   $("#loginSaveToken").addEventListener("click", () => {
     state.token = $("#loginTokenInput").value.trim();
@@ -3857,6 +4458,14 @@ function bindEvents() {
   $("#memberSearchButton").addEventListener("click", () => searchMember().catch(error => setAlert(error.message, "error")));
   $("#memberAiSummaryButton").addEventListener("click", () => loadMemberAiSummary().catch(error => setAlert(error.message, "error")));
   $("#memberActionButton").addEventListener("click", () => applyMemberAction().catch(error => setAlert(error.message, "error")));
+  $("#memberSearchInput").addEventListener("input", () => {
+    const query = $("#memberSearchInput").value.trim();
+    localStorage.setItem(storageKeys.lastMemberSearch, $("#memberSearchInput").value);
+    debounce("memberSearch", () => {
+      if ($("#memberSearchInput").value.trim().length < 2) return;
+      searchMember().catch(error => setAlert(error.message, "error"));
+    }, 350);
+  });
   $("#recentMemberSearches").addEventListener("click", event => {
     const button = event.target.closest("[data-member-search]");
     if (!button) return;
@@ -3868,6 +4477,20 @@ function bindEvents() {
     if (drawerButton) {
       state.memberDrawerOpen = true;
       renderMemberDrawer();
+      return;
+    }
+
+    const copyButton = event.target.closest("[data-copy-id]");
+    if (copyButton) {
+      copyToClipboard(copyButton.dataset.copyId).then(copied => {
+        setAlert(copied ? "Member ID copied." : "Copy failed.", copied ? "info" : "error");
+      });
+      return;
+    }
+
+    const undoButton = event.target.closest("[data-undo-member-record-delete]");
+    if (undoButton) {
+      restoreLastDeletedMemberRecord().catch(error => setAlert(error.message, "error"));
       return;
     }
 
@@ -3920,6 +4543,13 @@ function bindEvents() {
     if (event.target.closest("#closeMemberDrawerButton")) {
       state.memberDrawerOpen = false;
       renderMemberDrawer();
+      return;
+    }
+    const copyButton = event.target.closest("[data-copy-id]");
+    if (copyButton) {
+      copyToClipboard(copyButton.dataset.copyId).then(copied => {
+        setAlert(copied ? "Member ID copied." : "Copy failed.", copied ? "info" : "error");
+      });
       return;
     }
     const shortcutButton = event.target.closest("[data-member-shortcut]");
@@ -3978,7 +4608,7 @@ function bindEvents() {
   });
   $("#memberChatSearchInput").addEventListener("input", () => {
     localStorage.setItem(storageKeys.memberChatSearch, $("#memberChatSearchInput").value);
-    renderMemberChatLogs();
+    debounce("memberChatSearch", () => renderMemberChatLogs(), 180);
   });
   $("#memberChatChannelFilter").addEventListener("change", () => {
     localStorage.setItem(storageKeys.memberChatChannelFilter, $("#memberChatChannelFilter").value);
@@ -3997,7 +4627,7 @@ function bindEvents() {
   });
   $("#auditFilterInput").addEventListener("input", () => {
     localStorage.setItem(storageKeys.auditFilter, $("#auditFilterInput").value);
-    renderOps();
+    debounce("auditFilter", () => renderOps(), 140);
   });
   $("#appealStatusFilter").addEventListener("change", () => {
     localStorage.setItem(storageKeys.appealFilter, $("#appealStatusFilter").value);
@@ -4006,7 +4636,7 @@ function bindEvents() {
   ["#caseFilterUser", "#caseFilterAction", "#caseFilterModerator"].forEach(selector => {
     $(selector).addEventListener("input", () => {
       persistCaseFilters();
-      renderRecords();
+      debounce("caseFilters", () => renderRecords(), 120);
     });
   });
   $("#resetCaseFilters").addEventListener("click", () => {
@@ -4085,6 +4715,9 @@ function bindEvents() {
   });
 
   document.addEventListener("keydown", event => {
+    const target = event.target;
+    const editable = target && (target.closest?.("input, textarea, select") || target.isContentEditable);
+
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
       event.preventDefault();
       if ($("#commandPalette").classList.contains("hidden")) {
@@ -4092,6 +4725,18 @@ function bindEvents() {
       } else {
         closeCommandPalette();
       }
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      saveCurrentView().catch(error => setAlert(error.message, "error"));
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "z" && state.lastDeletedMemberRecord && state.selectedMember && !editable) {
+      event.preventDefault();
+      restoreLastDeletedMemberRecord().catch(error => setAlert(error.message, "error"));
       return;
     }
 
