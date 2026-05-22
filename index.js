@@ -87,6 +87,7 @@ const FOOTER = {
 };
 
 const MAX_TIMEOUT_MS = 28 * 24 * 60 * 60 * 1000;
+const BIRTHDAY_ROLE_DURATION_MS = 24 * 60 * 60 * 1000;
 const INVITE_REGEX = /(discord\.gg|discord\.com\/invite)\/[a-z0-9-]+/i;
 const AUTOMOD_RULE_KEYS = [
   "account-age-links",
@@ -154,6 +155,7 @@ let tempBanInterval = null;
 let scheduledReportInterval = null;
 let googleBlockListInterval = null;
 let generalChatSweepInterval = null;
+let birthdaySweepInterval = null;
 
 const dataDir = path.join(__dirname, "data");
 const configPath = path.join(dataDir, "config.json");
@@ -163,6 +165,7 @@ let messageArchiveLastPruneAt = 0;
 function createDefaultConfig() {
   return {
     verifyMessageId: null,
+    birthdays: {},
     warnings: {},
     notes: {},
     cases: [],
@@ -279,6 +282,8 @@ function createDefaultConfig() {
       logChannelId: null,
       automodLogChannelId: null,
       mutedRoleId: null,
+      birthdayRoleId: null,
+      birthdayAnnouncementChannelId: null,
       messageArchiveEnabled: true,
       messageArchiveRetentionDays: 30,
       tiktokHandle: "",
@@ -536,6 +541,7 @@ function loadConfig() {
     return {
       ...defaults,
       ...parsed,
+      birthdays: parsed.birthdays && typeof parsed.birthdays === "object" ? parsed.birthdays : {},
       warnings: parsed.warnings && typeof parsed.warnings === "object" ? parsed.warnings : {},
       notes: parsed.notes && typeof parsed.notes === "object" ? parsed.notes : {},
       cases: Array.isArray(parsed.cases) ? parsed.cases : [],
@@ -1044,6 +1050,239 @@ function getAutoModLogChannelId() {
 
 function getMutedRoleId() {
   return config.settings.mutedRoleId || null;
+}
+
+function getBirthdayRoleId() {
+  return config.settings.birthdayRoleId || null;
+}
+
+function getBirthdayAnnouncementChannelId() {
+  return config.settings.birthdayAnnouncementChannelId || null;
+}
+
+function getBirthdayStore() {
+  if (!config.birthdays || typeof config.birthdays !== "object") {
+    config.birthdays = {};
+  }
+  return config.birthdays;
+}
+
+function normalizeBirthdayMonthDay(month, day) {
+  const parsedMonth = Number(month);
+  const parsedDay = Number(day);
+  if (!Number.isInteger(parsedMonth) || !Number.isInteger(parsedDay)) return null;
+  if (parsedMonth < 1 || parsedMonth > 12) return null;
+  if (parsedDay < 1 || parsedDay > 31) return null;
+
+  const testDate = new Date(Date.UTC(2024, parsedMonth - 1, parsedDay));
+  if (testDate.getUTCMonth() !== parsedMonth - 1 || testDate.getUTCDate() !== parsedDay) {
+    return null;
+  }
+
+  return {
+    month: parsedMonth,
+    day: parsedDay
+  };
+}
+
+function formatBirthdayMonthDay(month, day) {
+  return `${String(month).padStart(2, "0")}/${String(day).padStart(2, "0")}`;
+}
+
+function getBirthdayEntry(userId) {
+  return getBirthdayStore()[userId] || null;
+}
+
+function setBirthdayEntry(userId, month, day) {
+  const normalized = normalizeBirthdayMonthDay(month, day);
+  if (!normalized) return null;
+
+  const store = getBirthdayStore();
+  const current = store[userId] || {};
+  store[userId] = {
+    ...current,
+    month: normalized.month,
+    day: normalized.day,
+    public: true,
+    updatedAt: new Date().toISOString()
+  };
+  saveConfig();
+  return store[userId];
+}
+
+function removeBirthdayEntry(userId) {
+  const store = getBirthdayStore();
+  if (!store[userId]) return false;
+  delete store[userId];
+  saveConfig();
+  return true;
+}
+
+function getBirthdayKey(month, day) {
+  return `${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function getBirthdayTodayKey(date = new Date()) {
+  return getBirthdayKey(date.getMonth() + 1, date.getDate());
+}
+
+function getNextBirthdayDate(month, day, fromDate = new Date()) {
+  const year = fromDate.getFullYear();
+  let next = new Date(year, month - 1, day, 9, 0, 0, 0);
+  if (next < fromDate) {
+    next = new Date(year + 1, month - 1, day, 9, 0, 0, 0);
+  }
+  return next;
+}
+
+function buildBirthdaySummary() {
+  const birthdays = Object.entries(getBirthdayStore());
+  return [
+    `Birthday role: ${getBirthdayRoleId() ? `<@&${getBirthdayRoleId()}>` : "Not set"}`,
+    `Announcement channel: ${getBirthdayAnnouncementChannelId() ? `<#${getBirthdayAnnouncementChannelId()}>` : "Not set"}`,
+    `Saved birthdays: ${birthdays.length}`,
+    `Role duration: ${formatDuration(BIRTHDAY_ROLE_DURATION_MS)}`,
+    `Mode: ${birthdays.length ? "Public month/day birthday giggles" : "No birthdays saved yet"}`
+  ].join("\n");
+}
+
+function buildBirthdayDescription(entry, userTag = null) {
+  if (!entry) return "No birthday set.";
+  const label = userTag ? `${userTag}` : "This member";
+  return [
+    `${label} has a public birthday saved. Cute.`,
+    `Birthday: ${formatBirthdayMonthDay(entry.month, entry.day)}`,
+    `Role duration: ${formatDuration(BIRTHDAY_ROLE_DURATION_MS)}`,
+    entry.public === false ? "Visibility: private" : "Visibility: public"
+  ].join("\n");
+}
+
+function buildBirthdayCardAttachment() {
+  return {
+    attachment: fs.readFileSync(path.join(__dirname, "assets", "birthday-card.png")),
+    name: "birthday-card.png"
+  };
+}
+
+function buildBirthdayEmbed(user, entry) {
+  return makeEmbed({
+    title: "Birthday profile",
+    description: buildBirthdayDescription(entry, user?.tag || user?.username || null),
+    color: COLORS.pink,
+    fields: user
+      ? [
+          { name: "User", value: `${user.tag || user.username || user.id}`, inline: true },
+          { name: "Birthday", value: entry ? formatBirthdayMonthDay(entry.month, entry.day) : "Not set", inline: true },
+          { name: "Public", value: entry ? (entry.public === false ? "No" : "Yes") : "No", inline: true }
+        ]
+      : []
+  });
+}
+
+function buildBirthdayPanelEmbed() {
+  return makeEmbed({
+    title: "Birthday giggle nook",
+    description:
+      "Tap the button below and tell me your month and day.\n\n" +
+      "I’ll tuck it into the birthday giggle nook, hand out the birthday role for 24 hours, and post a silly-sweet birthday cheer when your day comes around.",
+    color: COLORS.pink,
+    fields: [
+      { name: "Privacy", value: "Only month and day are stored. No year is saved.", inline: false },
+      { name: "Reward", value: `Birthday role lasts ${formatDuration(BIRTHDAY_ROLE_DURATION_MS)}.`, inline: true },
+      { name: "Public", value: "Birthdays are visible to staff and can be listed publicly.", inline: true }
+    ],
+    image: { url: "attachment://birthday-card.png" }
+  });
+}
+
+function buildBirthdayPanelComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("birthday:set")
+        .setLabel("Set My Birthday")
+        .setEmoji("🎂")
+        .setStyle(ButtonStyle.Primary)
+    )
+  ];
+}
+
+function buildBirthdayModal() {
+  const modal = new ModalBuilder()
+    .setCustomId("birthday:set")
+    .setTitle("Drop your birthday");
+
+  const monthInput = new TextInputBuilder()
+    .setCustomId("birthdayMonth")
+    .setLabel("Birthday month")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setPlaceholder("1-12")
+    .setMaxLength(2);
+
+  const dayInput = new TextInputBuilder()
+    .setCustomId("birthdayDay")
+    .setLabel("Birthday day")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setPlaceholder("1-31")
+    .setMaxLength(2);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(monthInput),
+    new ActionRowBuilder().addComponents(dayInput)
+  );
+  return modal;
+}
+
+function buildBirthdayListEmbed(limit = 10) {
+  const upcoming = getUpcomingBirthdays(limit);
+  return makeEmbed({
+    title: "Upcoming birthdays",
+    description: upcoming.length
+      ? upcoming.map((entry, index) => `${index + 1}. <@${entry.userId}> - ${formatBirthdayMonthDay(entry.month, entry.day)} - <t:${Math.floor(entry.nextBirthday.getTime() / 1000)}:R>`).join("\n")
+      : "No birthdays have been saved yet.",
+    color: COLORS.blue
+  });
+}
+
+async function postBirthdayPanel(source = "manual") {
+  const channelId = getBirthdayAnnouncementChannelId();
+  if (!channelId) {
+    throw new Error("Set a birthday announcement channel first.");
+  }
+
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel?.send) {
+    throw new Error("The birthday announcement channel could not be found or cannot send messages.");
+  }
+
+  const message = await channel.send({
+    embeds: [buildBirthdayPanelEmbed()],
+    components: buildBirthdayPanelComponents(),
+    files: [buildBirthdayCardAttachment()]
+  });
+
+  recordAuditLog(source, "birthday-panel-posted", {
+    channelId,
+    messageId: message.id
+  });
+
+  return message;
+}
+
+function getUpcomingBirthdays(limit = 10, fromDate = new Date()) {
+  return Object.entries(getBirthdayStore())
+    .map(([userId, entry]) => {
+      const nextBirthday = getNextBirthdayDate(entry.month, entry.day, fromDate);
+      return {
+        userId,
+        ...entry,
+        nextBirthday
+      };
+    })
+    .sort((a, b) => a.nextBirthday - b.nextBirthday)
+    .slice(0, limit);
 }
 
 function normalizeWebLoginUsername(value) {
@@ -2548,6 +2787,44 @@ const allCommands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("birthday")
+    .setDescription("Manage public birthday dates")
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("set")
+        .setDescription("Set your public birthday month and day")
+        .addIntegerOption(option =>
+          option.setName("month").setDescription("Birthday month").setRequired(true).setMinValue(1).setMaxValue(12)
+        )
+        .addIntegerOption(option =>
+          option.setName("day").setDescription("Birthday day").setRequired(true).setMinValue(1).setMaxValue(31)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("view")
+        .setDescription("View a public birthday")
+        .addUserOption(option =>
+          option.setName("user").setDescription("User to view").setRequired(false)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("remove")
+        .setDescription("Remove your public birthday")
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("list")
+        .setDescription("List upcoming birthdays")
+    ),
+
+  new SlashCommandBuilder()
+    .setName("birthdaypanel")
+    .setDescription("Post the birthday signup panel")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
     .setName("slowmode")
     .setDescription("Set channel slowmode")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
@@ -3048,6 +3325,26 @@ const allCommands = [
     )
     .addSubcommand(subcommand =>
       subcommand
+        .setName("birthdayrole")
+        .setDescription("Set the temporary birthday role")
+        .addRoleOption(option =>
+          option.setName("role").setDescription("Role to give on birthdays").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("birthdaychannel")
+        .setDescription("Set the public birthday announcement channel")
+        .addChannelOption(option =>
+          option
+            .setName("channel")
+            .setDescription("Channel to post birthday announcements")
+            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
         .setName("verifychannel")
         .setDescription("Set the verify channel")
         .addChannelOption(option =>
@@ -3164,6 +3461,8 @@ const allCommands = [
               { name: "log channel", value: "logchannel" },
               { name: "automod log channel", value: "automodlogchannel" },
               { name: "muted role", value: "mutedrole" },
+              { name: "birthday role", value: "birthdayrole" },
+              { name: "birthday channel", value: "birthdaychannel" },
               { name: "verify channel", value: "verifychannel" },
               { name: "welcome channel", value: "welcomechannel" },
               { name: "affirmations channel", value: "affirmchannel" },
@@ -3173,6 +3472,8 @@ const allCommands = [
               { name: "TikTok aliases", value: "tiktokaliases" },
               { name: "verified role", value: "verifiedrole" },
               { name: "unverified role", value: "unverifiedrole" },
+              { name: "birthday role", value: "birthdayrole" },
+              { name: "birthday channel", value: "birthdaychannel" },
               { name: "rules channel", value: "ruleschannel" }
             )
         )
@@ -3720,6 +4021,135 @@ function setAiReviewStatus(caseId, status) {
   };
   saveConfig();
   return config.aiReviews[String(caseId)];
+}
+
+async function processBirthdaySweep(source = "scheduled") {
+  if (!ENABLE_CORE_BOT) {
+    return { checked: 0, granted: 0, removed: 0, announced: 0, expired: 0 };
+  }
+
+  const birthdayEntries = Object.entries(getBirthdayStore());
+  if (!birthdayEntries.length) {
+    return { checked: 0, granted: 0, removed: 0, announced: 0, expired: 0 };
+  }
+
+  const guild = client.guilds.cache.get(GUILD_ID) || await client.guilds.fetch(GUILD_ID).catch(() => null);
+  if (!guild) {
+    return { checked: birthdayEntries.length, granted: 0, removed: 0, announced: 0, expired: 0 };
+  }
+
+  const birthdayRoleId = getBirthdayRoleId();
+  const announcementChannelId = getBirthdayAnnouncementChannelId();
+  const birthdayRole = birthdayRoleId
+    ? guild.roles.cache.get(birthdayRoleId) || await guild.roles.fetch(birthdayRoleId).catch(() => null)
+    : null;
+  const announcementChannel = announcementChannelId
+    ? guild.channels.cache.get(announcementChannelId) || await guild.channels.fetch(announcementChannelId).catch(() => null)
+    : null;
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const todayKey = getBirthdayTodayKey(now);
+  const updatedEntries = [];
+  let granted = 0;
+  let removed = 0;
+  let announced = 0;
+  let expired = 0;
+
+  for (const [userId, rawEntry] of birthdayEntries) {
+    const entry = rawEntry && typeof rawEntry === "object" ? rawEntry : null;
+    const normalized = entry ? normalizeBirthdayMonthDay(entry.month, entry.day) : null;
+    if (!normalized) continue;
+
+    const nextEntry = {
+      ...entry,
+      month: normalized.month,
+      day: normalized.day
+    };
+
+    const member = await guild.members.fetch(userId).catch(() => null);
+    const roleExpiresAt = entry?.roleExpiresAt ? new Date(entry.roleExpiresAt).getTime() : 0;
+    if (roleExpiresAt && roleExpiresAt <= Date.now()) {
+      let shouldClearExpiry = false;
+
+      if (!member || !birthdayRole) {
+        shouldClearExpiry = true;
+      } else if (!member.roles.cache.has(birthdayRole.id)) {
+        shouldClearExpiry = true;
+      } else if (member.manageable) {
+        await member.roles.remove(birthdayRole.id, `Birthday role expired (${source})`).catch(() => {});
+        removed += 1;
+        shouldClearExpiry = true;
+      }
+
+      if (shouldClearExpiry && (entry.roleGrantedAt || entry.roleExpiresAt)) {
+        nextEntry.roleGrantedAt = null;
+        nextEntry.roleExpiresAt = null;
+        nextEntry.lastBirthdayRoleYear = entry.lastBirthdayRoleYear || null;
+        expired += 1;
+      }
+    }
+
+    if (!member) {
+      updatedEntries.push([userId, nextEntry]);
+      continue;
+    }
+
+    const entryKey = getBirthdayKey(normalized.month, normalized.day);
+      if (entryKey === todayKey && entry.lastBirthdayRoleYear !== currentYear) {
+      let shouldMarkRoleYear = false;
+
+      if (birthdayRole) {
+        if (member.roles.cache.has(birthdayRole.id)) {
+          shouldMarkRoleYear = true;
+        } else if (member.manageable) {
+          await member.roles.add(birthdayRole.id, `Birthday role granted (${source})`).catch(() => {});
+          granted += 1;
+          shouldMarkRoleYear = true;
+        }
+      }
+
+      if (shouldMarkRoleYear) {
+        nextEntry.roleGrantedAt = now.toISOString();
+        nextEntry.roleExpiresAt = new Date(Date.now() + BIRTHDAY_ROLE_DURATION_MS).toISOString();
+        nextEntry.lastBirthdayRoleYear = currentYear;
+      }
+
+      if (announcementChannel && entry.lastBirthdayAnnouncementYear !== currentYear) {
+        await announcementChannel.send({
+          embeds: [
+            makeEmbed({
+              title: "Birthday chaos, lovingly",
+              description: `It’s <@${userId}>’s birthday today, which means cake is mandatory, confetti is suspiciously everywhere, and the vibe is officially extra bubbly. Happy birthday, star!`,
+              color: COLORS.pink,
+              fields: [
+                { name: "Birthday", value: formatBirthdayMonthDay(normalized.month, normalized.day), inline: true },
+                { name: "Role duration", value: formatDuration(BIRTHDAY_ROLE_DURATION_MS), inline: true }
+              ],
+              image: { url: "attachment://birthday-card.png" }
+            })
+          ],
+          files: [buildBirthdayCardAttachment()]
+        }).catch(() => {});
+        nextEntry.lastBirthdayAnnouncementYear = currentYear;
+        announced += 1;
+      }
+    }
+
+    updatedEntries.push([userId, nextEntry]);
+  }
+
+  if (updatedEntries.length) {
+    config.birthdays = Object.fromEntries(updatedEntries);
+    saveConfig();
+  }
+
+  return {
+    checked: birthdayEntries.length,
+    granted,
+    removed,
+    announced,
+    expired
+  };
 }
 
 function memberHasConfiguredRole(member, roleIds) {
@@ -4667,6 +5097,7 @@ function buildSettingsSummary() {
     `General chat inactivity: ${isGeneralChatInactivityEnabled() ? "Enabled" : "Disabled"}`,
     `Anonymous affirmations: ${isAnonymousAffirmationsEnabled() ? "Enabled" : "Disabled"} (${getAnonymousAffirmationsChannelId() ? `<#${getAnonymousAffirmationsChannelId()}>` : "Not set"})`,
     `Muted role: ${getMutedRoleId() ? `<@&${getMutedRoleId()}>` : "Not set"}`,
+    buildBirthdaySummary(),
     buildTikTokVerificationSummary()
   ].join("\n");
 }
@@ -5602,6 +6033,11 @@ function buildHelpEmbed() {
       inline: false
     },
     {
+      name: "Birthdays",
+      value: "`/birthday`, `/birthdaypanel`, `/settings birthdayrole`, `/settings birthdaychannel`",
+      inline: false
+    },
+    {
       name: "Runtime",
       value: "`/status`, `/reload`",
       inline: false
@@ -5650,10 +6086,13 @@ function buildStatusEmbed() {
       { name: "TikTok Verify", value: isTikTokVerificationEnabled() ? `@${getTikTokHandle()}` : "Disabled", inline: true },
       { name: "Verified Role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
       { name: "Unverified Role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Not set", inline: true },
+      { name: "Birthday Role", value: getBirthdayRoleId() ? `<@&${getBirthdayRoleId()}>` : "Not set", inline: true },
       { name: "Core Features", value: ENABLE_CORE_BOT ? "Enabled" : "Disabled", inline: true },
       { name: "Verify Message", value: config.verifyMessageId || "Not cached", inline: false },
       { name: "Cases Logged", value: `${config.cases.length}`, inline: true },
-      { name: "Banned Words", value: `${getBannedWords().length}`, inline: true }
+      { name: "Banned Words", value: `${getBannedWords().length}`, inline: true },
+      { name: "Birthdays Saved", value: `${Object.keys(getBirthdayStore()).length}`, inline: true },
+      { name: "Birthday Channel", value: getBirthdayAnnouncementChannelId() ? `<#${getBirthdayAnnouncementChannelId()}>` : "Not set", inline: true }
     ]
   });
 }
@@ -5739,6 +6178,7 @@ async function buildDashboardEmbed() {
       { name: "Nickname filter terms", value: `${getNicknameBlockedTerms().length}`, inline: true },
       { name: "Reaction roles", value: reactionRoleHealth.ready ? "Ready" : `${reactionRoleHealth.issues.length} issue${reactionRoleHealth.issues.length === 1 ? "" : "s"} found`, inline: true },
       { name: "Reaction role panel", value: reactionRoleHealth.panelMessageFound ? "Found" : "Missing", inline: true },
+      { name: "Birthdays", value: Object.keys(getBirthdayStore()).length ? `${Object.keys(getBirthdayStore()).length} saved` : "None saved", inline: true },
       { name: "Reaction role issues", value: reactionRoleHealth.issues.slice(0, 6).join("\n") || "None", inline: false },
       {
         name: "Recent AutoMod cases",
@@ -6857,6 +7297,7 @@ async function buildWebDashboardPayload() {
       warningUsers: Object.keys(config.warnings || {}).length,
       noteUsers: Object.keys(config.notes || {}).length,
       tempBans: config.tempBans.length,
+      birthdays: Object.keys(getBirthdayStore()).length,
       bannedWords: getBannedWords().length,
       nicknameTerms: getNicknameBlockedTerms().length,
       allowedDomains: config.automod.allowedDomains.length,
@@ -6917,6 +7358,8 @@ function buildWebConfigPayload() {
       logChannelId: config.settings.logChannelId || "",
       automodLogChannelId: config.settings.automodLogChannelId || "",
       mutedRoleId: config.settings.mutedRoleId || "",
+      birthdayRoleId: config.settings.birthdayRoleId || "",
+      birthdayAnnouncementChannelId: config.settings.birthdayAnnouncementChannelId || "",
       messageArchiveEnabled: Boolean(config.settings.messageArchiveEnabled),
       messageArchiveRetentionDays: Number(config.settings.messageArchiveRetentionDays || 30),
       tiktokHandle: getTikTokHandle(),
@@ -6925,6 +7368,16 @@ function buildWebConfigPayload() {
         : String(config.settings.tiktokNicknameAliases || ""),
       verifiedRoleId: config.settings.verifiedRoleId || "",
       unverifiedRoleId: config.settings.unverifiedRoleId || ""
+    },
+    birthdays: {
+      total: Object.keys(getBirthdayStore()).length,
+      upcoming: getUpcomingBirthdays(8).map(entry => ({
+        userId: entry.userId,
+        month: entry.month,
+        day: entry.day,
+        public: Boolean(entry.public),
+        nextBirthday: entry.nextBirthday.toISOString()
+      }))
     },
     automod: {
       ...config.automod,
@@ -6952,6 +7405,8 @@ function updateWebSettings(auth, payload) {
     "logChannelId",
     "automodLogChannelId",
     "mutedRoleId",
+    "birthdayRoleId",
+    "birthdayAnnouncementChannelId",
     "messageArchiveEnabled",
     "messageArchiveRetentionDays",
     "tiktokHandle",
@@ -7004,6 +7459,8 @@ function updateWebSettings(auth, payload) {
     logChannelId: config.settings.logChannelId,
     automodLogChannelId: config.settings.automodLogChannelId,
     mutedRoleId: config.settings.mutedRoleId,
+    birthdayRoleId: config.settings.birthdayRoleId,
+    birthdayAnnouncementChannelId: config.settings.birthdayAnnouncementChannelId,
     messageArchiveEnabled: config.settings.messageArchiveEnabled,
     messageArchiveRetentionDays: config.settings.messageArchiveRetentionDays,
     tiktokHandle: config.settings.tiktokHandle,
@@ -7056,6 +7513,8 @@ function updateWebSettings(auth, payload) {
     logChannelId: config.settings.logChannelId,
     automodLogChannelId: config.settings.automodLogChannelId,
     mutedRoleId: config.settings.mutedRoleId,
+    birthdayRoleId: config.settings.birthdayRoleId,
+    birthdayAnnouncementChannelId: config.settings.birthdayAnnouncementChannelId,
     messageArchiveEnabled: config.settings.messageArchiveEnabled,
     messageArchiveRetentionDays: config.settings.messageArchiveRetentionDays,
     tiktokHandle: config.settings.tiktokHandle,
@@ -8241,6 +8700,19 @@ async function handleWebApi(req, res, pathname) {
     });
   }
 
+  if (req.method === "POST" && pathname === "/api/birthday-panel") {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
+
+    const result = await postBirthdayPanel("web");
+    return sendWebJson(res, 200, {
+      ok: true,
+      channelId: result.channelId,
+      messageId: result.id
+    });
+  }
+
   if (req.method === "POST" && pathname === "/api/web-accounts") {
     if (!hasWebAccess(auth, "admin")) {
       return sendWebJson(res, 403, { error: "Admin web access is required." });
@@ -8670,6 +9142,10 @@ async function shutdownProcess(signal) {
     clearInterval(generalChatSweepInterval);
   }
 
+  if (birthdaySweepInterval) {
+    clearInterval(birthdaySweepInterval);
+  }
+
   process.exit(0);
 }
 
@@ -8689,6 +9165,9 @@ client.once("clientReady", async () => {
       await resolveVerifyMessageId();
       await enforceFlavorRoleVisibility(client.guilds.cache.get(GUILD_ID)).catch(() => null);
       await processExpiredTempBans();
+      await processBirthdaySweep("startup").catch(error => {
+        console.error("Birthday startup sweep error:", error.message);
+      });
       await enforceGeneralChatActivity().catch(error => {
         console.error("General chat startup sweep error:", error.message);
       });
@@ -8704,6 +9183,14 @@ client.once("clientReady", async () => {
           console.error("Temp ban processing error:", error.message);
         });
       }, 60 * 1000);
+      if (birthdaySweepInterval) {
+        clearInterval(birthdaySweepInterval);
+      }
+      birthdaySweepInterval = setInterval(() => {
+        processBirthdaySweep("interval").catch(error => {
+          console.error("Birthday processing error:", error.message);
+        });
+      }, 60 * 60 * 1000);
       startScheduledReports();
       startGoogleBlockListSync();
       startGeneralChatSweep();
@@ -8804,6 +9291,14 @@ client.on("channelCreate", async channel => {
 client.on("interactionCreate", async interaction => {
   try {
     if (interaction.isButton()) {
+      if (interaction.customId === "birthday:set") {
+        if (!ENABLE_CORE_BOT) {
+          return interaction.reply({ content: "Birthday signup is disabled on this deployment.", ephemeral: true });
+        }
+
+        return interaction.showModal(buildBirthdayModal());
+      }
+
       if (interaction.customId === "verify:tiktok-check") {
         if (!ENABLE_CORE_BOT) {
           return interaction.reply({ content: "Verification is disabled on this deployment.", ephemeral: true });
@@ -9985,6 +10480,29 @@ client.on("interactionCreate", async interaction => {
     }
 
     if (interaction.isModalSubmit()) {
+      if (interaction.customId === "birthday:set") {
+        if (!ENABLE_CORE_BOT) {
+          return interaction.reply({ content: "Birthday signup is disabled on this deployment.", ephemeral: true });
+        }
+
+        await interaction.deferReply({ ephemeral: true });
+        const month = Number(interaction.fields.getTextInputValue("birthdayMonth"));
+        const day = Number(interaction.fields.getTextInputValue("birthdayDay"));
+        const entry = setBirthdayEntry(interaction.user.id, month, day);
+
+        if (!entry) {
+          return interaction.editReply({ content: "Enter a valid birthday month and day like 3 and 14." });
+        }
+
+        await processBirthdaySweep("birthday-modal").catch(error => {
+          console.error("Birthday modal sweep error:", error.message);
+        });
+
+        return interaction.editReply({
+          content: `Yay! I caught your birthday as ${formatBirthdayMonthDay(entry.month, entry.day)}. I’ve got my confetti cannon loaded and I’ll hand you the birthday role when your day pops up.`
+        });
+      }
+
       if (interaction.customId === "affirmations:submit") {
         if (!ENABLE_CORE_BOT) {
           return interaction.reply({ content: "Anonymous affirmations are disabled on this deployment.", ephemeral: true });
@@ -11954,6 +12472,14 @@ client.on("interactionCreate", async interaction => {
         config.settings.mutedRoleId = interaction.options.getRole("role").id;
       }
 
+      if (subcommand === "birthdayrole") {
+        config.settings.birthdayRoleId = interaction.options.getRole("role").id;
+      }
+
+      if (subcommand === "birthdaychannel") {
+        config.settings.birthdayAnnouncementChannelId = interaction.options.getChannel("channel").id;
+      }
+
       if (subcommand === "verifychannel") {
         const nextVerifyChannelId = interaction.options.getChannel("channel").id;
         config.settings.verifyChannelId = nextVerifyChannelId;
@@ -12013,6 +12539,14 @@ client.on("interactionCreate", async interaction => {
           config.settings.mutedRoleId = null;
         }
 
+        if (target === "birthdayrole") {
+          config.settings.birthdayRoleId = null;
+        }
+
+        if (target === "birthdaychannel") {
+          config.settings.birthdayAnnouncementChannelId = null;
+        }
+
         if (target === "verifychannel") {
           config.settings.verifyChannelId = null;
           config.verifyMessageId = null;
@@ -12068,6 +12602,12 @@ client.on("interactionCreate", async interaction => {
         }
       }
 
+      if (subcommand === "birthdayrole" || subcommand === "birthdaychannel" || (subcommand === "reset" && ["birthdayrole", "birthdaychannel"].includes(interaction.options.getString("target")))) {
+        await processBirthdaySweep("settings").catch(error => {
+          console.error("Birthday settings update error:", error.message);
+        });
+      }
+
       if (["tiktokhandle", "tiktokaliases", "verifiedrole", "unverifiedrole", "verifychannel", "welcomechannel", "affirmchannel"].includes(subcommand)) {
         await resolveVerifyMessageId().catch(() => null);
       }
@@ -12084,6 +12624,67 @@ client.on("interactionCreate", async interaction => {
             ? `Reset setting: ${interaction.options.getString("target")}.`
             : `Updated setting: ${subcommand}.`,
         ephemeral: true
+      });
+    }
+
+    if (interaction.commandName === "birthday") {
+      const subcommand = interaction.options.getSubcommand();
+
+      if (subcommand === "set") {
+        const month = interaction.options.getInteger("month");
+        const day = interaction.options.getInteger("day");
+        const entry = setBirthdayEntry(interaction.user.id, month, day);
+
+        if (!entry) {
+          return interaction.reply({ content: "Enter a valid month and day.", ephemeral: true });
+        }
+
+        await processBirthdaySweep("birthday-set").catch(error => {
+          console.error("Birthday set sweep error:", error.message);
+        });
+
+        return interaction.reply({
+          content: `Yay! I caught your birthday as ${formatBirthdayMonthDay(entry.month, entry.day)}. I’ve got my confetti cannon loaded and I’ll hand you the birthday role when your day pops up.`,
+          ephemeral: true
+        });
+      }
+
+      if (subcommand === "remove") {
+        const removed = removeBirthdayEntry(interaction.user.id);
+        return interaction.reply({
+          content: removed
+            ? "Removed your public birthday."
+            : "You did not have a birthday saved.",
+          ephemeral: true
+        });
+      }
+
+      if (subcommand === "view") {
+        const user = interaction.options.getUser("user") || interaction.user;
+        const entry = getBirthdayEntry(user.id);
+        return interaction.reply({
+          embeds: [buildBirthdayEmbed(user, entry)],
+          allowedMentions: { users: [] }
+        });
+      }
+
+      if (subcommand === "list") {
+        return interaction.reply({
+          embeds: [buildBirthdayListEmbed(25)],
+          allowedMentions: { users: [] }
+        });
+      }
+    }
+
+    if (interaction.commandName === "birthdaypanel") {
+      if (!ENABLE_CORE_BOT) {
+        return interaction.reply({ content: "Birthday signup is disabled on this deployment.", ephemeral: true });
+      }
+
+      await interaction.deferReply({ ephemeral: true });
+      const posted = await postBirthdayPanel("slash");
+      return interaction.editReply({
+        content: `Posted the birthday panel in <#${posted.channelId}>.`
       });
     }
 
@@ -12370,6 +12971,10 @@ client.on("guildMemberAdd", async member => {
         );
       }
     }
+
+    await processBirthdaySweep("join").catch(error => {
+      console.error("Birthday join sweep error:", error.message);
+    });
   } catch (error) {
     console.error("Welcome error:", error);
   }

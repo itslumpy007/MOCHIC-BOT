@@ -477,6 +477,7 @@
             <button class="view-tab is-active" type="button" data-subtab-view="settings" data-subtab="general">General</button>
             <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="accounts">Accounts</button>
             <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="verification">Verification</button>
+            <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="birthdays">Birthdays</button>
             <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="safety">Safety</button>
           </div>
           <div class="button-row" style="margin: 0 0 14px;">
@@ -594,6 +595,26 @@
                 <button class="ghost-button" id="repairVerifyPanel" type="button">Repair Verify Panel</button>
                 <button class="ghost-button" id="repairRolePanel" type="button">Repair Role Panel</button>
               </div>
+            </section>
+          </div>
+
+          <div class="view-stack hidden" data-view-subtab-group="settings" data-subtab="birthdays">
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Birthday Settings <span class="header-status" id="birthdaysDirtyStatus"></span></h3>
+                <div class="button-row">
+                  <button class="ghost-button" id="postBirthdayPanel" type="button">Post Panel</button>
+                  <button class="save-button" id="saveBirthdaySettings" type="button">Save</button>
+                </div>
+              </div>
+              <p class="panel-note">Birthdays are stored as public month/day entries. The birthday role is granted temporarily and removed automatically.</p>
+              <div class="form-grid" id="birthdaySettingsFields"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Upcoming Birthdays</h3>
+              </div>
+              <div id="birthdayUpcomingList" class="event-list"></div>
             </section>
           </div>
 

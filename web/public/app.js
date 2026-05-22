@@ -362,6 +362,11 @@ const verificationSettingTypes = {
   unverifiedRoleId: "input"
 };
 
+const birthdaySettingLabels = {
+  birthdayRoleId: "Birthday role ID",
+  birthdayAnnouncementChannelId: "Birthday announcement channel ID"
+};
+
 const automodPresets = {
   light: {
     invites: true,
@@ -855,6 +860,7 @@ function updateDirtyIndicators() {
     settingsDirtyStatus: ["settings", "Unsaved"],
     affirmationsDirtyStatus: ["settings", "Unsaved"],
     verificationDirtyStatus: ["settings", "Unsaved"],
+    birthdaysDirtyStatus: ["settings", "Unsaved"],
     exemptionsDirtyStatus: ["exemptions", "Unsaved"],
     privacyDirtyStatus: ["settings", "Unsaved"],
     staffDirtyStatus: ["staff", "Unsaved"],
@@ -1483,6 +1489,7 @@ function renderMetrics() {
     ["Warning Users", counts.warningUsers || 0],
     ["Staff Notes", counts.noteUsers || 0],
     ["AutoMod Hits", state.dashboard?.analytics?.totalDetections || 0],
+    ["Birthdays", counts.birthdays || 0],
     ["Banned Words", counts.bannedWords || 0],
     ["Blocked Domains", counts.blockedDomains || 0],
     ["Allowed Domains", counts.allowedDomains || 0],
@@ -1500,6 +1507,7 @@ function getMetricHint(label) {
     "Warning Users": "members with warnings",
     "Staff Notes": "members with notes",
     "AutoMod Hits": "detected events",
+    Birthdays: "public month/day entries",
     "Banned Words": "filtered terms",
     "Blocked Domains": "denied domains",
     "Allowed Domains": "approved domains",
@@ -2273,6 +2281,26 @@ function renderSettings() {
           : `<input data-setting="${key}" value="${escapeHtml(Array.isArray(settings[key]) ? settings[key].join(", ") : (settings[key] || ""))}" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="${key === "tiktokHandle" ? "Paste @yourhandle or tiktok.com/@yourhandle" : (key === "welcomeChannelId" || key === "generalChatChannelId" || key === "anonymousAffirmationsChannelId" ? "Channel ID" : "")}">`}
       </label>
     `).join("");
+
+  $("#birthdaySettingsFields").innerHTML = Object.entries(birthdaySettingLabels)
+    .map(([key, label]) => `
+      <label>${label}
+        <input data-setting="${key}" value="${escapeHtml(settings[key] || "")}" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="Role or channel ID">
+      </label>
+    `).join("");
+
+  const birthdayUpcoming = Array.isArray(state.config?.birthdays?.upcoming) ? state.config.birthdays.upcoming : [];
+  $("#birthdayUpcomingList").innerHTML = birthdayUpcoming.length
+    ? birthdayUpcoming.map((entry, index) => `
+      <article class="event" ${revealStyle(index)}>
+        <strong><span class="badge">${escapeHtml(formatDate(entry.nextBirthday))}</span> <span class="badge">${escapeHtml(formatBirthdayMonthDay(entry.month, entry.day))}</span></strong>
+        <p>
+          User: <code>${escapeHtml(entry.userId)}</code><br>
+          Public: ${entry.public ? "Yes" : "No"}
+        </p>
+      </article>
+    `).join("")
+    : renderEmptyState("No birthdays saved", "Use the birthday panel button or /birthday to add a public birthday.");
 
   $("#privacySettingsFields").innerHTML = Object.entries(privacySettingLabels)
     .map(([key, label]) => {
@@ -3410,6 +3438,8 @@ async function saveCurrentView() {
   if (view === "settings") {
     if (subtab === "verification") {
       await saveVerificationSettings();
+    } else if (subtab === "birthdays") {
+      await saveBirthdaySettings();
     } else if (subtab === "safety") {
       await savePrivacySettings();
     } else if (subtab === "accounts") {
@@ -4093,6 +4123,47 @@ async function saveVerificationSettings(options = {}) {
   }
 }
 
+async function saveBirthdaySettings(options = {}) {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to change server settings.", "error");
+    return;
+  }
+  const auto = Boolean(options.auto);
+
+  const payload = collectSettingsPayload([
+    "birthdayRoleId",
+    "birthdayAnnouncementChannelId"
+  ]);
+  const result = await api("/api/settings", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+
+  state.config.settings = result.settings;
+  clearAutosaveDraft("settings");
+  renderAll();
+  if (!auto) {
+    updateSaveButton("saveBirthdaySettings", "saved");
+    window.setTimeout(() => updateSaveButton("saveBirthdaySettings", "idle"), 700);
+    setAlert("Birthday settings saved.");
+  }
+}
+
+async function postBirthdayPanel() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to post the birthday panel.", "error");
+    return;
+  }
+
+  const result = await api("/api/birthday-panel", {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+
+  await loadAll();
+  setAlert(`Birthday panel posted in ${result.channelId ? `<#${result.channelId}>` : "the configured channel"}.`);
+}
+
 async function repostRolePanel() {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change server settings.", "error");
@@ -4402,6 +4473,8 @@ function bindEvents() {
   });
   $("#postAffirmationsPanel").addEventListener("click", () => postAffirmationsPanel().catch(error => setAlert(error.message, "error")));
   $("#saveVerificationSettings").addEventListener("click", () => saveVerificationSettings().catch(error => setAlert(error.message, "error")));
+  $("#saveBirthdaySettings").addEventListener("click", () => saveBirthdaySettings().catch(error => setAlert(error.message, "error")));
+  $("#postBirthdayPanel").addEventListener("click", () => postBirthdayPanel().catch(error => setAlert(error.message, "error")));
   $("#repostRolePanel").addEventListener("click", () => repostRolePanel().catch(error => setAlert(error.message, "error")));
   $("#repairVerifyPanel").addEventListener("click", () => repairVerifyPanel().catch(error => setAlert(error.message, "error")));
   $("#repairRolePanel").addEventListener("click", () => repairRolePanel().catch(error => setAlert(error.message, "error")));
