@@ -7187,25 +7187,13 @@ function buildMochiPlayUrl(sessionId) {
 }
 
 async function launchMochiActivity(interaction) {
-  const payload = {
-    type: 12
-  };
-
-  const response = await fetch(`https://discord.com/api/v10/interactions/${interaction.id}/${interaction.token}/callback`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
-
-  if (response.ok) {
+  try {
+    await interaction.launchActivity();
     return true;
+  } catch (error) {
+    console.warn("Mochi Activity launch failed:", error?.message || error);
+    return false;
   }
-
-  const errorText = await response.text().catch(() => "");
-  console.warn("Mochi Activity launch failed:", response.status, errorText);
-  return false;
 }
 
 function loadMochiLeaderboard() {
