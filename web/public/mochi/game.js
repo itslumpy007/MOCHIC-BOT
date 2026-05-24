@@ -40,6 +40,7 @@ let backgroundOffset = 0;
 let clouds = [];
 let stars = [];
 let primaryMode = 'start';
+let gameState = 'menu';
 
 const GRAVITY = 1100;
 const FLAP_VELOCITY = -340;
@@ -75,12 +76,7 @@ function resizeCanvas() {
   ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
 }
 
-function resetGame() {
-  started = false;
-  gameOver = false;
-  submitted = false;
-  score = 0;
-  elapsedMs = 0;
+function resetBoard() {
   bird = {
     x: width * 0.28,
     y: height * 0.42,
@@ -102,16 +98,51 @@ function resetGame() {
     r: 0.8 + (index % 3) * 0.5,
     twinkle: 0.3 + (index % 5) * 0.11
   })); 
+}
+
+function showMenu() {
+  started = false;
+  gameOver = false;
+  submitted = false;
+  score = 0;
+  elapsedMs = 0;
+  gameState = 'menu';
+  resetBoard();
   scoreEl.textContent = '0';
   hydrateBestScore();
-  primaryMode = 'start';
+  primaryMode = 'play';
   showOverlay(
-    isPracticeMode ? 'Practice mode' : 'Ready to fly',
+    session ? `Ready for ${session.userTag}` : 'Mochi Bird',
     isPracticeMode
-      ? 'Click or tap to begin. This run stays local until you open a session from Discord.'
-      : 'Press Space, click, or tap to start your recorded Discord run.',
-    'Start'
+      ? 'Practice mode is ready. Tap Play to start a local run, then flap with Space, click, or tap.'
+      : 'Discord Activity mode is ready. Tap Play to start your recorded run.',
+    'Play'
   );
+  updateStatus(
+    session
+      ? `Ready for ${session.userTag}`
+      : activityMode
+        ? 'Activity practice ready'
+        : 'Practice mode ready'
+  );
+  sessionNoteEl.textContent = activityMode
+    ? `Running inside Discord as an Activity${session ? ` for ${session.userTag}.` : '.'}`
+    : 'Practice mode: this run is local only.';
+}
+
+function launchRun() {
+  started = false;
+  gameOver = false;
+  submitted = false;
+  score = 0;
+  elapsedMs = 0;
+  gameState = 'playing';
+  resetBoard();
+  scoreEl.textContent = '0';
+  hideOverlay();
+  updateStatus(isPracticeMode ? 'Practice mode running' : 'Session running');
+  bird.velocity = FLAP_VELOCITY;
+  started = true;
 }
 
 function showOverlay(title, text, buttonLabel = 'Start') {
@@ -190,9 +221,8 @@ function flap() {
   }
 
   if (!started) {
-    started = true;
-    hideOverlay();
-    updateStatus(isPracticeMode ? 'Practice mode running' : 'Session running');
+    launchRun();
+    return;
   }
 
   bird.velocity = FLAP_VELOCITY;
@@ -241,14 +271,15 @@ function endGame(reason) {
   }
 
   gameOver = true;
+  gameState = 'gameover';
   started = false;
   updateStatus(`Game over: ${reason}`);
   showOverlay(
     'Game over',
     `You scored ${score}. ${isPracticeMode ? 'Press the button to try again.' : 'This run has been recorded in Discord.'}`,
-    isPracticeMode ? 'Play again' : 'Play practice'
+    'Play again'
   );
-  setPrimaryMode(isPracticeMode ? 'practice-restart' : 'practice-open');
+  setPrimaryMode('restart');
   submitScore(reason);
 }
 
@@ -473,6 +504,49 @@ function drawHudOverlay() {
   ctx.restore();
 }
 
+function drawMenuScene() {
+  if (started || gameOver) {
+    return;
+  }
+
+  const floatOffset = Math.sin(elapsedMs / 420) * 8;
+  const centerX = width * 0.68;
+  const centerY = height * 0.42 + floatOffset;
+
+  ctx.save();
+  ctx.globalAlpha = 0.16;
+  ctx.fillStyle = 'rgba(255,255,255,0.82)';
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, 96, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.globalAlpha = 0.22;
+  ctx.fillStyle = 'rgba(7, 16, 24, 0.12)';
+  ctx.beginPath();
+  ctx.ellipse(centerX, centerY + 108, 120, 24, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  if (birdSprite.complete && birdSprite.naturalWidth > 0) {
+    ctx.save();
+    ctx.globalAlpha = 0.26;
+    ctx.translate(centerX, centerY);
+    ctx.rotate(Math.sin(elapsedMs / 600) * 0.08);
+    const size = 156;
+    ctx.drawImage(birdSprite, -size / 2, -size / 2, size, size);
+    ctx.restore();
+  }
+
+  ctx.save();
+  ctx.globalAlpha = 0.18;
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '700 26px Georgia, serif';
+  ctx.fillText('Mochi Bird', width * 0.11, height * 0.18);
+  ctx.font = '500 13px "Trebuchet MS", sans-serif';
+  ctx.fillText('Press Play to start', width * 0.11, height * 0.22);
+  ctx.restore();
+}
+
 function roundRect(context, x, y, w, h, r, fill = true, stroke = false) {
   if (typeof r === 'number') {
     r = { tl: r, tr: r, br: r, bl: r };
@@ -511,6 +585,7 @@ function render() {
     drawCloud(cloud.x, cloud.y, cloud.size);
   }
 
+  drawMenuScene();
   drawPipes();
   drawGround();
   drawBird();
@@ -576,7 +651,7 @@ async function loadSession() {
     if (!activityMode) {
       sessionNoteEl.textContent = 'Practice mode: this run is local only.';
     }
-    resetGame();
+    showMenu();
     return;
   }
 
@@ -603,7 +678,7 @@ async function loadSession() {
     } catch {
       // Best score lookup is optional.
     }
-    resetGame();
+    showMenu();
   } catch (error) {
     updateStatus(`Session error: ${error.message}`);
     setPrimaryMode('reload');
@@ -621,25 +696,14 @@ function onPrimaryAction() {
     return;
   }
 
-  if (primaryMode === 'practice-open') {
-    window.location.href = '/play';
-    return;
-  }
-
-  if (gameOver && isPracticeMode) {
-    resetGame();
-    hideOverlay();
-    return;
-  }
-
-  if (!started) {
-    flap();
+  if (primaryMode === 'play' || primaryMode === 'restart') {
+    launchRun();
   }
 }
 
 window.addEventListener('resize', () => {
   resizeCanvas();
-  resetGame();
+  showMenu();
 });
 
 window.addEventListener('keydown', (event) => {
@@ -647,9 +711,8 @@ window.addEventListener('keydown', (event) => {
     event.preventDefault();
     flap();
   }
-  if (event.code === 'KeyR' && isPracticeMode && gameOver) {
-    resetGame();
-    hideOverlay();
+  if (event.code === 'KeyR' && gameOver) {
+    launchRun();
   }
 });
 

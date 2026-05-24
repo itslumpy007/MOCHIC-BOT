@@ -35,17 +35,31 @@
         <div class="stage">
           <canvas id="game"></canvas>
           <div class="overlay" id="overlay">
-            <div class="overlay-card">
-              <h2 id="overlayTitle">Preparing game</h2>
-              <p id="overlayText">Loading session data.</p>
-              <button id="primaryButton" type="button">Start</button>
+            <div class="overlay-card menu-card">
+              <div class="menu-kicker">Discord launch game</div>
+              <div class="menu-hero">
+                <div class="menu-avatar-frame">
+                  <img id="menuAvatar" src="./assets/avatar.png" alt="Mochi Bird avatar" />
+                </div>
+                <div class="menu-copy">
+                  <h2 id="overlayTitle">Mochi Bird</h2>
+                  <p id="overlayText">Loading session data.</p>
+                  <div class="menu-chips" aria-hidden="true">
+                    <span>Space</span>
+                    <span>Click</span>
+                    <span>Tap</span>
+                  </div>
+                  <p class="menu-note" id="sessionNote">Practice mode is available when you open this page directly.</p>
+                </div>
+              </div>
+              <button id="primaryButton" type="button">Play</button>
             </div>
           </div>
         </div>
 
         <div class="footer">
           <p>Flap with Space, click, or tap. Opened from Discord? Your score will be recorded automatically.</p>
-          <p id="sessionNote">Practice mode is available when you open this page directly.</p>
+          <p>Use the Play button to start from the main menu, then keep the bird alive as long as you can.</p>
         </div>
       </section>
     </main>

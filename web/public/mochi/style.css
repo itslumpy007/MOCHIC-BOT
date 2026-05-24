@@ -180,6 +180,84 @@ canvas {
   text-align: center;
 }
 
+.menu-card {
+  width: min(92%, 420px);
+  padding: 20px;
+}
+
+.menu-kicker {
+  margin-bottom: 14px;
+  color: var(--accent);
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-weight: 800;
+}
+
+.menu-hero {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  gap: 16px;
+  align-items: center;
+  text-align: left;
+  margin-bottom: 18px;
+}
+
+.menu-avatar-frame {
+  width: 112px;
+  height: 112px;
+  border-radius: 28px;
+  padding: 10px;
+  background:
+    radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.32), transparent 42%),
+    linear-gradient(180deg, rgba(37, 208, 171, 0.18), rgba(255, 200, 87, 0.12));
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.menu-avatar-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.28));
+}
+
+.menu-copy h2 {
+  margin: 0 0 8px;
+}
+
+.menu-copy p {
+  margin: 0;
+}
+
+.menu-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.menu-chips span {
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.menu-note {
+  margin-top: 12px;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.menu-card button {
+  width: 100%;
+}
+
 .overlay-card h2 {
   margin: 0 0 10px;
   font-size: 1.6rem;
@@ -242,6 +320,20 @@ button:hover {
     width: 100%;
     text-align: left;
     margin-left: 0;
+  }
+
+  .menu-hero {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .menu-copy {
+    width: 100%;
+  }
+
+  .menu-chips {
+    justify-content: center;
   }
 
   .stage {
