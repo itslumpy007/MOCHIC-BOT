@@ -438,6 +438,13 @@ function getTikTokVerificationSetupIssues() {
   return issues;
 }
 
+function getRuleVerificationSetupIssues() {
+  const issues = [];
+  if (!getVerifyChannelId()) issues.push("verify channel");
+  if (!getVerificationRoleId()) issues.push("verified role");
+  return issues;
+}
+
 function matchesTikTokVerification(member) {
   const handle = normalizeVerificationText(getTikTokHandle());
   if (!handle) return false;
@@ -456,13 +463,96 @@ function buildTikTokVerificationSummary() {
   const handle = getTikTokHandle();
   const aliases = getTikTokNicknameAliases();
   return [
-    `TikTok handle: ${handle ? `@${handle}` : "Not set"}`,
+    `Verification mode: Rules + button verify`,
+    `TikTok bonus: ${handle ? `Enabled (@${handle})` : "Disabled"}`,
     `Saved nicknames: ${aliases.length}`,
     `Verified role: ${getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set"}`,
     `Unverified role: ${getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Not set"}`,
     `Welcome channel: ${getWelcomeChannelId() ? `<#${getWelcomeChannelId()}>` : "Not set"}`,
-    `Mode: ${isTikTokVerificationEnabled() ? "Nickname gate" : "Disabled"}`
+    `Bonus automation: ${isTikTokVerificationEnabled() ? "Enabled" : "Disabled"}`
   ].join("\n");
+}
+
+function buildRuleVerifyEmbed() {
+  const verifiedRoleId = getVerificationRoleId();
+  const unverifiedRoleId = getUnverifiedRoleId();
+  const handle = getTikTokHandle();
+
+  return makeEmbed({
+    title: "Rules check + verification",
+    description:
+      "Most members use this quick path.\n\n" +
+      "Read the rules, click the button once, and I’ll unlock the server for you.",
+    color: COLORS.pink,
+    fields: [
+      { name: "1. Read the rules", value: "Make sure you’ve looked over the rules card in this channel.", inline: false },
+      { name: "2. Click verify", value: "Press the button below to confirm you’ve read everything and get access.", inline: false },
+      { name: "3. Optional bonus", value: handle ? `TikTok matching can still run as a bonus path for @${handle}.` : "TikTok matching can be enabled later for special cases.", inline: false },
+      { name: "Verified role", value: verifiedRoleId ? `<@&${verifiedRoleId}>` : "Not set", inline: true },
+      { name: "Unverified role", value: unverifiedRoleId ? `<@&${unverifiedRoleId}>` : "Optional", inline: true }
+    ],
+    image: { url: "attachment://cute-rules-card.png" }
+  });
+}
+
+function buildRuleVerifyComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("verify:rules-check")
+        .setLabel("I Read the Rules")
+        .setEmoji("📜")
+        .setStyle(ButtonStyle.Primary)
+    )
+  ];
+}
+
+async function postRuleVerifyPanel(source = "manual") {
+  const setupIssues = getRuleVerificationSetupIssues();
+  if (setupIssues.length) {
+    const listed = setupIssues.length === 1
+      ? setupIssues[0]
+      : `${setupIssues.slice(0, -1).join(", ")} and ${setupIssues[setupIssues.length - 1]}`;
+    throw new Error(`Set the ${listed} first.`);
+  }
+
+  const verifyChannelId = getVerifyChannelId();
+  const verifyChannel = await client.channels.fetch(verifyChannelId).catch(() => null);
+  if (!verifyChannel || typeof verifyChannel.send !== "function") {
+    throw new Error("The verify channel could not be found.");
+  }
+
+  const botMember = verifyChannel.guild?.members?.me || verifyChannel.guild?.members?.cache?.get(client.user.id) || null;
+  const requiredPermissions = ["ViewChannel", "SendMessages", "EmbedLinks"];
+  if (botMember && typeof verifyChannel.permissionsFor === "function") {
+    const permissions = verifyChannel.permissionsFor(botMember);
+    const missing = requiredPermissions.filter(permission => !permissions?.has(PermissionFlagsBits[permission]));
+    if (missing.length) {
+      throw new Error(`I am missing permissions in the verify channel: ${missing.join(", ")}.`);
+    }
+  }
+
+  const sentMessage = await verifyChannel.send({
+    embeds: [buildRuleVerifyEmbed()],
+    components: buildRuleVerifyComponents(),
+    files: [buildCuteRulesCardAttachment()]
+  });
+
+  config.verifyMessageId = sentMessage.id;
+  saveConfig();
+
+  recordAuditLog(source, "verification-panel-posted", {
+    channelId: verifyChannelId,
+    messageId: sentMessage.id,
+    verifiedRoleId: getVerificationRoleId(),
+    unverifiedRoleId: getUnverifiedRoleId()
+  });
+
+  return {
+    channelId: verifyChannelId,
+    messageId: sentMessage.id,
+    source
+  };
 }
 
 async function syncTikTokVerification(member, source = "manual") {
@@ -488,13 +578,6 @@ async function syncTikTokVerification(member, source = "manual") {
     if (unverifiedRoleId && member.roles.cache.has(unverifiedRoleId)) {
       rolesToRemove.push(unverifiedRoleId);
     }
-  } else {
-    if (unverifiedRoleId && !member.roles.cache.has(unverifiedRoleId)) {
-      rolesToAdd.push(unverifiedRoleId);
-    }
-    if (verifiedRoleId && member.roles.cache.has(verifiedRoleId)) {
-      rolesToRemove.push(verifiedRoleId);
-    }
   }
 
   if (!rolesToAdd.length && !rolesToRemove.length) {
@@ -502,8 +585,8 @@ async function syncTikTokVerification(member, source = "manual") {
       matched,
       changed: false,
       reason: matched
-        ? "Nickname already matches the TikTok handle."
-        : `Use Set My Name and type @${handle} again. Reaction roles are optional.`
+        ? "Nickname already matches the TikTok bonus setting."
+        : `Nickname does not match the TikTok bonus setting.`
     };
   }
 
@@ -524,7 +607,7 @@ async function syncTikTokVerification(member, source = "manual") {
     changed: Boolean(rolesToAdd.length || rolesToRemove.length),
     reason: matched
       ? `Verified as @${handle}.`
-      : `Use Set My Name and type @${handle} again. Reaction roles are optional.`
+      : `Nickname does not match the TikTok bonus setting.`
   };
 }
 
@@ -2556,7 +2639,7 @@ const allCommands = [
 
   new SlashCommandBuilder()
     .setName("setupverify")
-    .setDescription("Create the onboarding panel")
+    .setDescription("Create the rules verification panel")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
 
   new SlashCommandBuilder()
@@ -3481,7 +3564,7 @@ const allCommands = [
 
   new SlashCommandBuilder()
     .setName("verify")
-    .setDescription("Open TikTok name verification")
+    .setDescription("Open the verification panel")
     .setDMPermission(false),
 
   new SlashCommandBuilder()
@@ -3685,7 +3768,7 @@ function buildCuteRulesMessage() {
       { name: "3", value: "Follow Discord's Terms of Service and community rules.", inline: false },
       { name: "4", value: "Use each channel for its intended purpose.", inline: false },
       { name: "5", value: "Stay active in general chat within two months, or you may be kicked from the server.", inline: false },
-      { name: "6", value: `Please verify in <#${getVerifyChannelId()}> so you can fully access the server.`, inline: false }
+      { name: "6", value: `Please use the verify button in <#${getVerifyChannelId()}> so you can fully access the server.`, inline: false }
     ],
     image: { url: `attachment://${attachment.name}` }
   });
@@ -3751,13 +3834,14 @@ async function resolveVerifyMessageId() {
       const hasExpectedEmbed = message.embeds?.some(embed =>
         typeof embed.title === "string" &&
         (
-          embed.title.toLowerCase().includes("tiktok name verification") ||
+          embed.title.toLowerCase().includes("rules check + verification") ||
+          embed.title.toLowerCase().includes("tiktok bonus verification") ||
           embed.title.toLowerCase().includes("welcome to the mochi garden")
         )
       );
 
       const hasExpectedButton = message.components?.some(row =>
-        row.components?.some(component => component.customId === "verify:tiktok-check")
+        row.components?.some(component => ["verify:rules-check", "verify:tiktok-check"].includes(component.customId))
       );
 
       return Boolean(hasExpectedEmbed || hasExpectedButton);
@@ -3896,6 +3980,7 @@ function isPanelAuditAction(action) {
     "channel-rule-override-added",
     "google-block-list-synced",
     "google-block-list-sync-failed",
+    "verification-panel-posted",
     "affirmations-panel-posted"
   ].includes(String(action || ""));
 }
@@ -5151,19 +5236,19 @@ function buildTikTokVerifyEmbed() {
   const handle = getTikTokHandle();
   const aliases = getTikTokNicknameAliases();
   return makeEmbed({
-    title: "TikTok name verification",
+    title: "TikTok bonus verification",
     description:
       handle
-        ? `Welcome to the mochi garden. Pick a flavor role below, then tap **Set My Name** and type your TikTok username.\n\nI’ll match it against **@${handle}** and any saved nicknames, then hand you the verified role.`
-        : `Welcome to the mochi garden. Pick a flavor role by reacting below, then tap the button and type your TikTok username.\n\nAsk staff if you are not sure what format they want.`,
+        ? `Optional bonus path: pick a flavor role below, then tap **Set My Name** and type your TikTok username.\n\nI’ll match it against **@${handle}** and any saved nicknames, then hand you the verified role if it matches.`
+        : `Optional bonus path: pick a flavor role by reacting below, then tap the button and type your TikTok username.\n\nAsk staff if you are not sure what format they want.`,
     color: COLORS.pink,
     fields: [
-      { name: "🌸 TikTok handle", value: handle ? `@${handle}` : "Not set", inline: true },
+      { name: "🌸 Bonus handle", value: handle ? `@${handle}` : "Not set", inline: true },
       { name: "✨ Verified role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
       { name: "🫧 Unverified role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Optional", inline: true },
       { name: "🍡 Saved nicknames", value: aliases.length ? `${aliases.length} saved` : "None saved", inline: false },
       { name: "🍥 Flavor roles", value: "React below if you want a flavor role. They are optional.", inline: false },
-      { name: "How it works", value: "1. Tap Set My Name\n2. Type your TikTok username\n3. Enjoy the garden", inline: false }
+      { name: "How it works", value: "1. Tap Set My Name\n2. Type your TikTok username\n3. Enjoy the garden if it matches", inline: false }
     ]
   });
 }
@@ -6029,7 +6114,7 @@ function buildHelpEmbed() {
     },
     {
       name: "Verification",
-      value: "`/verify`, `/setupverify`, `/setuptiktokverify`, `/lockverified`, `/unlockverified`, `/settings`",
+      value: "`/verify`, `/setupverify`, `/setuptiktokverify`, `/lockverified`, `/unlockverified`, `/settings`\nMost members should use the rules + button verify flow.",
       inline: false
     },
     {
@@ -6044,7 +6129,7 @@ function buildHelpEmbed() {
     },
     {
       name: "Server Tools",
-      value: "`/setupverify`, `/setuptiktokverify`, `/setuprules`, `/announce`, `/purge`, `/lockdown`, `/unlockdown`, `/lockverified`, `/unlockverified`\nAnonymous affirmations: use the button in the affirmations channel after `/settings affirmchannel`.",
+      value: "`/setupverify`, `/setuptiktokverify`, `/setuprules`, `/announce`, `/purge`, `/lockdown`, `/unlockdown`, `/lockverified`, `/unlockverified`\nAnonymous affirmations: use the button in the affirmations channel after `/settings affirmchannel`.\nVerification: rules + button verify for most users, TikTok matching is optional.",
       inline: false
     },
     {
@@ -6083,7 +6168,7 @@ function buildStatusEmbed() {
       { name: "General Chat Rule", value: `Gentle reminder at 53 days, kick at 60 days.`, inline: false },
       { name: "Log Channel", value: logChannelId ? `<#${logChannelId}>` : "Not set", inline: true },
       { name: "AutoMod Log Channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
-      { name: "TikTok Verify", value: isTikTokVerificationEnabled() ? `@${getTikTokHandle()}` : "Disabled", inline: true },
+      { name: "TikTok Bonus", value: isTikTokVerificationEnabled() ? `@${getTikTokHandle()}` : "Disabled", inline: true },
       { name: "Verified Role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
       { name: "Unverified Role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Not set", inline: true },
       { name: "Birthday Role", value: getBirthdayRoleId() ? `<@&${getBirthdayRoleId()}>` : "Not set", inline: true },
@@ -6172,7 +6257,7 @@ async function buildDashboardEmbed() {
       { name: "Total cases", value: `${allCases.length}`, inline: true },
       { name: "Warnings saved", value: `${Object.keys(config.warnings || {}).length}`, inline: true },
       { name: "Staff notes", value: `${Object.keys(config.notes || {}).length}`, inline: true },
-      { name: "TikTok verification", value: isTikTokVerificationEnabled() ? `@${getTikTokHandle()}` : "Disabled", inline: true },
+      { name: "TikTok bonus", value: isTikTokVerificationEnabled() ? `@${getTikTokHandle()}` : "Disabled", inline: true },
       { name: "AutoMod log channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
       { name: "Alert-only rules", value: getAlertOnlyRules().join(", ") || "None", inline: false },
       { name: "Nickname filter terms", value: `${getNicknameBlockedTerms().length}`, inline: true },
@@ -6626,8 +6711,8 @@ function buildAdminPanelButtons(view, targetUserId = null) {
   if (view === "setup") {
     rows.push(
       new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setupverify", targetUserId)).setLabel("Post Onboarding Panel").setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setuptiktokverify", targetUserId)).setLabel("Repost Role Panel").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setupverify", targetUserId)).setLabel("Post Verify Panel").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setuptiktokverify", targetUserId)).setLabel("Post TikTok Bonus").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setuprules", targetUserId)).setLabel("Post Rules").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "settings-view", targetUserId)).setLabel("View Settings").setStyle(ButtonStyle.Secondary)
       ),
@@ -8853,14 +8938,12 @@ async function handleWebApi(req, res, pathname) {
         return sendWebJson(res, 403, { error: "Admin web access is required." });
       }
       await readWebJsonBody(req).catch(() => null);
-      const posted = await postTikTokVerifyPanel("web");
+      const posted = await postRuleVerifyPanel("web");
       recordAuditLog(getWebModeratorTag(auth), "verification-panel-repaired", {
         channelId: posted.channelId,
         messageId: posted.messageId,
-        tiktokHandle: config.settings.tiktokHandle,
         verifiedRoleId: config.settings.verifiedRoleId,
-        unverifiedRoleId: config.settings.unverifiedRoleId,
-        aliases: config.settings.tiktokNicknameAliases
+        unverifiedRoleId: config.settings.unverifiedRoleId
       });
       return sendWebJson(res, 200, { ok: true, posted });
     }
@@ -9292,6 +9375,89 @@ client.on("interactionCreate", async interaction => {
         }
 
         return interaction.showModal(buildBirthdayModal());
+      }
+
+      if (interaction.customId === "verify:rules-check") {
+        if (!ENABLE_CORE_BOT) {
+          return interaction.reply({ content: "Verification is disabled on this deployment.", ephemeral: true });
+        }
+
+        await interaction.deferReply({ ephemeral: true });
+
+        const member = interaction.member || await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+        if (!member) {
+          return interaction.editReply({
+            embeds: [
+              makeEmbed({
+                title: "Try again",
+                description: "I could not find your server membership.",
+                color: COLORS.red
+              })
+            ]
+          });
+        }
+
+        const verifiedRoleId = getVerificationRoleId();
+        const unverifiedRoleId = getUnverifiedRoleId();
+        if (!verifiedRoleId) {
+          return interaction.editReply({
+            embeds: [
+              makeEmbed({
+                title: "Try again",
+                description: "Ask staff to set the verified role first.",
+                color: COLORS.red
+              })
+            ]
+          });
+        }
+
+        const rolesToAdd = member.roles.cache.has(verifiedRoleId) ? [] : [verifiedRoleId];
+        const rolesToRemove = unverifiedRoleId && member.roles.cache.has(unverifiedRoleId) ? [unverifiedRoleId] : [];
+
+        if (!rolesToAdd.length && !rolesToRemove.length) {
+          return interaction.editReply({
+            embeds: [
+              makeEmbed({
+                title: "You’re already verified",
+                description: "You already have access. Thanks for reading the rules.",
+                color: COLORS.mint
+              })
+            ]
+          });
+        }
+
+        if (!member.manageable) {
+          return interaction.editReply({
+            embeds: [
+              makeEmbed({
+                title: "Try again",
+                description: "I cannot manage your roles right now.",
+                color: COLORS.red
+              })
+            ]
+          });
+        }
+
+        if (rolesToRemove.length) {
+          await member.roles.remove(rolesToRemove, "Rules check verification").catch(() => {});
+        }
+
+        if (rolesToAdd.length) {
+          await member.roles.add(rolesToAdd, "Rules check verification").catch(() => {});
+        }
+
+        const bonusMatched = isTikTokVerificationEnabled() && matchesTikTokVerification(member);
+        return interaction.editReply({
+          embeds: [
+            makeEmbed({
+              title: "Verified",
+              description: bonusMatched
+                ? `You’re verified, and your nickname also matches the TikTok bonus setting for @${getTikTokHandle()}.`
+                : "You’re verified. Welcome in.",
+              color: COLORS.mint
+            })
+          ]
+        });
       }
 
       if (interaction.customId === "verify:tiktok-check") {
@@ -10336,10 +10502,10 @@ client.on("interactionCreate", async interaction => {
 
         if (action === "setupverify") {
           try {
-            await postTikTokVerifyPanel("adminpanel");
-            return interaction.reply({ content: "Onboarding panel posted.", ephemeral: true });
+            await postRuleVerifyPanel("adminpanel");
+            return interaction.reply({ content: "Verification panel posted.", ephemeral: true });
           } catch (error) {
-            return interaction.reply({ content: error.message || "Onboarding panel could not be posted.", ephemeral: true });
+            return interaction.reply({ content: error.message || "Verification panel could not be posted.", ephemeral: true });
           }
         }
 
@@ -11261,31 +11427,27 @@ client.on("interactionCreate", async interaction => {
         return interaction.reply({ content: "Verification is disabled on this deployment.", ephemeral: true });
       }
 
-      if (!isTikTokVerificationEnabled()) {
-        const setupError = "TikTok verification is not configured yet. Ask staff to set the handle and roles.";
-        const setupEmbed = makeEmbed({
-          title: "Try again",
-          description: setupError,
-          color: COLORS.red,
-          image: { url: "attachment://tiktok-error-card.png" }
-        });
+      const verifyChannelId = getVerifyChannelId();
+      if (!verifyChannelId) {
         return interaction.reply({
-          embeds: [setupEmbed],
-          files: [buildTikTokErrorCardAttachment(setupError, "username", "permission")],
+          content: "Ask staff to post the verification panel first.",
           ephemeral: true
         });
       }
 
-      return interaction.showModal(buildTikTokNameModal());
+      return interaction.reply({
+        content: `Head to <#${verifyChannelId}> and click **I Read the Rules** to verify.${isTikTokVerificationEnabled() ? ` TikTok matching is available there as a bonus.` : ""}`,
+        ephemeral: true
+      });
     }
 
     if (interaction.commandName === "setupverify") {
       await interaction.deferReply({ ephemeral: true });
       try {
-        await postTikTokVerifyPanel("slash");
-        return interaction.editReply("Onboarding panel created.");
+        await postRuleVerifyPanel("slash");
+        return interaction.editReply("Verification panel created.");
       } catch (error) {
-        return interaction.editReply(error.message || "Onboarding panel could not be created.");
+        return interaction.editReply(error.message || "Verification panel could not be created.");
       }
     }
 
