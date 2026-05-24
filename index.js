@@ -7525,11 +7525,6 @@ function updateWebSettings(auth, payload) {
   recordAuditLog(getWebModeratorTag(auth), "settings-updated", {
     changes: buildAuditDiff(before, after, Object.keys(after))
   });
-  if (Object.prototype.hasOwnProperty.call(payload, "anonymousAffirmationsChannelId")) {
-    postAnonymousAffirmationsPanel("web").catch(error => {
-      console.error("Anonymous affirmations panel error:", error.message);
-    });
-  }
   return buildWebConfigPayload().settings;
 }
 
