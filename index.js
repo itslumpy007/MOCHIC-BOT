@@ -7186,6 +7186,28 @@ function buildMochiPlayUrl(sessionId) {
   return url.toString();
 }
 
+async function launchMochiActivity(interaction) {
+  const payload = {
+    type: 12
+  };
+
+  const response = await fetch(`https://discord.com/api/v10/interactions/${interaction.id}/${interaction.token}/callback`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (response.ok) {
+    return true;
+  }
+
+  const errorText = await response.text().catch(() => "");
+  console.warn("Mochi Activity launch failed:", response.status, errorText);
+  return false;
+}
+
 function loadMochiLeaderboard() {
   if (mochiLeaderboardCache) return mochiLeaderboardCache;
 
@@ -11591,11 +11613,16 @@ client.on("interactionCreate", async interaction => {
       });
       const playUrl = buildMochiPlayUrl(session.id);
 
+      const launched = await launchMochiActivity(interaction, session);
+      if (launched) {
+        return;
+      }
+
       return interaction.reply({
         embeds: [
           makeEmbed({
             title: "Mochi Bird",
-            description: "Your run is ready. Tap the button to open the game in your browser.",
+            description: "Discord could not launch the Activity, so here is a browser link instead.",
             color: COLORS.mint,
             fields: [
               { name: "Player", value: interaction.user.tag, inline: true },
