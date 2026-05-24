@@ -7196,6 +7196,15 @@ async function launchMochiActivity(interaction) {
   }
 }
 
+function buildMochiLaunchRow(sessionId) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`mochi:launch:${sessionId}`)
+      .setLabel("Launch Mochi Activity")
+      .setStyle(ButtonStyle.Primary)
+  );
+}
+
 function loadMochiLeaderboard() {
   if (mochiLeaderboardCache) return mochiLeaderboardCache;
 
@@ -9640,6 +9649,28 @@ client.on("channelCreate", async channel => {
 client.on("interactionCreate", async interaction => {
   try {
     if (interaction.isButton()) {
+      if (interaction.customId.startsWith("mochi:launch:")) {
+        const sessionId = interaction.customId.split(":")[2];
+        const session = getMochiSession(sessionId);
+        if (!session) {
+          return interaction.reply({
+            content: "That Mochi Bird session expired. Run `/mochi` again to get a fresh launch.",
+            ephemeral: true
+          });
+        }
+
+        const launched = await launchMochiActivity(interaction);
+        if (launched) {
+          return;
+        }
+
+        const playUrl = buildMochiPlayUrl(session.id);
+        return interaction.reply({
+          content: `Discord could not launch the Activity, so here is the browser fallback: ${playUrl}`,
+          ephemeral: true
+        });
+      }
+
       if (interaction.customId === "birthday:set") {
         if (!ENABLE_CORE_BOT) {
           return interaction.reply({ content: "Birthday signup is disabled on this deployment.", ephemeral: true });
@@ -11601,16 +11632,11 @@ client.on("interactionCreate", async interaction => {
       });
       const playUrl = buildMochiPlayUrl(session.id);
 
-      const launched = await launchMochiActivity(interaction, session);
-      if (launched) {
-        return;
-      }
-
       return interaction.reply({
         embeds: [
           makeEmbed({
             title: "Mochi Bird",
-            description: "Discord could not launch the Activity, so here is a browser link instead.",
+            description: "Tap the button to launch the Activity inside Discord. If that fails, use the browser fallback.",
             color: COLORS.mint,
             fields: [
               { name: "Player", value: interaction.user.tag, inline: true },
@@ -11619,9 +11645,10 @@ client.on("interactionCreate", async interaction => {
           })
         ],
         components: [
+          buildMochiLaunchRow(session.id),
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()
-              .setLabel("Play Mochi Bird")
+              .setLabel("Browser Fallback")
               .setStyle(ButtonStyle.Link)
               .setURL(playUrl)
           )
