@@ -729,6 +729,7 @@ async function loadSession() {
     if (configResponse.ok) {
       activityMode = Boolean(configPayload.activityMode);
       discordClientId = configPayload.discordClientId;
+      document.body.classList.toggle('activity-mode', activityMode);
     }
   } catch {
     // Config lookup is optional.
