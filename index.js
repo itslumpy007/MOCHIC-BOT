@@ -488,6 +488,8 @@ function buildRuleVerifyEmbed() {
       { name: "1. Read the rules", value: "Make sure you’ve looked over the rules card in this channel.", inline: false },
       { name: "2. Click verify", value: "Press the button below to confirm you’ve read everything and get access.", inline: false },
       { name: "3. Optional bonus", value: handle ? `TikTok matching can still run as a bonus path for @${handle}.` : "TikTok matching can be enabled later for special cases.", inline: false },
+      { name: "🍥 Flavor roles", value: "React below if you want a flavor role. They are optional.", inline: false },
+      { name: "How it works", value: "1. Read the rules\n2. Click verify\n3. React for an optional flavor role", inline: false },
       { name: "Verified role", value: verifiedRoleId ? `<@&${verifiedRoleId}>` : "Not set", inline: true },
       { name: "Unverified role", value: unverifiedRoleId ? `<@&${unverifiedRoleId}>` : "Optional", inline: true }
     ],
@@ -537,6 +539,8 @@ async function postRuleVerifyPanel(source = "manual") {
     components: buildRuleVerifyComponents(),
     files: [buildCuteRulesCardAttachment()]
   });
+
+  await addMochiRoleReactions(sentMessage);
 
   config.verifyMessageId = sentMessage.id;
   saveConfig();
