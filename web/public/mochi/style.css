@@ -32,6 +32,104 @@ body {
   overflow-x: hidden;
 }
 
+.intro-splash {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(37, 208, 171, 0.18), transparent 28%),
+    radial-gradient(circle at 80% 25%, rgba(255, 200, 87, 0.16), transparent 26%),
+    linear-gradient(180deg, rgba(5, 10, 16, 0.98), rgba(7, 16, 24, 0.98));
+  transition: opacity 0.45s ease, transform 0.45s ease;
+}
+
+.intro-splash.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(1.02);
+}
+
+.intro-card {
+  width: min(92vw, 760px);
+  display: grid;
+  place-items: center;
+  gap: 18px;
+  padding: 28px;
+}
+
+.intro-logo {
+  width: min(88vw, 620px);
+  height: auto;
+  filter: drop-shadow(0 18px 36px rgba(0, 0, 0, 0.35));
+  animation: intro-pop 900ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.intro-stage {
+  position: relative;
+  width: min(74vw, 320px);
+  aspect-ratio: 1 / 1;
+  display: grid;
+  place-items: center;
+}
+
+.intro-can {
+  width: 54%;
+  height: auto;
+  filter: drop-shadow(0 20px 28px rgba(0, 0, 0, 0.35));
+  animation: intro-float 2200ms ease-in-out infinite;
+  z-index: 2;
+}
+
+.intro-ring {
+  position: absolute;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.14);
+  animation: intro-ring 2200ms ease-in-out infinite;
+}
+
+.ring-a {
+  width: 100%;
+  height: 100%;
+}
+
+.ring-b {
+  width: 72%;
+  height: 72%;
+  animation-delay: 180ms;
+}
+
+.intro-copy {
+  color: var(--text);
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-size: 0.84rem;
+}
+
+.intro-dots {
+  display: flex;
+  gap: 8px;
+}
+
+.intro-dots span {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 18px rgba(37, 208, 171, 0.5);
+  animation: intro-dot 900ms ease-in-out infinite;
+}
+
+.intro-dots span:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.intro-dots span:nth-child(3) {
+  animation-delay: 240ms;
+}
+
 .background-orb {
   position: fixed;
   border-radius: 999px;
@@ -68,6 +166,14 @@ body {
 .hero {
   max-width: 760px;
   padding: 24px 6px 8px;
+}
+
+.hero-logo {
+  display: block;
+  width: min(100%, 760px);
+  height: auto;
+  margin: 10px 0 12px;
+  filter: drop-shadow(0 12px 26px rgba(0, 0, 0, 0.22));
 }
 
 .eyebrow {
@@ -185,15 +291,6 @@ canvas {
   padding: 20px;
 }
 
-.menu-kicker {
-  margin-bottom: 14px;
-  color: var(--accent);
-  font-size: 0.76rem;
-  text-transform: uppercase;
-  letter-spacing: 0.18em;
-  font-weight: 800;
-}
-
 .menu-hero {
   display: grid;
   grid-template-columns: 112px 1fr;
@@ -201,6 +298,13 @@ canvas {
   align-items: center;
   text-align: left;
   margin-bottom: 18px;
+}
+
+.menu-logo {
+  display: block;
+  width: min(100%, 360px);
+  height: auto;
+  margin: 0 auto 12px;
 }
 
 .menu-avatar-frame {
@@ -256,6 +360,52 @@ canvas {
 
 .menu-card button {
   width: 100%;
+}
+
+@keyframes intro-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(20px) scale(0.94);
+  }
+  65% {
+    opacity: 1;
+    transform: translateY(0) scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes intro-float {
+  0%, 100% {
+    transform: translateY(-6px) rotate(-3deg);
+  }
+  50% {
+    transform: translateY(10px) rotate(3deg);
+  }
+}
+
+@keyframes intro-ring {
+  0%, 100% {
+    transform: scale(0.92);
+    opacity: 0.18;
+  }
+  50% {
+    transform: scale(1.04);
+    opacity: 0.42;
+  }
+}
+
+@keyframes intro-dot {
+  0%, 100% {
+    transform: translateY(0);
+    opacity: 0.46;
+  }
+  50% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
 }
 
 .overlay-card h2 {
@@ -334,6 +484,10 @@ button:hover {
 
   .menu-chips {
     justify-content: center;
+  }
+
+  .hero-logo {
+    margin-bottom: 8px;
   }
 
   .stage {

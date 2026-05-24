@@ -3,19 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Discord Mochi Bird</title>
+    <title>Mochi Bird Activity</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
+    <div class="intro-splash" id="introSplash" aria-hidden="true">
+      <div class="intro-card">
+        <img class="intro-logo" src="./assets/mochi-logo.svg" alt="Mochi Bird" />
+        <div class="intro-stage">
+          <img class="intro-can" src="./assets/dr-pepper-can.svg" alt="" aria-hidden="true" />
+          <div class="intro-ring ring-a"></div>
+          <div class="intro-ring ring-b"></div>
+        </div>
+        <div class="intro-copy">Launching Activity</div>
+        <div class="intro-dots" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </div>
+      </div>
+    </div>
+
     <div class="background-orb orb-a"></div>
     <div class="background-orb orb-b"></div>
     <main class="app-shell">
       <section class="hero">
         <div class="eyebrow">Discord launch game</div>
-        <h1>Mochi Bird</h1>
+        <img class="hero-logo" src="./assets/mochi-logo.svg" alt="Mochi Bird" />
         <p>
           A browser-first Mochi Bird that opens from Discord, records your score, and keeps a
-          leaderboard.
+          leaderboard. Collect soda cans, dodge pipes, and chase a personal best.
         </p>
       </section>
 
@@ -36,13 +51,13 @@
           <canvas id="game"></canvas>
           <div class="overlay" id="overlay">
             <div class="overlay-card menu-card">
-              <div class="menu-kicker">Discord launch game</div>
+              <img class="menu-logo" src="./assets/mochi-logo.svg" alt="Mochi Bird" />
               <div class="menu-hero">
                 <div class="menu-avatar-frame">
                   <img id="menuAvatar" src="./assets/avatar.png" alt="Mochi Bird avatar" />
                 </div>
                 <div class="menu-copy">
-                  <h2 id="overlayTitle">Mochi Bird</h2>
+                  <h2 id="overlayTitle">Main Menu</h2>
                   <p id="overlayText">Loading session data.</p>
                   <div class="menu-chips" aria-hidden="true">
                     <span>Space</span>

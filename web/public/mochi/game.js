@@ -8,6 +8,7 @@ const overlayTitleEl = document.getElementById('overlayTitle');
 const overlayTextEl = document.getElementById('overlayText');
 const primaryButton = document.getElementById('primaryButton');
 const sessionNoteEl = document.getElementById('sessionNote');
+const introSplashEl = document.getElementById('introSplash');
 
 const params = new URLSearchParams(window.location.search);
 let sessionId = params.get('sid');
@@ -19,8 +20,12 @@ let discordClientId = null;
 let discordSdk = null;
 
 let session = null;
+const logoSprite = new Image();
+logoSprite.src = './assets/mochi-logo.svg';
 const birdSprite = new Image();
 birdSprite.src = './assets/avatar.png';
+const canSprite = new Image();
+canSprite.src = './assets/dr-pepper-can.svg';
 
 let width = 360;
 let height = 640;
@@ -39,6 +44,7 @@ let spawnTimer = 0;
 let backgroundOffset = 0;
 let clouds = [];
 let stars = [];
+let collectibles = [];
 let primaryMode = 'start';
 let gameState = 'menu';
 
@@ -97,7 +103,8 @@ function resetBoard() {
     y: (index * 71) % (height * 0.45),
     r: 0.8 + (index % 3) * 0.5,
     twinkle: 0.3 + (index % 5) * 0.11
-  })); 
+  }));
+  collectibles = [];
 }
 
 function showMenu() {
@@ -112,7 +119,7 @@ function showMenu() {
   hydrateBestScore();
   primaryMode = 'play';
   showOverlay(
-    session ? `Ready for ${session.userTag}` : 'Mochi Bird',
+    session ? `Ready for ${session.userTag}` : 'Main Menu',
     isPracticeMode
       ? 'Practice mode is ready. Tap Play to start a local run, then flap with Space, click, or tap.'
       : 'Discord Activity mode is ready. Tap Play to start your recorded run.',
@@ -213,6 +220,37 @@ function addPipe() {
     topHeight,
     passed: false
   });
+
+  if (Math.random() < 0.7) {
+    const gapCenter = topHeight + PIPE_GAP / 2;
+    collectibles.push({
+      x: width + 116,
+      y: clamp(gapCenter + (Math.random() * 90 - 45), 60, height - GROUND_HEIGHT - 70),
+      radius: 20,
+      rotation: Math.random() * Math.PI * 2,
+      bobSeed: Math.random() * Math.PI * 2,
+      collected: false
+    });
+  }
+}
+
+function collectScore(points = 1) {
+  score += points;
+  scoreEl.textContent = String(score);
+  if (score > bestScore) {
+    bestScore = score;
+    bestScoreEl.textContent = String(bestScore);
+    localStorage.setItem(bestScoreKey, String(bestScore));
+  }
+}
+
+function collectibleBox(item) {
+  return {
+    x: item.x - item.radius,
+    y: item.y - item.radius,
+    width: item.radius * 2,
+    height: item.radius * 2
+  };
 }
 
 function flap() {
@@ -340,6 +378,13 @@ function update(deltaSeconds) {
 
   pipes = pipes.filter((pipe) => pipe.x > -PIPE_WIDTH - 40);
 
+  for (const item of collectibles) {
+    item.x -= PIPE_SPEED * deltaSeconds;
+    item.rotation += deltaSeconds * 1.8;
+  }
+
+  collectibles = collectibles.filter((item) => item.x > -item.radius * 3 && !item.collected);
+
   const birdBounds = birdBox();
 
   if (bird.y + bird.radius >= height - GROUND_HEIGHT) {
@@ -362,13 +407,19 @@ function update(deltaSeconds) {
 
     if (!pipe.passed && pipe.x + PIPE_WIDTH < bird.x - bird.radius) {
       pipe.passed = true;
-      score += 1;
-      scoreEl.textContent = String(score);
-      if (score > bestScore) {
-        bestScore = score;
-        bestScoreEl.textContent = String(bestScore);
-        localStorage.setItem(bestScoreKey, String(bestScore));
-      }
+      collectScore(1);
+    }
+  }
+
+  for (const item of collectibles) {
+    if (item.collected) {
+      continue;
+    }
+    const pickup = collectibleBox(item);
+    if (rectsOverlap(birdBounds, pickup)) {
+      item.collected = true;
+      collectScore(1);
+      updateStatus('Collected a Dr Pepper can!');
     }
   }
 }
@@ -439,6 +490,40 @@ function drawPipes() {
     roundRect(ctx, pipe.x - 4, bottomY, PIPE_WIDTH + 8, capHeight, 8, true, false);
     ctx.fillStyle = '#2fd18d';
     ctx.fill();
+  }
+}
+
+function drawCollectibles() {
+  for (const item of collectibles) {
+    if (item.collected) {
+      continue;
+    }
+
+    const floatY = Math.sin(elapsedMs / 240 + item.bobSeed) * 6;
+    const drawX = item.x;
+    const drawY = item.y + floatY;
+    const size = item.radius * 2.8;
+
+    ctx.save();
+    ctx.translate(drawX, drawY);
+    ctx.rotate(item.rotation * 0.5);
+
+    if (canSprite.complete && canSprite.naturalWidth > 0) {
+      ctx.drawImage(canSprite, -size / 2, -size / 2, size, size * 1.95);
+    } else {
+      ctx.fillStyle = '#c81f30';
+      ctx.beginPath();
+      roundRect(ctx, -size * 0.36, -size * 0.72, size * 0.72, size * 1.44, 10);
+      ctx.fill();
+      ctx.fillStyle = '#f8f2eb';
+      ctx.fillRect(-size * 0.32, -size * 0.06, size * 0.64, size * 0.12);
+      ctx.fillStyle = '#f2c14e';
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
   }
 }
 
@@ -539,9 +624,15 @@ function drawMenuScene() {
 
   ctx.save();
   ctx.globalAlpha = 0.18;
-  ctx.fillStyle = '#ffffff';
-  ctx.font = '700 26px Georgia, serif';
-  ctx.fillText('Mochi Bird', width * 0.11, height * 0.18);
+  if (logoSprite.complete && logoSprite.naturalWidth > 0) {
+    const logoWidth = Math.min(width * 0.62, 340);
+    const logoHeight = logoWidth * 0.267;
+    ctx.drawImage(logoSprite, width * 0.08, height * 0.1, logoWidth, logoHeight);
+  } else {
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '700 26px Georgia, serif';
+    ctx.fillText('Mochi Bird', width * 0.11, height * 0.18);
+  }
   ctx.font = '500 13px "Trebuchet MS", sans-serif';
   ctx.fillText('Press Play to start', width * 0.11, height * 0.22);
   ctx.restore();
@@ -587,6 +678,7 @@ function render() {
 
   drawMenuScene();
   drawPipes();
+  drawCollectibles();
   drawGround();
   drawBird();
   drawHudOverlay();
@@ -723,5 +815,8 @@ canvas.addEventListener('pointerdown', () => {
 primaryButton.addEventListener('click', onPrimaryAction);
 
 resizeCanvas();
+window.setTimeout(() => {
+  introSplashEl?.classList.add('hidden');
+}, 1700);
 await loadSession();
 animationFrame = requestAnimationFrame(loop);
