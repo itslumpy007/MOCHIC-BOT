@@ -152,7 +152,6 @@ const pendingPanelActions = new Map();
 const webSessions = new Map();
 const webOauthStates = new Map();
 const mochiSessions = new Map();
-const mochiLeaderboardPath = path.join(dataDir, "mochi-leaderboard.json");
 const MOCHI_PATH = normalizeMochiPath(process.env.MOCHI_PATH || "/mochi");
 const MOCHI_SESSION_TTL_MS = Number.isFinite(Number(process.env.MOCHI_SESSION_TTL_MINUTES))
   ? Math.max(5, Number(process.env.MOCHI_SESSION_TTL_MINUTES)) * 60 * 1000
@@ -165,6 +164,7 @@ let generalChatSweepInterval = null;
 let birthdaySweepInterval = null;
 
 const dataDir = path.join(__dirname, "data");
+const mochiLeaderboardPath = path.join(dataDir, "mochi-leaderboard.json");
 const configPath = path.join(dataDir, "config.json");
 const messageArchivePath = path.join(dataDir, "message-archive.jsonl");
 let messageArchiveLastPruneAt = 0;
