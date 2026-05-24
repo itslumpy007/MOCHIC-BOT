@@ -7181,7 +7181,7 @@ function publicMochiSession(session) {
 }
 
 function buildMochiPlayUrl(sessionId) {
-  const url = new URL(MOCHI_PATH, buildMochiBaseUrl());
+  const url = new URL(`${MOCHI_PATH}/`, buildMochiBaseUrl());
   url.searchParams.set("sid", sessionId);
   return url.toString();
 }
@@ -9420,6 +9420,14 @@ function startWebServer() {
 
     if (pathname === "/auth/logout") {
       handleWebLogout(req, res);
+      return;
+    }
+
+    if (pathname === MOCHI_PATH) {
+      res.writeHead(302, {
+        Location: `${MOCHI_PATH}/${requestUrl.search || ""}`
+      });
+      res.end();
       return;
     }
 
