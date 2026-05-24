@@ -25,7 +25,7 @@ logoSprite.src = './assets/mochi-logo.svg';
 const birdSprite = new Image();
 birdSprite.src = './assets/avatar.png';
 const canSprite = new Image();
-canSprite.src = './assets/dr-pepper-can.svg';
+canSprite.src = './assets/dr-pepper-can.png';
 
 let width = 360;
 let height = 640;
@@ -542,6 +542,29 @@ function drawGround() {
   }
 }
 
+function drawBrandWatermark() {
+  const pad = 14;
+  const boxWidth = 170;
+  const boxHeight = 40;
+
+  ctx.save();
+  ctx.globalAlpha = 0.94;
+  ctx.fillStyle = 'rgba(8, 14, 22, 0.36)';
+  roundRect(ctx, pad, pad, boxWidth, boxHeight, 16, true, false);
+
+  ctx.fillStyle = 'rgba(37, 208, 171, 0.18)';
+  roundRect(ctx, pad + 1, pad + 1, boxWidth - 2, boxHeight - 2, 15, true, false);
+
+  ctx.fillStyle = '#ecf6ff';
+  ctx.font = '800 18px Georgia, "Times New Roman", serif';
+  ctx.fillText('Mochi Bird', pad + 16, pad + 25);
+
+  ctx.fillStyle = '#9fb5c8';
+  ctx.font = '600 9px "Trebuchet MS", sans-serif';
+  ctx.fillText('Collect cans • Dodge pipes', pad + 16, pad + 35);
+  ctx.restore();
+}
+
 function drawBird() {
   const tilt = clamp(bird.velocity / 400, -0.6, 0.8);
   ctx.save();
@@ -676,6 +699,7 @@ function render() {
     drawCloud(cloud.x, cloud.y, cloud.size);
   }
 
+  drawBrandWatermark();
   drawMenuScene();
   drawPipes();
   drawCollectibles();

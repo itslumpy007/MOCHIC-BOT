@@ -212,6 +212,49 @@ body {
   backdrop-filter: blur(14px);
 }
 
+.game-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 4px 16px;
+}
+
+.game-brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 160px;
+  padding: 10px 14px;
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(37, 208, 171, 0.24), rgba(255, 200, 87, 0.16)),
+    rgba(8, 14, 22, 0.54);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #ecf6ff;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.2rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.22));
+}
+
+.game-brand-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.game-brand-copy strong {
+  color: var(--text);
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
+}
+
+.game-brand-copy span {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
 .hud {
   display: flex;
   flex-wrap: wrap;
@@ -301,10 +344,24 @@ canvas {
 }
 
 .menu-logo {
-  display: block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: min(100%, 360px);
-  height: auto;
+  min-height: 62px;
   margin: 0 auto 12px;
+  padding: 12px 18px;
+  border-radius: 20px;
+  background:
+    linear-gradient(135deg, rgba(37, 208, 171, 0.22), rgba(255, 200, 87, 0.16)),
+    rgba(8, 14, 22, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #ecf6ff;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(1.5rem, 5vw, 2.5rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
 }
 
 .menu-avatar-frame {
@@ -460,6 +517,14 @@ button:hover {
   .game-card {
     padding: 14px;
     border-radius: 22px;
+  }
+
+  .game-brand {
+    align-items: flex-start;
+  }
+
+  .game-brand-mark {
+    width: 136px;
   }
 
   .hud {
