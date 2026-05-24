@@ -2831,6 +2831,13 @@ function formatDate(value) {
   return new Date(value).toLocaleString();
 }
 
+function formatBirthdayMonthDay(month, day) {
+  const nextMonth = Number(month);
+  const nextDay = Number(day);
+  if (!Number.isFinite(nextMonth) || !Number.isFinite(nextDay)) return "Unknown";
+  return `${String(nextMonth).padStart(2, "0")}/${String(nextDay).padStart(2, "0")}`;
+}
+
 function formatDurationInput(milliseconds) {
   const value = Number(milliseconds || 0);
   if (!value) return "0";
