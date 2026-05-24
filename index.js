@@ -151,6 +151,13 @@ const googleBlockListSyncState = {
 const pendingPanelActions = new Map();
 const webSessions = new Map();
 const webOauthStates = new Map();
+const mochiSessions = new Map();
+const mochiLeaderboardPath = path.join(dataDir, "mochi-leaderboard.json");
+const MOCHI_PATH = normalizeMochiPath(process.env.MOCHI_PATH || "/mochi");
+const MOCHI_SESSION_TTL_MS = Number.isFinite(Number(process.env.MOCHI_SESSION_TTL_MINUTES))
+  ? Math.max(5, Number(process.env.MOCHI_SESSION_TTL_MINUTES)) * 60 * 1000
+  : 30 * 60 * 1000;
+let mochiLeaderboardCache = null;
 let tempBanInterval = null;
 let scheduledReportInterval = null;
 let googleBlockListInterval = null;
@@ -2577,6 +2584,14 @@ const allCommands = [
   new SlashCommandBuilder()
     .setName("help")
     .setDescription("Show the bot's main commands"),
+
+  new SlashCommandBuilder()
+    .setName("mochi")
+    .setDescription("Play Mochi Bird in a browser"),
+
+  new SlashCommandBuilder()
+    .setName("mochi-leaderboard")
+    .setDescription("Show the Mochi Bird leaderboard"),
 
   new SlashCommandBuilder()
     .setName("adminpanel")
@@ -6132,6 +6147,11 @@ function buildHelpEmbed() {
       inline: false
     },
     {
+      name: "Games",
+      value: "`/mochi`, `/mochi-leaderboard`",
+      inline: false
+    },
+    {
       name: "Server Tools",
       value: "`/setupverify`, `/setuptiktokverify`, `/setuprules`, `/announce`, `/purge`, `/lockdown`, `/unlockdown`, `/lockverified`, `/unlockverified`\nAnonymous affirmations: use the button in the affirmations channel after `/settings affirmchannel`.\nVerification: rules + button verify for most users, TikTok matching is optional.",
       inline: false
@@ -7079,6 +7099,138 @@ function getWebSession(req) {
     return null;
   }
   return { sessionId, ...session };
+}
+
+function buildMochiBaseUrl() {
+  return (WEB_BASE_URL || `http://localhost:${WEB_PORT}`).replace(/\/$/, "");
+}
+
+function normalizeMochiPath(value) {
+  let next = String(value || "/mochi").trim();
+  if (!next.startsWith("/")) next = `/${next}`;
+  next = next.replace(/\/+$/, "");
+  return next || "/mochi";
+}
+
+function getMochiIndexPath() {
+  return `${MOCHI_PATH}/index.html`;
+}
+
+function cleanupMochiSessions() {
+  const now = Date.now();
+  for (const [sessionId, session] of mochiSessions.entries()) {
+    if (session.expiresAt <= now) {
+      mochiSessions.delete(sessionId);
+    }
+  }
+}
+
+function createMochiSession({ userId, userTag, channelId, guildId }) {
+  const sessionId = crypto.randomUUID();
+  const createdAt = Date.now();
+  const session = {
+    id: sessionId,
+    userId,
+    userTag,
+    channelId,
+    guildId,
+    createdAt,
+    expiresAt: createdAt + MOCHI_SESSION_TTL_MS,
+    status: "active",
+    score: null,
+    submittedAt: null
+  };
+
+  mochiSessions.set(sessionId, session);
+  return session;
+}
+
+function getMochiSession(sessionId) {
+  cleanupMochiSessions();
+  return mochiSessions.get(sessionId) || null;
+}
+
+function completeMochiSession(sessionId, payload) {
+  cleanupMochiSessions();
+  const session = mochiSessions.get(sessionId);
+  if (!session) return null;
+  if (session.status === "completed") return session;
+
+  session.status = "completed";
+  session.score = Number(payload.score) || 0;
+  session.submittedAt = Date.now();
+  session.lastResult = payload;
+  mochiSessions.set(sessionId, session);
+  return session;
+}
+
+function publicMochiSession(session) {
+  if (!session) return null;
+  return {
+    id: session.id,
+    userId: session.userId,
+    userTag: session.userTag,
+    channelId: session.channelId,
+    guildId: session.guildId,
+    createdAt: session.createdAt,
+    expiresAt: session.expiresAt,
+    status: session.status,
+    score: session.score,
+    submittedAt: session.submittedAt
+  };
+}
+
+function buildMochiPlayUrl(sessionId) {
+  const url = new URL(MOCHI_PATH, buildMochiBaseUrl());
+  url.searchParams.set("sid", sessionId);
+  return url.toString();
+}
+
+function loadMochiLeaderboard() {
+  if (mochiLeaderboardCache) return mochiLeaderboardCache;
+
+  try {
+    const raw = fs.readFileSync(mochiLeaderboardPath, "utf8");
+    const parsed = JSON.parse(raw);
+    mochiLeaderboardCache = new Map(parsed.map(entry => [entry.userId, entry]));
+  } catch {
+    mochiLeaderboardCache = new Map();
+  }
+
+  return mochiLeaderboardCache;
+}
+
+function persistMochiLeaderboard() {
+  fs.mkdirSync(dataDir, { recursive: true });
+  const entries = [...loadMochiLeaderboard().values()].sort((a, b) => b.bestScore - a.bestScore || String(a.userTag).localeCompare(String(b.userTag)));
+  fs.writeFileSync(mochiLeaderboardPath, JSON.stringify(entries, null, 2), "utf8");
+}
+
+function recordMochiScore({ userId, userTag, score }) {
+  const board = loadMochiLeaderboard();
+  const existing = board.get(userId);
+  const bestScore = existing ? Math.max(existing.bestScore, score) : score;
+  const entry = {
+    userId,
+    userTag,
+    bestScore,
+    lastScore: score,
+    updatedAt: new Date().toISOString()
+  };
+
+  board.set(userId, entry);
+  persistMochiLeaderboard();
+  return entry;
+}
+
+function getMochiLeaderboard(limit = 10) {
+  return [...loadMochiLeaderboard().values()]
+    .sort((a, b) => b.bestScore - a.bestScore || String(a.userTag).localeCompare(String(b.userTag)))
+    .slice(0, limit);
+}
+
+function getMochiPersonalBest(userId) {
+  return loadMochiLeaderboard().get(userId) || null;
 }
 
 function buildWebUserPayload(session = null) {
@@ -8567,7 +8719,12 @@ function getWebMimeType(filePath) {
 }
 
 function serveWebStatic(req, res, pathname) {
-  const requested = pathname === "/" ? "/index.html" : pathname;
+  let requested = pathname;
+  if (pathname === "/") {
+    requested = "/index.html";
+  } else if (pathname === MOCHI_PATH || pathname === `${MOCHI_PATH}/`) {
+    requested = getMochiIndexPath();
+  }
   const decodedPath = decodeURIComponent(requested);
   const filePath = path.normalize(path.join(webPublicDir, decodedPath));
 
@@ -8593,6 +8750,98 @@ async function handleWebApi(req, res, pathname) {
 
   if (req.method === "GET" && pathname === "/api/me") {
     return sendWebJson(res, 200, buildWebUserPayload(auth));
+  }
+
+  if (req.method === "GET" && pathname === "/api/mochi/config") {
+    return sendWebJson(res, 200, {
+      ok: true,
+      gameTitle: "Mochi Bird",
+      publicBaseUrl: buildMochiBaseUrl(),
+      mochiPath: MOCHI_PATH,
+      sessionTtlMinutes: Math.round(MOCHI_SESSION_TTL_MS / 60000)
+    });
+  }
+
+  if (req.method === "POST" && pathname === "/api/mochi/activity/session") {
+    const body = await readWebJsonBody(req);
+    const userId = String(body.userId || "").trim();
+    const userTag = String(body.userTag || "").trim();
+    const channelId = String(body.channelId || "").trim();
+    const guildId = String(body.guildId || "").trim();
+
+    if (!userId || !userTag || !channelId) {
+      return sendWebJson(res, 400, { ok: false, error: "Missing activity session fields." });
+    }
+
+    const session = createMochiSession({ userId, userTag, channelId, guildId });
+    return sendWebJson(res, 200, { ok: true, session: publicMochiSession(session) });
+  }
+
+  if (req.method === "GET" && pathname.startsWith("/api/mochi/session/")) {
+    const sessionId = pathname.split("/").filter(Boolean)[3];
+    const session = sessionId ? getMochiSession(sessionId) : null;
+    if (!session) {
+      return sendWebJson(res, 404, { ok: false, error: "Session not found or expired." });
+    }
+    return sendWebJson(res, 200, { ok: true, session: publicMochiSession(session) });
+  }
+
+  if (req.method === "GET" && pathname === "/api/mochi/leaderboard") {
+    return sendWebJson(res, 200, { ok: true, leaderboard: getMochiLeaderboard(10) });
+  }
+
+  if (req.method === "GET" && pathname.startsWith("/api/mochi/leaderboard/")) {
+    const userId = pathname.split("/").filter(Boolean)[3];
+    const entry = userId ? getMochiPersonalBest(userId) : null;
+    if (!entry) {
+      return sendWebJson(res, 404, { ok: false, error: "No score yet." });
+    }
+    return sendWebJson(res, 200, { ok: true, entry });
+  }
+
+  if (req.method === "POST" && pathname.startsWith("/api/mochi/session/") && pathname.endsWith("/score")) {
+    const sessionId = pathname.split("/").filter(Boolean)[3];
+    const session = sessionId ? getMochiSession(sessionId) : null;
+    if (!session) {
+      return sendWebJson(res, 404, { ok: false, error: "Session not found or expired." });
+    }
+    if (session.status === "completed") {
+      return sendWebJson(res, 409, { ok: false, error: "This score was already submitted.", session: publicMochiSession(session) });
+    }
+
+    const body = await readWebJsonBody(req);
+    const score = Number(body.score);
+    if (!Number.isFinite(score) || score < 0) {
+      return sendWebJson(res, 400, { ok: false, error: "Invalid score." });
+    }
+
+    const durationMs = Number(body.durationMs) || 0;
+    const reason = String(body.reason || "game_over");
+    const completedSession = completeMochiSession(sessionId, { score: Math.floor(score), durationMs, reason });
+    const personalBest = recordMochiScore({
+      userId: completedSession.userId,
+      userTag: completedSession.userTag,
+      score: Math.floor(score)
+    });
+    const leaderboard = getMochiLeaderboard(10);
+
+    if (completedSession.channelId) {
+      client.channels.fetch(completedSession.channelId).then(async channel => {
+        if (!channel || typeof channel.isTextBased !== "function" || !channel.isTextBased()) return;
+        const best = personalBest?.bestScore ?? Math.floor(score);
+        const rankText = leaderboard.length ? `Current top score: ${leaderboard[0].bestScore}.` : "No leaderboard entries yet.";
+        await channel.send({
+          content: `**${completedSession.userTag}** scored **${Math.floor(score)}** in Mochi Bird. Personal best: **${best}**. ${rankText}`
+        }).catch(() => {});
+      }).catch(() => {});
+    }
+
+    return sendWebJson(res, 200, {
+      ok: true,
+      session: publicMochiSession(completedSession),
+      personalBest,
+      leaderboard
+    });
   }
 
   if (!auth) {
@@ -11323,6 +11572,57 @@ client.on("interactionCreate", async interaction => {
       !(await ensureStaffAccess(interaction, "mod", `/${interaction.commandName}`))
     ) {
       return;
+    }
+
+    if (interaction.commandName === "mochi") {
+      const session = createMochiSession({
+        userId: interaction.user.id,
+        userTag: interaction.user.tag,
+        channelId: interaction.channelId,
+        guildId: interaction.guildId
+      });
+      const playUrl = buildMochiPlayUrl(session.id);
+
+      return interaction.reply({
+        embeds: [
+          makeEmbed({
+            title: "Mochi Bird",
+            description: "Your run is ready. Tap the button to open the game in your browser.",
+            color: COLORS.mint,
+            fields: [
+              { name: "Player", value: interaction.user.tag, inline: true },
+              { name: "Session", value: session.id.slice(0, 8), inline: true }
+            ]
+          })
+        ],
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setLabel("Play Mochi Bird")
+              .setStyle(ButtonStyle.Link)
+              .setURL(playUrl)
+          )
+        ],
+        ephemeral: true
+      });
+    }
+
+    if (interaction.commandName === "mochi-leaderboard") {
+      const leaderboard = getMochiLeaderboard(10);
+      const description = leaderboard.length
+        ? leaderboard.map((entry, index) => `${index + 1}. ${entry.userTag} - ${entry.bestScore}`).join("\n")
+        : "No scores yet. Be the first to flap.";
+
+      return interaction.reply({
+        embeds: [
+          makeEmbed({
+            title: "Mochi Bird Leaderboard",
+            description,
+            color: COLORS.yellow
+          })
+        ],
+        ephemeral: true
+      });
     }
 
     if (interaction.commandName === "help") {

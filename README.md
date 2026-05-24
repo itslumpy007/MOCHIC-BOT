@@ -2,6 +2,10 @@
 
 Discord bot for server utilities, role verification, and moderation commands.
 
+## Mochi Bird
+
+The bot also includes `/mochi`, which opens the Mochi Bird browser game from Discord and records scores back into the channel.
+
 ## Run locally
 
 1. Install dependencies:
@@ -58,6 +62,12 @@ The bot serves a web dashboard from the same Node process.
 - The web panel opens on a dedicated login screen before exposing moderation controls.
 - Staff can search members and run web moderation actions including warn, note, timeout, mute, unmute, clear warnings, kick, ban, and tempban. Risky actions ask for browser confirmation.
 - Records include case filters and a unified timeline. AutoMod includes duration and age-gate controls for escalation, raids, links, and attachments.
+
+## Mochi Bird route
+
+- The game defaults to `/mochi`.
+- If you want a different path, set `MOCHI_PATH=/your-path` in your Railway variables.
+- The matching URL becomes `https://your-domain/your-path`.
 - AutoMod also supports dry-run mode, quiet hours, channel rule overrides, link reputation checks, language-aware filtering, and a preview tool for testing sample messages before applying changes.
 - Channel profiles can be entered in the Ops tab with lines like `#general: standard` or `#promo: dryrun=on, preset=strict`.
 - Optional AI moderation can be enabled from the AutoMod tab's `AI Settings` after setting `OPENAI_API_KEY`. AI review starts as alert-only via the `ai-review` rule and appears in the AI Review tab and AutoMod cases.
