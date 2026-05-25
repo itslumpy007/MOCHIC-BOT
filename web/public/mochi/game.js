@@ -226,6 +226,16 @@ async function unlockAudio() {
   return audioUnlocked;
 }
 
+async function readResponseJson(response) {
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const text = await response.text();
+    throw new Error(text.trim() || `Unexpected response (${response.status})`);
+  }
+
+  return response.json();
+}
+
 function formatLeaderboardUpdatedAt(value) {
   if (!value) {
     return 'Updated when the panel opens.';
@@ -325,6 +335,11 @@ async function loadLeaderboard(force = false) {
     return leaderboardEntries;
   }
 
+  if (leaderboardLoaded && leaderboardEntries.length && !force) {
+    renderLeaderboard(leaderboardEntries);
+    return leaderboardEntries;
+  }
+
   leaderboardLoading = true;
   if (leaderboardSummaryEl) {
     leaderboardSummaryEl.textContent = 'Loading leaderboard...';
@@ -335,7 +350,7 @@ async function loadLeaderboard(force = false) {
 
   try {
     const response = await fetch('/api/mochi/leaderboard');
-    const payload = await response.json();
+    const payload = await readResponseJson(response);
     if (!response.ok) {
       throw new Error(payload.error || 'Failed to load leaderboard');
     }
@@ -344,12 +359,24 @@ async function loadLeaderboard(force = false) {
     leaderboardLoaded = true;
     renderLeaderboard(leaderboardEntries);
   } catch (error) {
-    leaderboardEntries = [];
-    if (leaderboardSummaryEl) {
-      leaderboardSummaryEl.textContent = `Could not load the leaderboard: ${error.message}`;
-    }
-    if (leaderboardListEl) {
-      leaderboardListEl.innerHTML = '<li class="leaderboard-empty">Try opening the leaderboard again in a moment.</li>';
+    try {
+      const configResponse = await fetch('/api/mochi/config');
+      const configPayload = await readResponseJson(configResponse);
+      if (configResponse.ok && Array.isArray(configPayload.leaderboard)) {
+        leaderboardEntries = configPayload.leaderboard;
+        leaderboardLoaded = true;
+        renderLeaderboard(leaderboardEntries);
+        return leaderboardEntries;
+      }
+      throw error;
+    } catch (fallbackError) {
+      leaderboardEntries = [];
+      if (leaderboardSummaryEl) {
+        leaderboardSummaryEl.textContent = `Could not load the leaderboard: ${fallbackError.message}`;
+      }
+      if (leaderboardListEl) {
+        leaderboardListEl.innerHTML = '<li class="leaderboard-empty">Try opening the leaderboard again in a moment.</li>';
+      }
     }
   } finally {
     leaderboardLoading = false;
@@ -1131,6 +1158,11 @@ async function loadSession() {
       activityMode = Boolean(configPayload.activityMode);
       discordClientId = configPayload.discordClientId;
       document.body.classList.toggle('activity-mode', activityMode);
+      if (Array.isArray(configPayload.leaderboard)) {
+        leaderboardEntries = configPayload.leaderboard;
+        leaderboardLoaded = true;
+        renderLeaderboard(leaderboardEntries);
+      }
     }
   } catch {
     // Config lookup is optional.

@@ -8777,7 +8777,8 @@ async function handleWebApi(req, res, pathname) {
       gameTitle: "Mochi Bird",
       publicBaseUrl: buildMochiBaseUrl(),
       mochiPath: MOCHI_PATH,
-      sessionTtlMinutes: Math.round(MOCHI_SESSION_TTL_MS / 60000)
+      sessionTtlMinutes: Math.round(MOCHI_SESSION_TTL_MS / 60000),
+      leaderboard: getMochiLeaderboard(10)
     });
   }
 
