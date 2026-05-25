@@ -1263,6 +1263,21 @@ button:disabled {
     padding: 14px;
   }
 
+  .overlay {
+    align-items: start;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 12px 0;
+  }
+
+  .overlay-card {
+    max-height: calc(100% - 24px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
   .main-menu-actions {
     grid-template-columns: 1fr;
   }
@@ -1398,6 +1413,21 @@ button:disabled {
     width: 100%;
   }
 
+  body.activity-mode .overlay {
+    align-items: start;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 10px 0;
+  }
+
+  body.activity-mode .overlay-card {
+    max-height: calc(100% - 20px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
   body.activity-mode .leaderboard-podium {
     grid-template-columns: 1fr;
   }
@@ -1455,6 +1485,21 @@ button:disabled {
   .menu-card {
     width: min(98%, 560px);
     padding: 12px;
+  }
+
+  .overlay {
+    align-items: start;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 10px 0;
+  }
+
+  .overlay-card {
+    max-height: calc(100% - 20px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
 
   .menu-tabs {
@@ -1535,6 +1580,21 @@ button:disabled {
   .leaderboard-summary,
   .leaderboard-footer {
     font-size: 0.84rem;
+  }
+
+  body.activity-mode .overlay {
+    align-items: start;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    padding: 8px 0;
+  }
+
+  body.activity-mode .overlay-card {
+    max-height: calc(100% - 16px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
   }
 
   .leaderboard-podium {
