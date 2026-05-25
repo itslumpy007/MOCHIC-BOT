@@ -39,6 +39,7 @@ const menuPanels = Array.from(document.querySelectorAll('[data-menu-panel]'));
 const ASSET_VERSION = 'mobile-activity10';
 const DISCORD_SDK_MODULE_URL = `./vendor/discord-sdk/index.mjs?v=${ASSET_VERSION}`;
 const SETTINGS_KEY = 'discord-mochi-bird-settings';
+const LEADERBOARD_CACHE_KEY = 'discord-mochi-bird-leaderboard-cache';
 
 const params = new URLSearchParams(window.location.search);
 function readMochiBootstrap() {
@@ -158,6 +159,35 @@ function formatDiscordUser(user) {
 function hydrateBestScore() {
   bestScore = Number(localStorage.getItem(bestScoreKey) || 0);
   bestScoreEl.textContent = String(bestScore);
+}
+
+function hydrateLeaderboardCache() {
+  try {
+    const cached = localStorage.getItem(LEADERBOARD_CACHE_KEY);
+    if (!cached) {
+      return;
+    }
+
+    const parsed = JSON.parse(cached);
+    if (!Array.isArray(parsed) || !parsed.length) {
+      return;
+    }
+
+    leaderboardEntries = parsed;
+    leaderboardLoaded = true;
+    leaderboardLastRefreshAt = Number(localStorage.getItem(`${LEADERBOARD_CACHE_KEY}:ts`) || 0) || leaderboardLastRefreshAt;
+  } catch {
+    // Ignore malformed cache.
+  }
+}
+
+function persistLeaderboardCache(entries = leaderboardEntries) {
+  try {
+    localStorage.setItem(LEADERBOARD_CACHE_KEY, JSON.stringify(Array.isArray(entries) ? entries : []));
+    localStorage.setItem(`${LEADERBOARD_CACHE_KEY}:ts`, String(leaderboardLastRefreshAt || Date.now()));
+  } catch {
+    // Cache writes are best-effort.
+  }
 }
 
 function resizeCanvas() {
@@ -421,6 +451,7 @@ function updateLeaderboardUpdatedLabel() {
 
 function markLeaderboardRefreshed() {
   leaderboardLastRefreshAt = Date.now();
+  persistLeaderboardCache();
   updateLeaderboardUpdatedLabel();
 }
 
@@ -648,52 +679,38 @@ async function loadLeaderboard(force = false) {
 
   leaderboardLoading = true;
   if (leaderboardSummaryEl) {
-    leaderboardSummaryEl.textContent = 'Loading leaderboard...';
+    leaderboardSummaryEl.textContent = leaderboardEntries.length
+      ? 'Refreshing leaderboard...'
+      : 'Loading leaderboard...';
   }
   if (leaderboardListEl) {
-    leaderboardListEl.innerHTML = '<li class="leaderboard-empty">Fetching the top scores...</li>';
+    leaderboardListEl.innerHTML = leaderboardEntries.length
+      ? leaderboardListEl.innerHTML
+      : '<li class="leaderboard-empty">Fetching the top scores...</li>';
   }
 
   try {
-    const configResponse = await fetch('/api/mochi/config', { cache: 'no-store' });
-    const configPayload = await readResponsePayload(configResponse);
-    if (configResponse.ok && configPayload && Array.isArray(configPayload.leaderboard)) {
-      leaderboardEntries = configPayload.leaderboard;
-      leaderboardLoaded = true;
-      renderLeaderboard(leaderboardEntries);
-      markLeaderboardRefreshed();
-      return leaderboardEntries;
-    }
-
-    const response = await fetch('/api/mochi/leaderboard', { cache: 'no-store' });
+    const response = await fetch(`/api/mochi/leaderboard?ts=${Date.now()}`, { cache: 'no-store' });
     const payload = await readResponsePayload(response);
     if (response.ok && payload && Array.isArray(payload.leaderboard)) {
-      leaderboardEntries = Array.isArray(payload.leaderboard) ? payload.leaderboard : [];
+      leaderboardEntries = payload.leaderboard;
       leaderboardLoaded = true;
       renderLeaderboard(leaderboardEntries);
-      markLeaderboardRefreshed();
+      persistLeaderboardCache();
       return leaderboardEntries;
     }
-
-    if (leaderboardEntries.length) {
+    if (!leaderboardEntries.length) {
+      leaderboardEntries = [];
       leaderboardLoaded = true;
       renderLeaderboard(leaderboardEntries);
-      return leaderboardEntries;
     }
-
-    leaderboardEntries = [];
-    leaderboardLoaded = true;
-    renderLeaderboard(leaderboardEntries);
-    markLeaderboardRefreshed();
   } catch {
     leaderboardLoaded = true;
-    if (leaderboardEntries.length) {
-      renderLeaderboard(leaderboardEntries);
-      markLeaderboardRefreshed();
-    } else {
+    if (!leaderboardEntries.length) {
       leaderboardEntries = [];
       renderLeaderboard(leaderboardEntries);
-      markLeaderboardRefreshed();
+    } else {
+      renderLeaderboard(leaderboardEntries);
     }
   } finally {
     leaderboardLoading = false;
@@ -1977,6 +1994,7 @@ document.querySelectorAll('[data-setting-toggle]').forEach((button) => {
 
 resizeCanvas();
 loadSettings();
+hydrateLeaderboardCache();
 updateViewportMode();
 showReadyMenuForCurrentState();
 void loadLeaderboard();
