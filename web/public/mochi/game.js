@@ -76,6 +76,7 @@ const BIRD_RENDER_SCALE = 3.05;
 const BIRD_MENU_SCALE = 200;
 const BIRD_HITBOX_SCALE = 1.55;
 let menuTransitionTimer = null;
+let activityAutoStartTimer = null;
 let settings = {
   audioEnabled: true,
   reducedMotion: false,
@@ -586,6 +587,31 @@ function showReadyMenuForCurrentState() {
     startButtonLabel: session ? 'Start Run' : 'Start Practice',
     startDisabled: false
   });
+
+  if (activityMode && !started && !gameOver) {
+    scheduleActivityAutoStart();
+  }
+}
+
+function cancelActivityAutoStart() {
+  if (activityAutoStartTimer) {
+    clearTimeout(activityAutoStartTimer);
+    activityAutoStartTimer = null;
+  }
+}
+
+function scheduleActivityAutoStart(delayMs = 900) {
+  if (!activityMode || started || gameOver) {
+    return;
+  }
+
+  cancelActivityAutoStart();
+  activityAutoStartTimer = window.setTimeout(() => {
+    activityAutoStartTimer = null;
+    if (activityMode && !started && !gameOver) {
+      startRunNow();
+    }
+  }, delayMs);
 }
 
 function startRunNow(event) {
@@ -598,6 +624,7 @@ function startRunNow(event) {
     return;
   }
 
+  cancelActivityAutoStart();
   void unlockAudio();
   updateStatus('Starting run...');
   void autoSaveScore('reset');
@@ -2068,6 +2095,7 @@ window.setTimeout(() => {
 if (activityMode) {
   introSplashEl?.classList.add('hidden');
 }
+scheduleActivityAutoStart(1200);
 loadSession().catch((error) => {
   updateStatus(`Startup error: ${error.message}`);
 });
