@@ -1186,48 +1186,176 @@ button:disabled {
   }
 }
 
-@media (min-width: 901px) {
+@media (max-width: 480px) {
   .app-shell {
-    width: min(1140px, calc(100vw - 48px));
-    gap: 28px;
+    width: min(100vw - 12px, 1120px);
+    padding-top: 82px;
+  }
+
+  .global-brand {
+    top: 8px;
+    width: calc(100vw - 10px);
+    padding: 9px 10px;
+    gap: 8px;
+  }
+
+  .global-brand-pill {
+    padding: 8px 12px;
+    font-size: 0.92rem;
+  }
+
+  .global-brand-copy {
+    font-size: 0.78rem;
   }
 
   .game-card {
-    padding: 22px;
+    padding: 10px;
+    border-radius: 20px;
+  }
+
+  .hud {
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .stat strong {
+    font-size: 1.28rem;
+  }
+
+  .stage {
+    width: 100%;
+  }
+
+  .overlay-card {
+    width: min(94%, 300px);
+    padding: 18px;
+  }
+
+  .menu-card {
+    width: min(98%, 560px);
+    padding: 12px;
+  }
+
+  .menu-tabs {
+    gap: 6px;
+  }
+
+  .menu-tab {
+    padding: 8px 10px;
+    font-size: 0.92rem;
+  }
+
+  .main-menu-stage {
+    gap: 10px;
+    padding: 8px 0 0;
+  }
+
+  .main-menu-wordmark {
+    min-height: 56px;
+    padding: 10px 12px;
+    font-size: clamp(1.55rem, 11vw, 2.15rem);
+  }
+
+  .main-menu-avatar {
+    width: 108px;
+    height: 108px;
+    padding: 10px;
+  }
+
+  .main-menu-actions {
+    gap: 8px;
+  }
+
+  .main-menu-actions button {
+    min-height: 54px;
+    font-size: 0.98rem;
+    letter-spacing: 0.06em;
+  }
+
+  .menu-note {
+    font-size: 0.84rem;
+  }
+
+  .leaderboard-summary,
+  .leaderboard-footer {
+    font-size: 0.84rem;
+  }
+
+  .leaderboard-podium {
+    gap: 6px;
+  }
+
+  .leaderboard-entry {
+    gap: 8px;
+    padding: 10px;
+    grid-template-columns: 54px minmax(0, 1fr) auto;
+  }
+
+  .leaderboard-rank {
+    min-width: 46px;
+    padding-inline: 7px;
+    font-size: 0.82rem;
+  }
+
+  .leaderboard-name strong {
+    font-size: 0.88rem;
+  }
+
+  .leaderboard-name em {
+    font-size: 0.78rem;
+  }
+
+  .leaderboard-score {
+    font-size: 0.98rem;
+  }
+}
+
+@media (min-width: 901px) {
+  .app-shell {
+    width: min(1240px, calc(100vw - 56px));
+    gap: 32px;
+  }
+
+  .game-card {
+    padding: 26px;
     border-radius: 30px;
   }
 
   .stage {
-    width: min(100%, 540px);
+    width: min(100%, 580px);
   }
 
   .menu-card {
-    width: min(94%, 620px);
-    padding: 22px;
+    width: min(94%, 680px);
+    padding: 24px;
   }
 
   .main-menu-stage {
-    gap: 16px;
-    padding: 16px 8px 6px;
+    gap: 18px;
+    padding: 18px 10px 8px;
   }
 
   .main-menu-wordmark {
-    width: min(100%, 420px);
-    min-height: 86px;
-    font-size: clamp(2.2rem, 4.4vw, 3.4rem);
+    width: min(100%, 480px);
+    min-height: 94px;
+    font-size: clamp(2.4rem, 3.8vw, 3.75rem);
   }
 
   .main-menu-avatar {
-    width: 168px;
-    height: 168px;
+    width: 184px;
+    height: 184px;
+  }
+
+  .main-menu-actions {
+    grid-template-columns: 1.2fr 1fr 1fr;
   }
 
   .main-menu-actions button {
-    min-height: 68px;
-    font-size: 1.1rem;
+    min-height: 74px;
+    font-size: 1.16rem;
   }
 
   .leaderboard-entry {
-    grid-template-columns: 76px minmax(0, 1fr) auto;
+    grid-template-columns: 84px minmax(0, 1fr) auto;
   }
 }
