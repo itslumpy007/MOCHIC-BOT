@@ -1,5 +1,6 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
+const stage = document.querySelector('.stage');
 const scoreEl = document.getElementById('score');
 const bestScoreEl = document.getElementById('bestScore');
 const statusEl = document.getElementById('status');
@@ -1617,8 +1618,8 @@ window.addEventListener('keydown', (event) => {
 
 canvas.addEventListener('pointerdown', handleGameInput);
 canvas.addEventListener('touchstart', handleGameInput, { passive: false });
-stage.addEventListener('pointerdown', handleGameInput);
-stage.addEventListener('touchstart', handleGameInput, { passive: false });
+stage?.addEventListener('pointerdown', handleGameInput);
+stage?.addEventListener('touchstart', handleGameInput, { passive: false });
 
 mainPlayButton.addEventListener('click', () => {
   void unlockAudio();
