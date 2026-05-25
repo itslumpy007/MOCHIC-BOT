@@ -617,14 +617,18 @@ async function bootstrapActivitySession() {
         updateStatus(`Ready for ${session.userTag}`);
       }
 
-      showReadyMenuForCurrentState();
+      if (!started && gameState === 'menu' && !gameOver) {
+        showReadyMenuForCurrentState();
+      }
       void loadLeaderboard(true);
       startLeaderboardAutoRefresh();
       return session;
     } catch (error) {
       updateStatus(`Discord Activity handshake failed: ${error.message}`);
       sessionNoteEl.textContent = 'Discord Activity is still connecting.';
-      showReadyMenuForCurrentState();
+      if (!started && gameState === 'menu' && !gameOver) {
+        showReadyMenuForCurrentState();
+      }
       return null;
     }
   })();
@@ -910,7 +914,7 @@ function showMenu(view = 'main', options = {}) {
 
 async function launchRun() {
   if (activityMode && !sessionId) {
-    await resolveActivitySession(3500);
+    void resolveActivitySession(3500);
   }
   await autoSaveScore('reset');
   started = false;
@@ -1833,7 +1837,9 @@ async function loadSession() {
     }
     void loadLeaderboard(true);
     startLeaderboardAutoRefresh();
-    showMenu('main');
+    if (!started && gameState === 'menu' && !gameOver) {
+      showMenu('main');
+    }
   } catch (error) {
     updateStatus(`Session error: ${error.message}`);
     showMenu('start', {
@@ -1896,7 +1902,7 @@ mobileTapLayerEl?.addEventListener('click', handleMobileTapLayerInput);
 
 mainPlayButton.addEventListener('click', () => {
   void unlockAudio();
-  showMenu('start');
+  void launchRun();
 });
 mainLeaderboardButton.addEventListener('click', () => {
   void unlockAudio();
