@@ -13,6 +13,7 @@ const mainSettingsButton = document.getElementById('mainSettingsButton');
 const startRunButton = document.getElementById('startRunButton');
 const startBackButton = document.getElementById('startBackButton');
 const settingsBackButton = document.getElementById('settingsBackButton');
+const audioStateEl = document.getElementById('audioState');
 const reducedMotionStateEl = document.getElementById('reducedMotionState');
 const hardModeStateEl = document.getElementById('hardModeState');
 const startMenuTextEl = document.getElementById('startMenuText');
@@ -32,6 +33,7 @@ let discordClientId = null;
 let discordSdk = null;
 let menuView = 'main';
 let settings = {
+  audioEnabled: true,
   reducedMotion: false,
   hardMode: false
 };
@@ -73,6 +75,11 @@ const GRAVITY = 1100;
 const FLAP_VELOCITY = -340;
 const PIPE_WIDTH = 72;
 const GROUND_HEIGHT = 90;
+
+let audioContext = null;
+let audioMasterGain = null;
+let musicTimer = null;
+let audioUnlocked = false;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -132,6 +139,7 @@ function loadSettings() {
       return;
     }
     const parsed = JSON.parse(stored);
+    settings.audioEnabled = parsed.audioEnabled !== false;
     settings.reducedMotion = Boolean(parsed.reducedMotion);
     settings.hardMode = Boolean(parsed.hardMode);
   } catch {
@@ -157,13 +165,150 @@ function refreshGameplaySettings() {
   }
 }
 
+function ensureAudioContext() {
+  if (!audioContext) {
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) {
+      return null;
+    }
+    audioContext = new AudioContextCtor();
+    audioMasterGain = audioContext.createGain();
+    audioMasterGain.gain.value = 0.08;
+    audioMasterGain.connect(audioContext.destination);
+  }
+  return audioContext;
+}
+
+async function unlockAudio() {
+  if (!settings.audioEnabled) {
+    return false;
+  }
+
+  const ctx = ensureAudioContext();
+  if (!ctx) {
+    return false;
+  }
+
+  if (ctx.state === 'suspended') {
+    try {
+      await ctx.resume();
+    } catch {
+      // Ignore resume errors; the page can still run silently.
+    }
+  }
+
+  audioUnlocked = ctx.state === 'running';
+  if (audioUnlocked) {
+    startMusicLoop();
+  }
+
+  return audioUnlocked;
+}
+
+function stopMusicLoop() {
+  if (musicTimer) {
+    clearInterval(musicTimer);
+    musicTimer = null;
+  }
+}
+
+function stopAudio() {
+  stopMusicLoop();
+}
+
+function playTone({ frequency, duration = 0.18, type = 'triangle', gain = 0.06, start = 0 }) {
+  const ctx = ensureAudioContext();
+  if (!ctx || !audioMasterGain || !settings.audioEnabled || !audioUnlocked) {
+    return;
+  }
+
+  const osc = ctx.createOscillator();
+  const envelope = ctx.createGain();
+  const now = ctx.currentTime + start;
+
+  osc.type = type;
+  osc.frequency.setValueAtTime(frequency, now);
+  envelope.gain.setValueAtTime(0.0001, now);
+  envelope.gain.linearRampToValueAtTime(gain, now + 0.02);
+  envelope.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+  osc.connect(envelope);
+  envelope.connect(audioMasterGain);
+  osc.start(now);
+  osc.stop(now + duration + 0.05);
+}
+
+function playPickupChime() {
+  playTone({ frequency: 988, duration: 0.11, type: 'sine', gain: 0.05 });
+  playTone({ frequency: 1318.5, duration: 0.14, type: 'triangle', gain: 0.04, start: 0.05 });
+}
+
+function playFlapSound() {
+  playTone({ frequency: 392, duration: 0.08, type: 'square', gain: 0.02 });
+}
+
+function startMusicLoop() {
+  if (musicTimer || !settings.audioEnabled || !audioUnlocked) {
+    return;
+  }
+
+  const progression = [
+    [440, 554.37, 659.25],
+    [392, 493.88, 587.33],
+    [349.23, 440, 523.25],
+    [392, 523.25, 659.25]
+  ];
+  const bassLine = [220, 196, 174.61, 196];
+  let step = 0;
+
+  const tick = () => {
+    if (!settings.audioEnabled || !audioUnlocked) {
+      stopMusicLoop();
+      return;
+    }
+
+    const chord = progression[step % progression.length];
+    const bass = bassLine[step % bassLine.length];
+
+    chord.forEach((freq, index) => {
+      playTone({
+        frequency: freq,
+        duration: 0.28,
+        type: index === 0 ? 'triangle' : 'sine',
+        gain: index === 0 ? 0.035 : 0.02,
+        start: index * 0.02
+      });
+    });
+
+    playTone({
+      frequency: bass,
+      duration: 0.36,
+      type: 'sine',
+      gain: 0.03
+    });
+
+    step += 1;
+  };
+
+  tick();
+  musicTimer = window.setInterval(tick, 560);
+}
+
 function applySettings() {
+  if (!settings.audioEnabled) {
+    audioUnlocked = false;
+    stopAudio();
+  }
   document.body.classList.toggle('reduced-motion', settings.reducedMotion);
   document.body.classList.toggle('hard-mode', settings.hardMode);
   refreshGameplaySettings();
+  audioStateEl.textContent = settings.audioEnabled ? 'On' : 'Off';
   reducedMotionStateEl.textContent = settings.reducedMotion ? 'On' : 'Off';
   hardModeStateEl.textContent = settings.hardMode ? 'On' : 'Off';
   modeLabelEl.textContent = settings.hardMode ? 'Hard' : 'Normal';
+  if (settings.audioEnabled && audioUnlocked) {
+    startMusicLoop();
+  }
   saveSettings();
 }
 
@@ -346,6 +491,7 @@ function flap() {
     return;
   }
 
+  playFlapSound();
   bird.velocity = FLAP_VELOCITY;
 }
 
@@ -505,6 +651,7 @@ function update(deltaSeconds) {
     if (rectsOverlap(birdBounds, pickup)) {
       item.collected = true;
       collectScore(1);
+      playPickupChime();
       updateStatus('Collected a Dr Pepper can!');
     }
   }
@@ -907,20 +1054,30 @@ window.addEventListener('resize', () => {
 window.addEventListener('keydown', (event) => {
   if (event.code === 'Space' || event.code === 'ArrowUp') {
     event.preventDefault();
+    void unlockAudio();
     flap();
   }
   if (event.code === 'KeyR' && gameOver) {
+    void unlockAudio();
     launchRun();
   }
 });
 
 canvas.addEventListener('pointerdown', () => {
+  void unlockAudio();
   flap();
 });
 
-mainPlayButton.addEventListener('click', () => showMenu('start'));
-mainSettingsButton.addEventListener('click', () => showMenu('settings'));
+mainPlayButton.addEventListener('click', () => {
+  void unlockAudio();
+  showMenu('start');
+});
+mainSettingsButton.addEventListener('click', () => {
+  void unlockAudio();
+  showMenu('settings');
+});
 startRunButton.addEventListener('click', () => {
+  void unlockAudio();
   if (startRunMode === 'reload') {
     window.location.reload();
     return;
@@ -931,17 +1088,25 @@ startRunButton.addEventListener('click', () => {
   }
   launchRun();
 });
-startBackButton.addEventListener('click', () => showMenu('main'));
-settingsBackButton.addEventListener('click', () => showMenu('main'));
+startBackButton.addEventListener('click', () => {
+  void unlockAudio();
+  showMenu('main');
+});
+settingsBackButton.addEventListener('click', () => {
+  void unlockAudio();
+  showMenu('main');
+});
 
 menuTabs.forEach((tab) => {
   tab.addEventListener('click', () => {
+    void unlockAudio();
     showMenu(tab.dataset.menuTab || 'main');
   });
 });
 
 document.querySelectorAll('[data-setting-toggle]').forEach((button) => {
   button.addEventListener('click', () => {
+    void unlockAudio();
     const key = button.dataset.settingToggle;
     if (!key || !(key in settings)) {
       return;
@@ -952,6 +1117,7 @@ document.querySelectorAll('[data-setting-toggle]').forEach((button) => {
 });
 
 resizeCanvas();
+loadSettings();
 showMenu('main', {
   title: 'Launching Activity',
   text: 'Connecting to Discord and preparing your run.',
