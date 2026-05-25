@@ -191,6 +191,7 @@ function showMenu(view = 'main', options = {}) {
     startText = 'Ready to start a new run. Use the button below when you want to launch.',
     startButtonLabel = 'Start Run',
     startAction = 'start',
+    startDisabled = false,
     preserveScore = false
   } = options;
 
@@ -211,6 +212,7 @@ function showMenu(view = 'main', options = {}) {
   updateMenuHeader(title, text);
   startMenuTextEl.textContent = startText;
   startRunButton.textContent = startButtonLabel;
+  startRunButton.disabled = startDisabled;
   startRunMode = startAction;
   setMenuView(view);
   updateStatus(
@@ -337,6 +339,9 @@ function flap() {
   }
 
   if (!started) {
+    if (startRunButton?.disabled) {
+      return;
+    }
     launchRun();
     return;
   }
@@ -947,8 +952,17 @@ document.querySelectorAll('[data-setting-toggle]').forEach((button) => {
 });
 
 resizeCanvas();
+showMenu('main', {
+  title: 'Launching Activity',
+  text: 'Connecting to Discord and preparing your run.',
+  startText: 'If this takes a moment, the Activity is still loading in the background.',
+  startButtonLabel: 'Please wait',
+  startDisabled: true
+});
 window.setTimeout(() => {
   introSplashEl?.classList.add('hidden');
 }, 1700);
-await loadSession();
+loadSession().catch((error) => {
+  updateStatus(`Startup error: ${error.message}`);
+});
 animationFrame = requestAnimationFrame(loop);
