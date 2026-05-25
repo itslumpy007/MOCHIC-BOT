@@ -1,6 +1,5 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
-const stage = document.querySelector('.stage');
 const scoreEl = document.getElementById('score');
 const bestScoreEl = document.getElementById('bestScore');
 const statusEl = document.getElementById('status');
@@ -36,7 +35,7 @@ const runSummaryTextEl = document.getElementById('runSummaryText');
 const modeLabelEl = document.getElementById('modeLabel');
 const menuTabs = Array.from(document.querySelectorAll('[data-menu-tab]'));
 const menuPanels = Array.from(document.querySelectorAll('[data-menu-panel]'));
-const ASSET_VERSION = 'transparent3';
+const ASSET_VERSION = 'mobile-activity2';
 const SETTINGS_KEY = 'discord-mochi-bird-settings';
 
 const params = new URLSearchParams(window.location.search);
@@ -54,6 +53,7 @@ function readMochiBootstrap() {
 }
 
 const mochiBootstrap = readMochiBootstrap();
+const mobileViewportQuery = window.matchMedia('(max-width: 720px)');
 let sessionId = params.get('sid');
 let isPracticeMode = !sessionId;
 
@@ -473,41 +473,33 @@ async function loadLeaderboard(force = false) {
   }
 
   try {
-    try {
-      const configResponse = await fetch('/api/mochi/config');
-      const configPayload = await readResponseJson(configResponse);
-      if (configResponse.ok && Array.isArray(configPayload.leaderboard)) {
-        leaderboardEntries = configPayload.leaderboard;
-        leaderboardLoaded = true;
-        renderLeaderboard(leaderboardEntries);
-        return leaderboardEntries;
-      }
-      throw new Error('Leaderboard data is unavailable.');
-    } catch (fallbackError) {
-      try {
-        const response = await fetch('/api/mochi/leaderboard');
-        const payload = await readResponseJson(response);
-        if (!response.ok) {
-          throw new Error(payload.error || 'Failed to load leaderboard');
-        }
-
-        leaderboardEntries = Array.isArray(payload.leaderboard) ? payload.leaderboard : [];
-        leaderboardLoaded = true;
-        renderLeaderboard(leaderboardEntries);
-      } catch (leaderboardError) {
-        if (leaderboardLoaded) {
-          renderLeaderboard(leaderboardEntries);
-          return leaderboardEntries;
-        }
-        leaderboardEntries = [];
-        if (leaderboardSummaryEl) {
-          leaderboardSummaryEl.textContent = `Could not load the leaderboard: ${leaderboardError.message || fallbackError.message}`;
-        }
-        if (leaderboardListEl) {
-          leaderboardListEl.innerHTML = '<li class="leaderboard-empty">Try opening the leaderboard again in a moment.</li>';
-        }
-      }
+    const configResponse = await fetch('/api/mochi/config');
+    const configPayload = await readResponseJson(configResponse);
+    if (configResponse.ok && Array.isArray(configPayload.leaderboard)) {
+      leaderboardEntries = configPayload.leaderboard;
+      leaderboardLoaded = true;
+      renderLeaderboard(leaderboardEntries);
+      return leaderboardEntries;
     }
+
+    const response = await fetch('/api/mochi/leaderboard');
+    const payload = await readResponseJson(response);
+    if (response.ok) {
+      leaderboardEntries = Array.isArray(payload.leaderboard) ? payload.leaderboard : [];
+      leaderboardLoaded = true;
+      renderLeaderboard(leaderboardEntries);
+      return leaderboardEntries;
+    }
+
+    if (leaderboardEntries.length) {
+      leaderboardLoaded = true;
+      renderLeaderboard(leaderboardEntries);
+      return leaderboardEntries;
+    }
+
+    leaderboardEntries = [];
+    leaderboardLoaded = true;
+    renderLeaderboard(leaderboardEntries);
   } finally {
     leaderboardLoading = false;
   }
@@ -1327,6 +1319,12 @@ function handleGameplayInput(event) {
   handleGameInput(event);
 }
 
+function updateViewportMode() {
+  const isMobileViewport = mobileViewportQuery.matches || window.innerWidth <= 720;
+  document.body.classList.toggle('mobile-activity', isMobileViewport);
+  document.body.classList.toggle('desktop-activity', !isMobileViewport);
+}
+
 function drawPauseOverlay() {
   if (!paused || gameOver) {
     return;
@@ -1507,11 +1505,7 @@ function loop(timestamp) {
 async function loadSession() {
   loadSettings();
   applySettings();
-  document.body.classList.toggle('activity-mode', activityMode);
-  if (leaderboardLoaded) {
-    renderLeaderboard(leaderboardEntries);
-  }
-
+  updateViewportMode();
   document.body.classList.toggle('activity-mode', activityMode);
   if (leaderboardLoaded) {
     renderLeaderboard(leaderboardEntries);
@@ -1557,12 +1551,10 @@ async function loadSession() {
             localStorage.setItem(bestScoreKey, String(bestScore));
           }
         }
-        if (leaderboardLoaded) {
-          renderLeaderboard();
-        }
         sessionNoteEl.textContent = `Activity session created for ${session.userTag}.`;
         updateStatus(`Ready for ${session.userTag}`);
       }
+      void loadLeaderboard(true);
     } catch (error) {
       updateStatus(`Discord Activity handshake failed: ${error.message}`);
     }
@@ -1588,9 +1580,6 @@ async function loadSession() {
     bestScoreKey = `discord-mochi-bird-best-${session.userId}`;
     sessionNoteEl.textContent = `Session linked to ${session.userTag}.`;
     updateStatus(`Ready for ${session.userTag}`);
-    if (leaderboardLoaded) {
-      renderLeaderboard();
-    }
     try {
       const bestResponse = await fetch(`/api/mochi/leaderboard/${session.userId}`);
       if (bestResponse.ok) {
@@ -1603,6 +1592,7 @@ async function loadSession() {
     } catch {
       // Best score lookup is optional.
     }
+    void loadLeaderboard(true);
     showMenu('main');
   } catch (error) {
     updateStatus(`Session error: ${error.message}`);
@@ -1618,6 +1608,7 @@ async function loadSession() {
 
 window.addEventListener('resize', () => {
   resizeCanvas();
+  updateViewportMode();
   if (gameState === 'menu') {
     showMenu(menuView);
   }
@@ -1646,11 +1637,6 @@ window.addEventListener('keydown', (event) => {
 
 canvas.addEventListener('pointerdown', handleGameInput);
 canvas.addEventListener('touchstart', handleGameInput, { passive: false });
-stage?.addEventListener('pointerdown', handleGameInput);
-stage?.addEventListener('touchstart', handleGameInput, { passive: false });
-window.addEventListener('pointerdown', handleGameplayInput, { capture: true });
-window.addEventListener('touchstart', handleGameplayInput, { passive: false, capture: true });
-window.addEventListener('touchend', handleGameplayInput, { passive: false, capture: true });
 
 mainPlayButton.addEventListener('click', () => {
   void unlockAudio();
@@ -1718,6 +1704,7 @@ document.querySelectorAll('[data-setting-toggle]').forEach((button) => {
 
 resizeCanvas();
 loadSettings();
+updateViewportMode();
 showMenu('main', {
   title: 'Launching Activity',
   text: 'Connecting to Discord and preparing your run.',
