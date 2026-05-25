@@ -36,7 +36,8 @@ const runSummaryTextEl = document.getElementById('runSummaryText');
 const modeLabelEl = document.getElementById('modeLabel');
 const menuTabs = Array.from(document.querySelectorAll('[data-menu-tab]'));
 const menuPanels = Array.from(document.querySelectorAll('[data-menu-panel]'));
-const ASSET_VERSION = 'mobile-activity5';
+const ASSET_VERSION = 'mobile-activity6';
+const DISCORD_SDK_MODULE_URL = `./vendor/discord-sdk/index.mjs?v=${ASSET_VERSION}`;
 const SETTINGS_KEY = 'discord-mochi-bird-settings';
 
 const params = new URLSearchParams(window.location.search);
@@ -81,6 +82,7 @@ let settings = {
 let startRunMode = 'start';
 
 let session = null;
+let activityBootstrapPromise = null;
 const logoSprite = new Image();
 logoSprite.src = `./assets/mochi-logo.svg?v=${ASSET_VERSION}`;
 const birdSprite = new Image();
@@ -538,6 +540,77 @@ function stopLeaderboardAutoRefresh() {
     clearInterval(leaderboardRefreshLabelTimer);
     leaderboardRefreshLabelTimer = null;
   }
+}
+
+function showReadyMenuForCurrentState() {
+  showMenu('main', {
+    title: session ? `Ready for ${session.userTag}` : 'Main Menu',
+    text: activityMode
+      ? `Running inside Discord as an Activity${session ? ` for ${session.userTag}.` : ' while we finish connecting.'}`
+      : 'Practice mode: this run is local only.',
+    startText: session
+      ? 'You are connected and ready to play.'
+      : 'Connecting to Discord in the background. Keep this tab open for a moment.',
+    startButtonLabel: session ? 'Start Run' : 'Please wait',
+    startDisabled: !session
+  });
+}
+
+async function bootstrapActivitySession() {
+  if (activityBootstrapPromise) {
+    return activityBootstrapPromise;
+  }
+
+  activityBootstrapPromise = (async () => {
+    if (!activityMode || !discordClientId) {
+      return null;
+    }
+
+    try {
+      const sdkModule = await import(DISCORD_SDK_MODULE_URL);
+      discordSdk = new sdkModule.DiscordSDK(discordClientId);
+      await discordSdk.ready();
+
+      sessionNoteEl.textContent = 'Running inside Discord as an Activity.';
+      updateStatus('Discord Activity ready');
+
+      if (!sessionId) {
+        const activitySession = await createActivitySession();
+        sessionId = activitySession.id;
+        isPracticeMode = false;
+        session = activitySession;
+        bestScoreKey = `discord-mochi-bird-best-${session.userId}`;
+
+        try {
+          const bestResponse = await fetch(`/api/mochi/leaderboard/${session.userId}`, { cache: 'no-store' });
+          if (bestResponse.ok) {
+            const bestPayload = await bestResponse.json();
+            if (bestPayload?.entry?.bestScore !== undefined) {
+              bestScore = Number(bestPayload.entry.bestScore) || 0;
+              localStorage.setItem(bestScoreKey, String(bestScore));
+            }
+          }
+        } catch {
+          // Best score lookup is optional.
+        }
+
+        sessionNoteEl.textContent = `Activity session created for ${session.userTag}.`;
+        updateStatus(`Ready for ${session.userTag}`);
+      }
+
+      showReadyMenuForCurrentState();
+      void loadLeaderboard(true);
+      startLeaderboardAutoRefresh();
+      return session;
+    } catch (error) {
+      updateStatus(`Discord Activity handshake failed: ${error.message}`);
+      sessionNoteEl.textContent = 'Discord Activity is still connecting.';
+      showReadyMenuForCurrentState();
+      return null;
+    }
+  })();
+
+  return activityBootstrapPromise;
 }
 
 async function loadLeaderboard(force = false) {
@@ -1670,66 +1743,51 @@ async function loadSession() {
   }
 
   if (!mochiBootstrap || Object.keys(mochiBootstrap).length === 0) {
-    try {
-      const configResponse = await fetch('/api/mochi/config');
-      const configPayload = await configResponse.json();
-      if (configResponse.ok) {
-        activityMode = Boolean(configPayload.activityMode);
-        discordClientId = configPayload.discordClientId;
-        document.body.classList.toggle('activity-mode', activityMode);
-        if (Array.isArray(configPayload.leaderboard)) {
-          leaderboardEntries = configPayload.leaderboard;
-          leaderboardLoaded = true;
-          renderLeaderboard(leaderboardEntries);
+    void (async () => {
+      try {
+        const configResponse = await fetch('/api/mochi/config', { cache: 'no-store' });
+        const configPayload = await configResponse.json();
+        if (configResponse.ok) {
+          activityMode = Boolean(configPayload.activityMode);
+          discordClientId = configPayload.discordClientId;
+          document.body.classList.toggle('activity-mode', activityMode);
+          if (Array.isArray(configPayload.leaderboard)) {
+            leaderboardEntries = configPayload.leaderboard;
+            leaderboardLoaded = true;
+            renderLeaderboard(leaderboardEntries);
+          }
+          if (activityMode && discordClientId) {
+            void bootstrapActivitySession();
+          }
         }
+      } catch {
+        // Config lookup is optional.
       }
-    } catch {
-      // Config lookup is optional.
-    }
+    })();
   }
 
   if (activityMode && discordClientId) {
-    try {
-      const sdkModule = await import('https://cdn.jsdelivr.net/npm/@discord/embedded-app-sdk/+esm');
-      discordSdk = new sdkModule.DiscordSDK(discordClientId);
-      await discordSdk.ready();
-      updateStatus('Discord Activity ready');
-      sessionNoteEl.textContent = 'Running inside Discord as an Activity.';
-      if (!sessionId) {
-        const activitySession = await createActivitySession();
-        sessionId = activitySession.id;
-        isPracticeMode = false;
-        session = activitySession;
-        bestScoreKey = `discord-mochi-bird-best-${session.userId}`;
-        const bestResponse = await fetch(`/api/mochi/leaderboard/${session.userId}`);
-        if (bestResponse.ok) {
-          const bestPayload = await bestResponse.json();
-          if (bestPayload?.entry?.bestScore !== undefined) {
-            bestScore = Number(bestPayload.entry.bestScore) || 0;
-            localStorage.setItem(bestScoreKey, String(bestScore));
-          }
-        }
-        sessionNoteEl.textContent = `Activity session created for ${session.userTag}.`;
-        updateStatus(`Ready for ${session.userTag}`);
-      }
-      void loadLeaderboard(true);
-      startLeaderboardAutoRefresh();
-    } catch (error) {
-      updateStatus(`Discord Activity handshake failed: ${error.message}`);
-    }
+    showReadyMenuForCurrentState();
+    void bootstrapActivitySession();
+  } else if (activityMode) {
+    showReadyMenuForCurrentState();
   }
 
   if (!sessionId && isPracticeMode) {
-    updateStatus(activityMode ? 'Activity practice ready' : 'Practice mode ready');
     if (!activityMode) {
+      updateStatus('Practice mode ready');
       sessionNoteEl.textContent = 'Practice mode: this run is local only.';
+      showMenu('main');
+      return;
     }
-    showMenu('main');
+
+    updateStatus('Activity practice ready');
+    showReadyMenuForCurrentState();
     return;
   }
 
   try {
-    const response = await fetch(`/api/mochi/session/${sessionId}`);
+    const response = await fetch(`/api/mochi/session/${sessionId}`, { cache: 'no-store' });
     const payload = await response.json();
     if (!response.ok) {
       throw new Error(payload.error || 'Session not found');
@@ -1740,7 +1798,7 @@ async function loadSession() {
     sessionNoteEl.textContent = `Session linked to ${session.userTag}.`;
     updateStatus(`Ready for ${session.userTag}`);
     try {
-      const bestResponse = await fetch(`/api/mochi/leaderboard/${session.userId}`);
+      const bestResponse = await fetch(`/api/mochi/leaderboard/${session.userId}`, { cache: 'no-store' });
       if (bestResponse.ok) {
         const bestPayload = await bestResponse.json();
         if (bestPayload?.entry?.bestScore !== undefined) {
