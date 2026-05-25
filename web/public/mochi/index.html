@@ -90,6 +90,7 @@
                       <button id="mainPlayButton" type="button" class="primary-action">Play</button>
                       <button id="mainLeaderboardButton" type="button" class="secondary-button">Score</button>
                       <button id="mainSettingsButton" type="button" class="secondary-button">Rate</button>
+                      <button id="mainMuteButton" type="button" class="secondary-button">Mute</button>
                     </div>
                     <div class="menu-chips main-menu-chips" aria-hidden="true">
                       <span>Space</span>
@@ -111,6 +112,19 @@
                   <p class="panel-copy" id="startMenuText">
                     Ready to start a new run. Use the button below when you want to launch.
                   </p>
+                  <div class="run-summary" id="runSummary">
+                    <div class="run-summary-head">
+                      <span>Run Summary</span>
+                      <strong id="runSummaryState">Ready</strong>
+                    </div>
+                    <div class="run-summary-grid">
+                      <div><span>Score</span><strong id="runSummaryScore">0</strong></div>
+                      <div><span>Best</span><strong id="runSummaryBest">0</strong></div>
+                      <div><span>Cans</span><strong id="runSummaryCans">0</strong></div>
+                      <div><span>Time</span><strong id="runSummaryTime">0:00</strong></div>
+                    </div>
+                    <p id="runSummaryText">Your latest run stats will appear here after you play.</p>
+                  </div>
                   <div class="menu-checklist">
                     <div class="check-item"><strong>Controls</strong><span>Space, click, or tap to flap.</span></div>
                     <div class="check-item"><strong>Goal</strong><span>Stay alive and collect cans for points.</span></div>

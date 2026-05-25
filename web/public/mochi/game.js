@@ -12,6 +12,7 @@ const mainPlayButton = document.getElementById('mainPlayButton');
 const mainLeaderboardButton = document.getElementById('mainLeaderboardButton');
 const mainLeaderboardButtonInline = document.getElementById('mainLeaderboardButtonInline');
 const mainSettingsButton = document.getElementById('mainSettingsButton');
+const mainMuteButton = document.getElementById('mainMuteButton');
 const startRunButton = document.getElementById('startRunButton');
 const startBackButton = document.getElementById('startBackButton');
 const leaderboardBackButton = document.getElementById('leaderboardBackButton');
@@ -25,6 +26,12 @@ const mainMenuLeaderboardPodiumEl = document.getElementById('mainMenuLeaderboard
 const leaderboardListEl = document.getElementById('leaderboardList');
 const leaderboardUpdatedEl = document.getElementById('leaderboardUpdated');
 const startMenuTextEl = document.getElementById('startMenuText');
+const runSummaryStateEl = document.getElementById('runSummaryState');
+const runSummaryScoreEl = document.getElementById('runSummaryScore');
+const runSummaryBestEl = document.getElementById('runSummaryBest');
+const runSummaryCansEl = document.getElementById('runSummaryCans');
+const runSummaryTimeEl = document.getElementById('runSummaryTime');
+const runSummaryTextEl = document.getElementById('runSummaryText');
 const modeLabelEl = document.getElementById('modeLabel');
 const menuTabs = Array.from(document.querySelectorAll('[data-menu-tab]'));
 const menuPanels = Array.from(document.querySelectorAll('[data-menu-panel]'));
@@ -46,6 +53,7 @@ let leaderboardLoaded = false;
 const BIRD_RENDER_SCALE = 3.05;
 const BIRD_MENU_SCALE = 200;
 const BIRD_HITBOX_SCALE = 1.55;
+let menuTransitionTimer = null;
 let settings = {
   audioEnabled: true,
   reducedMotion: false,
@@ -72,6 +80,14 @@ let submitted = false;
 let score = 0;
 let bestScore = 0;
 let elapsedMs = 0;
+let cansCollected = 0;
+let paused = false;
+let gameOverReason = '';
+let latestRunSnapshot = null;
+let particles = [];
+let trailPoints = [];
+let shakeTime = 0;
+let shakeStrength = 0;
 let bird = null;
 let pipes = [];
 let spawnTimer = 0;
@@ -189,6 +205,87 @@ function refreshGameplaySettings() {
   }
 }
 
+function formatRunTime(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = String(totalSeconds % 60).padStart(2, '0');
+  return `${minutes}:${seconds}`;
+}
+
+function updateMainMuteButton() {
+  if (!mainMuteButton) {
+    return;
+  }
+  mainMuteButton.textContent = settings.audioEnabled ? 'Mute' : 'Sound';
+  mainMuteButton.setAttribute('aria-pressed', String(!settings.audioEnabled));
+}
+
+function syncRunSummary(snapshot = latestRunSnapshot) {
+  if (!snapshot) {
+    runSummaryStateEl.textContent = 'Ready';
+    runSummaryScoreEl.textContent = '0';
+    runSummaryBestEl.textContent = String(bestScore || 0);
+    runSummaryCansEl.textContent = '0';
+    runSummaryTimeEl.textContent = '0:00';
+    runSummaryTextEl.textContent = 'Your latest run stats will appear here after you play.';
+    return;
+  }
+
+  runSummaryStateEl.textContent = snapshot.state;
+  runSummaryScoreEl.textContent = String(snapshot.score);
+  runSummaryBestEl.textContent = String(snapshot.bestScore);
+  runSummaryCansEl.textContent = String(snapshot.cansCollected);
+  runSummaryTimeEl.textContent = formatRunTime(snapshot.durationMs);
+  runSummaryTextEl.textContent = snapshot.text;
+}
+
+function recordRunSnapshot(state, text) {
+  latestRunSnapshot = {
+    state,
+    text,
+    score,
+    bestScore,
+    cansCollected,
+    durationMs: elapsedMs,
+    reason: gameOverReason
+  };
+  syncRunSummary();
+}
+
+function triggerShake(strength = 5, durationMs = 180) {
+  shakeStrength = Math.max(shakeStrength, strength);
+  shakeTime = Math.max(shakeTime, durationMs);
+}
+
+function spawnParticles(x, y, colors, count = 6, speed = 120, life = 380) {
+  const palette = Array.isArray(colors) && colors.length ? colors : ['#ffffff'];
+  for (let i = 0; i < count; i += 1) {
+    const angle = Math.random() * Math.PI * 2;
+    const burstSpeed = speed * (0.4 + Math.random() * 0.8);
+    particles.push({
+      x,
+      y,
+      vx: Math.cos(angle) * burstSpeed,
+      vy: Math.sin(angle) * burstSpeed - 40,
+      life,
+      maxLife: life,
+      size: 2 + Math.random() * 4,
+      color: palette[i % palette.length]
+    });
+  }
+}
+
+function addTrailPoint(x, y, size = 1, color = '#ffd66f') {
+  trailPoints.push({
+    x,
+    y,
+    size,
+    color,
+    life: 240,
+    maxLife: 240
+  });
+}
+
 function ensureAudioContext() {
   if (!audioContext) {
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
@@ -293,7 +390,6 @@ function renderLeaderboard(entries = leaderboardEntries) {
 
   const rows = Array.isArray(entries) ? entries : [];
   const sessionUserId = session?.userId || null;
-  const podiumEntries = rows.slice(0, 3);
   const remainder = rows.slice(3);
 
   renderLeaderboardPodium(leaderboardPodiumEl, rows, sessionUserId);
@@ -439,16 +535,36 @@ function playFlapSound() {
   playTone({ frequency: 392, duration: 0.08, type: 'square', gain: 0.02 });
 }
 
+function playLaunchJingle() {
+  if (!settings.audioEnabled || !audioUnlocked) {
+    return;
+  }
+
+  playTone({ frequency: 523.25, duration: 0.12, type: 'triangle', gain: 0.035 });
+  playTone({ frequency: 659.25, duration: 0.12, type: 'triangle', gain: 0.03, start: 0.08 });
+  playTone({ frequency: 783.99, duration: 0.16, type: 'sine', gain: 0.028, start: 0.16 });
+}
+
+function playCrashSound(reason = 'pipe') {
+  if (!settings.audioEnabled || !audioUnlocked) {
+    return;
+  }
+
+  const isGround = reason.includes('ground');
+  playTone({ frequency: isGround ? 164.81 : 196, duration: 0.18, type: 'sawtooth', gain: 0.04 });
+  playTone({ frequency: isGround ? 123.47 : 146.83, duration: 0.22, type: 'triangle', gain: 0.03, start: 0.06 });
+}
+
 function startMusicLoop() {
   if (musicTimer || !settings.audioEnabled || !audioUnlocked) {
     return;
   }
 
   const progression = [
-    [440, 554.37, 659.25],
-    [392, 493.88, 587.33],
-    [349.23, 440, 523.25],
-    [392, 523.25, 659.25]
+    [440, 554.37, 659.25, 880],
+    [392, 493.88, 587.33, 783.99],
+    [349.23, 440, 523.25, 659.25],
+    [392, 523.25, 659.25, 830.61]
   ];
   const bassLine = [220, 196, 174.61, 196];
   let step = 0;
@@ -465,16 +581,16 @@ function startMusicLoop() {
     chord.forEach((freq, index) => {
       playTone({
         frequency: freq,
-        duration: 0.28,
+        duration: 0.26,
         type: index === 0 ? 'triangle' : 'sine',
-        gain: index === 0 ? 0.035 : 0.02,
+        gain: index === 0 ? 0.035 : 0.018,
         start: index * 0.02
       });
     });
 
     playTone({
       frequency: bass,
-      duration: 0.36,
+      duration: 0.34,
       type: 'sine',
       gain: 0.03
     });
@@ -498,6 +614,7 @@ function applySettings() {
   reducedMotionStateEl.textContent = settings.reducedMotion ? 'On' : 'Off';
   hardModeStateEl.textContent = settings.hardMode ? 'On' : 'Off';
   modeLabelEl.textContent = settings.hardMode ? 'Hard' : 'Normal';
+  updateMainMuteButton();
   if (settings.audioEnabled && audioUnlocked) {
     startMusicLoop();
   }
@@ -506,6 +623,13 @@ function applySettings() {
 
 function setMenuView(view) {
   menuView = view;
+  overlayEl.classList.add('menu-transitioning');
+  if (menuTransitionTimer) {
+    clearTimeout(menuTransitionTimer);
+  }
+  menuTransitionTimer = window.setTimeout(() => {
+    overlayEl.classList.remove('menu-transitioning');
+  }, 180);
   menuTabs.forEach((tab) => {
     tab.classList.toggle('active', tab.dataset.menuTab === view);
   });
@@ -529,11 +653,14 @@ function showMenu(view = 'main', options = {}) {
     startButtonLabel = 'Start Run',
     startAction = 'start',
     startDisabled = false,
-    preserveScore = false
+    preserveScore = false,
+    keepGameOver = false
   } = options;
 
   started = false;
-  gameOver = false;
+  if (!keepGameOver) {
+    gameOver = false;
+  }
   submitted = false;
   gameState = 'menu';
 
@@ -552,6 +679,11 @@ function showMenu(view = 'main', options = {}) {
   startRunButton.disabled = startDisabled;
   startRunMode = startAction;
   setMenuView(view);
+  if (view === 'start' && latestRunSnapshot) {
+    syncRunSummary(latestRunSnapshot);
+  } else if (view === 'start') {
+    syncRunSummary(null);
+  }
   if (view === 'leaderboard') {
     void loadLeaderboard();
   } else if (leaderboardLoaded) {
@@ -577,6 +709,13 @@ async function launchRun() {
   submitted = false;
   score = 0;
   elapsedMs = 0;
+  cansCollected = 0;
+  paused = false;
+  gameOverReason = '';
+  particles = [];
+  trailPoints = [];
+  shakeTime = 0;
+  shakeStrength = 0;
   gameState = 'playing';
   resetBoard();
   scoreEl.textContent = '0';
@@ -584,6 +723,7 @@ async function launchRun() {
   updateStatus(isPracticeMode ? 'Practice mode running' : 'Session running');
   bird.velocity = FLAP_VELOCITY;
   started = true;
+  playLaunchJingle();
 }
 
 function hideOverlay() {
@@ -592,6 +732,15 @@ function hideOverlay() {
 
 function updateStatus(text) {
   statusEl.textContent = text;
+}
+
+function togglePause() {
+  if (!started || gameOver) {
+    return;
+  }
+
+  paused = !paused;
+  updateStatus(paused ? 'Paused' : 'Session running');
 }
 
 async function createActivitySession() {
@@ -657,13 +806,20 @@ function addPipe() {
   }
 }
 
-function collectScore(points = 1) {
+function collectScore(points = 1, source = 'pipe') {
   score += points;
   scoreEl.textContent = String(score);
   if (score > bestScore) {
     bestScore = score;
     bestScoreEl.textContent = String(bestScore);
     localStorage.setItem(bestScoreKey, String(bestScore));
+  }
+  if (source === 'can') {
+    cansCollected += 1;
+    spawnParticles(bird.x + 8, bird.y - 6, ['#ff4d6d', '#fdf1d5', '#ffd24a'], 10, 150, 420);
+  }
+  if (source === 'pipe') {
+    spawnParticles(bird.x + 12, bird.y, ['#5be3c5', '#ecf6ff'], 5, 100, 260);
   }
 }
 
@@ -746,16 +902,22 @@ function endGame(reason) {
     return;
   }
 
+  gameOverReason = reason;
+  paused = false;
   gameOver = true;
   gameState = 'gameover';
   started = false;
+  triggerShake(reason.includes('pipe') ? 7 : 5, reason.includes('pipe') ? 220 : 180);
+  playCrashSound(reason);
+  recordRunSnapshot('Game over', `Ended by ${reason}. Your score has been saved.`);
   updateStatus(`Game over: ${reason}`);
   showMenu('start', {
     title: 'Game over',
     text: `You scored ${score}. ${isPracticeMode ? 'Press Start Run to try again.' : 'This run has been recorded in Discord.'}`,
     startText: 'Your run ended. Open Start Run when you want another attempt.',
     startButtonLabel: 'Play again',
-    preserveScore: true
+    preserveScore: true,
+    keepGameOver: true
   });
   gameOver = true;
   gameState = 'gameover';
@@ -791,6 +953,7 @@ async function submitScore(reason) {
     bestScore = Math.max(bestScore, submittedBest);
     localStorage.setItem(bestScoreKey, String(bestScore));
     bestScoreEl.textContent = String(bestScore);
+    recordRunSnapshot('Saved', `Score saved! Personal best: ${submittedBest}.`);
     if (Array.isArray(payload.leaderboard)) {
       leaderboardEntries = payload.leaderboard;
       leaderboardLoaded = true;
@@ -804,7 +967,13 @@ async function submitScore(reason) {
 }
 
 function update(deltaSeconds) {
-  if (!started || gameOver) {
+  if (shakeTime > 0) {
+    shakeTime = Math.max(0, shakeTime - deltaSeconds * 1000);
+  }
+
+  if (paused || !started || gameOver) {
+    particles = particles.filter((particle) => particle.life > 0);
+    trailPoints = trailPoints.filter((point) => point.life > 0);
     return;
   }
 
@@ -812,6 +981,17 @@ function update(deltaSeconds) {
   bird.velocity += GRAVITY * deltaSeconds;
   bird.y += bird.velocity * deltaSeconds;
   backgroundOffset = (backgroundOffset + PIPE_SPEED * deltaSeconds) % width;
+  trailPoints.push({
+    x: bird.x - 10,
+    y: bird.y + 2,
+    size: 1.1 + Math.abs(bird.velocity) / 900,
+    color: bird.velocity < -60 ? '#fdf1d5' : '#ffd24a',
+    life: 220,
+    maxLife: 220
+  });
+  if (trailPoints.length > 18) {
+    trailPoints.shift();
+  }
 
   spawnTimer -= deltaSeconds;
   if (spawnTimer <= 0) {
@@ -854,7 +1034,7 @@ function update(deltaSeconds) {
 
     if (!pipe.passed && pipe.x + PIPE_WIDTH < bird.x - bird.radius) {
       pipe.passed = true;
-      collectScore(1);
+      collectScore(1, 'pipe');
     }
   }
 
@@ -865,11 +1045,26 @@ function update(deltaSeconds) {
     const pickup = collectibleBox(item);
     if (rectsOverlap(birdBounds, pickup)) {
       item.collected = true;
-      collectScore(1);
+      collectScore(1, 'can');
       playPickupChime();
       updateStatus('Collected a Dr Pepper can!');
     }
   }
+
+  for (const particle of particles) {
+    particle.life -= deltaSeconds * 1000;
+    particle.x += particle.vx * deltaSeconds;
+    particle.y += particle.vy * deltaSeconds;
+    particle.vy += 180 * deltaSeconds;
+  }
+  particles = particles.filter((particle) => particle.life > 0);
+
+  for (const point of trailPoints) {
+    point.life -= deltaSeconds * 1000;
+    point.x -= 10 * deltaSeconds;
+  }
+  trailPoints = trailPoints.filter((point) => point.life > 0);
+
 }
 
 function drawSky() {
@@ -990,6 +1185,32 @@ function drawGround() {
   }
 }
 
+function drawTrail() {
+  for (const point of trailPoints) {
+    const alpha = clamp(point.life / point.maxLife, 0, 1) * 0.34;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = point.color;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, point.size + (1 - alpha) * 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawParticles() {
+  for (const particle of particles) {
+    const alpha = clamp(particle.life / particle.maxLife, 0, 1);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = particle.color;
+    ctx.beginPath();
+    ctx.arc(particle.x, particle.y, particle.size * (0.55 + alpha * 0.45), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
 function drawBrandWatermark() {
   const pad = 14;
   const boxWidth = 170;
@@ -1057,6 +1278,65 @@ function drawHudOverlay() {
   ctx.save();
   ctx.fillStyle = 'rgba(7, 16, 24, 0.12)';
   ctx.fillRect(0, 0, width, height);
+  ctx.restore();
+}
+
+function drawPauseOverlay() {
+  if (!paused || gameOver) {
+    return;
+  }
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(7, 16, 24, 0.36)';
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.fillStyle = 'rgba(8, 14, 22, 0.8)';
+  roundRect(ctx, width * 0.24, height * 0.34, width * 0.52, 120, 22, true, false);
+  ctx.fillStyle = '#ecf6ff';
+  ctx.font = '900 24px Georgia, serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Paused', width / 2, height * 0.39);
+  ctx.font = '500 14px "Trebuchet MS", sans-serif';
+  ctx.fillStyle = '#9fb5c8';
+  ctx.fillText('Press P to resume', width / 2, height * 0.45);
+  ctx.restore();
+}
+
+function drawGameOverOverlay() {
+  if (!gameOver) {
+    return;
+  }
+
+  const summary = latestRunSnapshot || {
+    score,
+    bestScore,
+    cansCollected,
+    durationMs: elapsedMs
+  };
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(7, 16, 24, 0.46)';
+  ctx.fillRect(0, 0, width, height);
+
+  const boxW = Math.min(width * 0.76, 320);
+  const boxH = Math.min(height * 0.42, 260);
+  const boxX = (width - boxW) / 2;
+  const boxY = height * 0.18;
+  ctx.fillStyle = 'rgba(8, 14, 22, 0.88)';
+  roundRect(ctx, boxX, boxY, boxW, boxH, 24, true, false);
+
+  ctx.fillStyle = '#ecf6ff';
+  ctx.textAlign = 'center';
+  ctx.font = '900 24px Georgia, serif';
+  ctx.fillText('Game Over', width / 2, boxY + 38);
+  ctx.font = '600 13px "Trebuchet MS", sans-serif';
+  ctx.fillStyle = '#9fb5c8';
+  ctx.fillText(`Score ${summary.score}  •  Best ${summary.bestScore}`, width / 2, boxY + 62);
+  ctx.fillText(`Cans ${summary.cansCollected}  •  Time ${formatRunTime(summary.durationMs)}`, width / 2, boxY + 82);
+  ctx.fillText(gameOverReason ? `Run ended: ${gameOverReason}` : 'Run recorded in Discord.', width / 2, boxY + 104);
+  ctx.fillStyle = '#25d0ab';
+  ctx.font = '700 12px "Trebuchet MS", sans-serif';
+  ctx.fillText('Press R or tap Play again to restart', width / 2, boxY + 138);
   ctx.restore();
 }
 
@@ -1136,6 +1416,10 @@ function roundRect(context, x, y, w, h, r, fill = true, stroke = false) {
 
 function render() {
   ctx.clearRect(0, 0, width, height);
+  const shakeX = shakeTime > 0 ? (Math.random() - 0.5) * shakeStrength : 0;
+  const shakeY = shakeTime > 0 ? (Math.random() - 0.5) * shakeStrength : 0;
+  ctx.save();
+  ctx.translate(shakeX, shakeY);
   drawSky();
 
   for (const cloud of clouds) {
@@ -1150,10 +1434,15 @@ function render() {
   drawBrandWatermark();
   drawMenuScene();
   drawPipes();
+  drawTrail();
   drawCollectibles();
   drawGround();
+  drawParticles();
   drawBird();
   drawHudOverlay();
+  drawPauseOverlay();
+  drawGameOverOverlay();
+  ctx.restore();
 }
 
 function loop(timestamp) {
@@ -1283,6 +1572,15 @@ window.addEventListener('keydown', (event) => {
     void unlockAudio();
     flap();
   }
+  if (event.code === 'KeyP') {
+    event.preventDefault();
+    togglePause();
+  }
+  if (event.code === 'KeyM') {
+    event.preventDefault();
+    settings.audioEnabled = !settings.audioEnabled;
+    applySettings();
+  }
   if (event.code === 'KeyR' && gameOver) {
     void unlockAudio();
     void launchRun();
@@ -1309,6 +1607,10 @@ mainLeaderboardButtonInline.addEventListener('click', () => {
 mainSettingsButton.addEventListener('click', () => {
   void unlockAudio();
   showMenu('settings');
+});
+mainMuteButton.addEventListener('click', () => {
+  settings.audioEnabled = !settings.audioEnabled;
+  applySettings();
 });
 startRunButton.addEventListener('click', () => {
   void unlockAudio();
