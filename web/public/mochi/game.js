@@ -9,7 +9,7 @@ const overlayTextEl = document.getElementById('overlayText');
 const primaryButton = document.getElementById('primaryButton');
 const sessionNoteEl = document.getElementById('sessionNote');
 const introSplashEl = document.getElementById('introSplash');
-const ASSET_VERSION = 'collectible2';
+const ASSET_VERSION = 'transparent3';
 
 const params = new URLSearchParams(window.location.search);
 let sessionId = params.get('sid');
@@ -24,9 +24,9 @@ let session = null;
 const logoSprite = new Image();
 logoSprite.src = `./assets/mochi-logo.svg?v=${ASSET_VERSION}`;
 const birdSprite = new Image();
-birdSprite.src = `./assets/avatar-v2.png?v=${ASSET_VERSION}`;
+birdSprite.src = `./assets/avatar-v3.png?v=${ASSET_VERSION}`;
 const canSprite = new Image();
-canSprite.src = `./assets/dr-pepper-can-v2.png?v=${ASSET_VERSION}`;
+canSprite.src = `./assets/dr-pepper-can-v3.png?v=${ASSET_VERSION}`;
 
 let width = 360;
 let height = 640;
