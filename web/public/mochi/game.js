@@ -40,7 +40,20 @@ const ASSET_VERSION = 'transparent3';
 const SETTINGS_KEY = 'discord-mochi-bird-settings';
 
 const params = new URLSearchParams(window.location.search);
-const mochiBootstrap = window.__MOCHI_BOOTSTRAP__ || {};
+function readMochiBootstrap() {
+  const node = document.getElementById('mochi-bootstrap');
+  if (!node) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(node.textContent || '{}');
+  } catch {
+    return {};
+  }
+}
+
+const mochiBootstrap = readMochiBootstrap();
 let sessionId = params.get('sid');
 let isPracticeMode = !sessionId;
 
@@ -1306,6 +1319,14 @@ function handleGameInput(event) {
   flap();
 }
 
+function handleGameplayInput(event) {
+  if (gameState !== 'playing' || paused || gameOver) {
+    return;
+  }
+
+  handleGameInput(event);
+}
+
 function drawPauseOverlay() {
   if (!paused || gameOver) {
     return;
@@ -1491,21 +1512,28 @@ async function loadSession() {
     renderLeaderboard(leaderboardEntries);
   }
 
-  try {
-    const configResponse = await fetch('/api/mochi/config');
-    const configPayload = await configResponse.json();
-    if (configResponse.ok) {
-      activityMode = Boolean(configPayload.activityMode);
-      discordClientId = configPayload.discordClientId;
-      document.body.classList.toggle('activity-mode', activityMode);
-      if (Array.isArray(configPayload.leaderboard)) {
-        leaderboardEntries = configPayload.leaderboard;
-        leaderboardLoaded = true;
-        renderLeaderboard(leaderboardEntries);
+  document.body.classList.toggle('activity-mode', activityMode);
+  if (leaderboardLoaded) {
+    renderLeaderboard(leaderboardEntries);
+  }
+
+  if (!mochiBootstrap || Object.keys(mochiBootstrap).length === 0) {
+    try {
+      const configResponse = await fetch('/api/mochi/config');
+      const configPayload = await configResponse.json();
+      if (configResponse.ok) {
+        activityMode = Boolean(configPayload.activityMode);
+        discordClientId = configPayload.discordClientId;
+        document.body.classList.toggle('activity-mode', activityMode);
+        if (Array.isArray(configPayload.leaderboard)) {
+          leaderboardEntries = configPayload.leaderboard;
+          leaderboardLoaded = true;
+          renderLeaderboard(leaderboardEntries);
+        }
       }
+    } catch {
+      // Config lookup is optional.
     }
-  } catch {
-    // Config lookup is optional.
   }
 
   if (activityMode && discordClientId) {
@@ -1620,6 +1648,9 @@ canvas.addEventListener('pointerdown', handleGameInput);
 canvas.addEventListener('touchstart', handleGameInput, { passive: false });
 stage?.addEventListener('pointerdown', handleGameInput);
 stage?.addEventListener('touchstart', handleGameInput, { passive: false });
+window.addEventListener('pointerdown', handleGameplayInput, { capture: true });
+window.addEventListener('touchstart', handleGameplayInput, { passive: false, capture: true });
+window.addEventListener('touchend', handleGameplayInput, { passive: false, capture: true });
 
 mainPlayButton.addEventListener('click', () => {
   void unlockAudio();

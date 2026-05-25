@@ -1292,6 +1292,10 @@ button:disabled {
     padding: 10px 2px 0;
   }
 
+  .main-menu-title p {
+    font-size: 0.92rem;
+  }
+
   .main-menu-wordmark {
     width: 100%;
     min-height: 60px;
@@ -1307,6 +1311,14 @@ button:disabled {
   .main-menu-leaderboard {
     gap: 8px;
     padding: 10px;
+  }
+
+  body.activity-mode .main-menu-leaderboard {
+    display: none;
+  }
+
+  body.activity-mode .menu-note {
+    display: none;
   }
 
   .main-menu-leaderboard-head {
@@ -1521,6 +1533,10 @@ button:disabled {
     padding: 8px 0 0;
   }
 
+  .main-menu-title p {
+    font-size: 0.86rem;
+  }
+
   .main-menu-wordmark {
     min-height: 56px;
     padding: 10px 12px;
@@ -1547,6 +1563,14 @@ button:disabled {
   .main-menu-leaderboard {
     gap: 8px;
     padding: 10px;
+  }
+
+  body.activity-mode .main-menu-leaderboard {
+    display: none;
+  }
+
+  body.activity-mode .menu-note {
+    display: none;
   }
 
   .main-menu-leaderboard-head {
