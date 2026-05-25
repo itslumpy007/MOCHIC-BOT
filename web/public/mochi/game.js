@@ -36,7 +36,7 @@ const runSummaryTextEl = document.getElementById('runSummaryText');
 const modeLabelEl = document.getElementById('modeLabel');
 const menuTabs = Array.from(document.querySelectorAll('[data-menu-tab]'));
 const menuPanels = Array.from(document.querySelectorAll('[data-menu-panel]'));
-const ASSET_VERSION = 'mobile-activity9';
+const ASSET_VERSION = 'mobile-activity10';
 const DISCORD_SDK_MODULE_URL = `./vendor/discord-sdk/index.mjs?v=${ASSET_VERSION}`;
 const SETTINGS_KEY = 'discord-mochi-bird-settings';
 
@@ -1638,7 +1638,7 @@ function drawGameOverOverlay() {
 }
 
 function drawMenuScene() {
-  if (started || gameOver) {
+  if (started || gameOver || document.body.classList.contains('mobile-activity')) {
     return;
   }
 

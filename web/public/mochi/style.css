@@ -213,6 +213,11 @@ body.activity-mode .global-brand {
   display: none;
 }
 
+body.activity-mode {
+  height: 100dvh;
+  overflow: hidden;
+}
+
 body.activity-mode .app-shell {
   width: min(100vw - 12px, 980px);
   padding: 14px 0 20px;
@@ -263,9 +268,16 @@ body.mobile-activity .global-brand {
   display: none;
 }
 
+body.mobile-activity {
+  height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 body.mobile-activity .app-shell {
   width: min(100vw - 10px, 980px);
-  padding: 10px 0 14px;
+  min-height: 100dvh;
+  padding: 6px 0 10px;
   gap: 10px;
 }
 
@@ -279,7 +291,7 @@ body.mobile-activity .game-card {
 }
 
 body.mobile-activity .game-brand {
-  padding: 7px 7px 9px;
+  display: none;
 }
 
 body.mobile-activity .game-brand-mark {
@@ -293,6 +305,8 @@ body.mobile-activity .hud {
 
 body.mobile-activity .stage {
   width: 100%;
+  aspect-ratio: auto;
+  height: min(calc(100dvh - 236px), 480px);
 }
 
 body.mobile-activity .overlay {
@@ -304,7 +318,7 @@ body.mobile-activity .overlay {
 }
 
 body.mobile-activity .overlay-card {
-  max-height: calc(100% - 20px);
+  max-height: calc(100dvh - 24px);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
