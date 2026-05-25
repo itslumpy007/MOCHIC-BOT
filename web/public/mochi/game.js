@@ -1319,6 +1319,26 @@ function handleGameplayInput(event) {
   handleGameInput(event);
 }
 
+function isInteractiveTarget(target) {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+
+  return Boolean(target.closest('button, a, input, textarea, select, [role="button"], [contenteditable="true"]'));
+}
+
+function handleDocumentGameInput(event) {
+  if (gameState !== 'playing' || paused || gameOver) {
+    return;
+  }
+
+  if (isInteractiveTarget(event.target)) {
+    return;
+  }
+
+  handleGameInput(event);
+}
+
 function updateViewportMode() {
   const isMobileViewport = mobileViewportQuery.matches || window.innerWidth <= 720;
   document.body.classList.toggle('mobile-activity', isMobileViewport);
@@ -1637,6 +1657,9 @@ window.addEventListener('keydown', (event) => {
 
 canvas.addEventListener('pointerdown', handleGameInput);
 canvas.addEventListener('touchstart', handleGameInput, { passive: false });
+document.addEventListener('pointerdown', handleDocumentGameInput, { capture: true });
+document.addEventListener('touchstart', handleDocumentGameInput, { capture: true, passive: false });
+document.addEventListener('click', handleDocumentGameInput, { capture: true });
 
 mainPlayButton.addEventListener('click', () => {
   void unlockAudio();
