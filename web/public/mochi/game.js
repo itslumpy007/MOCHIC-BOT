@@ -75,6 +75,7 @@ const BIRD_RENDER_SCALE = 3.05;
 const BIRD_MENU_SCALE = 200;
 const BIRD_HITBOX_SCALE = 1.55;
 let menuTransitionTimer = null;
+let startLaunchLock = false;
 let settings = {
   audioEnabled: true,
   reducedMotion: false,
@@ -585,6 +586,39 @@ function showReadyMenuForCurrentState() {
     startButtonLabel: session ? 'Start Run' : 'Start Practice',
     startDisabled: false
   });
+}
+
+function triggerRunStart(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  if (startLaunchLock) {
+    return;
+  }
+
+  startLaunchLock = true;
+  void unlockAudio();
+  updateStatus('Starting run...');
+  void launchRun().finally(() => {
+    window.setTimeout(() => {
+      startLaunchLock = false;
+    }, 250);
+  });
+}
+
+function handleStartRunButtonActivation(event) {
+  if (startRunMode === 'reload') {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    window.location.reload();
+    return;
+  }
+
+  triggerRunStart(event);
 }
 
 async function resolveActivitySession(timeoutMs = 3500) {
@@ -1927,10 +1961,10 @@ mobileTapLayerEl?.addEventListener('touchstart', handleMobileTapLayerInput, { pa
 mobileTapLayerEl?.addEventListener('click', handleMobileTapLayerInput);
 
 mainPlayButton.addEventListener('click', () => {
-  void unlockAudio();
-  updateStatus('Starting run...');
-  void launchRun();
+  triggerRunStart();
 });
+mainPlayButton.addEventListener('pointerdown', triggerRunStart);
+mainPlayButton.addEventListener('touchend', triggerRunStart, { passive: false });
 mainLeaderboardButton.addEventListener('click', () => {
   void unlockAudio();
   showMenu('leaderboard');
@@ -1948,18 +1982,10 @@ mainMuteButton.addEventListener('click', () => {
   applySettings();
 });
 startRunButton.addEventListener('click', () => {
-  void unlockAudio();
-  updateStatus('Starting run...');
-  if (startRunMode === 'reload') {
-    window.location.reload();
-    return;
-  }
-  if (gameState === 'gameover') {
-    void launchRun();
-    return;
-  }
-  void launchRun();
+  handleStartRunButtonActivation();
 });
+startRunButton.addEventListener('pointerdown', handleStartRunButtonActivation);
+startRunButton.addEventListener('touchend', handleStartRunButtonActivation, { passive: false });
 startBackButton.addEventListener('click', () => {
   void unlockAudio();
   showMenu('main');
