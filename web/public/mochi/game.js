@@ -36,7 +36,7 @@ const runSummaryTextEl = document.getElementById('runSummaryText');
 const modeLabelEl = document.getElementById('modeLabel');
 const menuTabs = Array.from(document.querySelectorAll('[data-menu-tab]'));
 const menuPanels = Array.from(document.querySelectorAll('[data-menu-panel]'));
-const ASSET_VERSION = 'mobile-activity10';
+const ASSET_VERSION = 'mobile-activity11';
 const DISCORD_SDK_MODULE_URL = `./vendor/discord-sdk/index.mjs?v=${ASSET_VERSION}`;
 const SETTINGS_KEY = 'discord-mochi-bird-settings';
 const LEADERBOARD_CACHE_KEY = 'discord-mochi-bird-leaderboard-cache';
@@ -75,7 +75,6 @@ const BIRD_RENDER_SCALE = 3.05;
 const BIRD_MENU_SCALE = 200;
 const BIRD_HITBOX_SCALE = 1.55;
 let menuTransitionTimer = null;
-let startLaunchLock = false;
 let settings = {
   audioEnabled: true,
   reducedMotion: false,
@@ -578,34 +577,53 @@ function showReadyMenuForCurrentState() {
   showMenu('main', {
     title: session ? `Ready for ${session.userTag}` : 'Main Menu',
     text: activityMode
-      ? `Running inside Discord as an Activity${session ? ` for ${session.userTag}.` : ' while we finish connecting.'}`
+      ? `Running inside Discord as an Activity${session ? ` for ${session.userTag}.` : ' while we connect in the background.'}`
       : 'Practice mode: this run is local only.',
     startText: session
       ? 'You are connected and ready to play.'
-      : 'Connecting to Discord in the background. You can start a practice run now.',
+      : 'Ready to play now. Discord will connect in the background.',
     startButtonLabel: session ? 'Start Run' : 'Start Practice',
     startDisabled: false
   });
 }
 
-function triggerRunStart(event) {
+function startRunNow(event) {
   if (event) {
     event.preventDefault();
     event.stopPropagation();
   }
 
-  if (startLaunchLock) {
+  if (started && gameState === 'playing') {
     return;
   }
 
-  startLaunchLock = true;
   void unlockAudio();
   updateStatus('Starting run...');
-  void launchRun().finally(() => {
-    window.setTimeout(() => {
-      startLaunchLock = false;
-    }, 250);
-  });
+  void autoSaveScore('reset');
+  started = false;
+  gameOver = false;
+  submitted = false;
+  score = 0;
+  elapsedMs = 0;
+  cansCollected = 0;
+  paused = false;
+  gameOverReason = '';
+  particles = [];
+  trailPoints = [];
+  shakeTime = 0;
+  shakeStrength = 0;
+  gameState = 'playing';
+  resetBoard();
+  scoreEl.textContent = '0';
+  hideOverlay();
+  updateStatus(isPracticeMode ? 'Practice mode running' : 'Session running');
+  bird.velocity = FLAP_VELOCITY;
+  started = true;
+  playLaunchJingle();
+  syncMobileTapLayer();
+  if (activityMode && !sessionId) {
+    void resolveActivitySession(3500);
+  }
 }
 
 function handleStartRunButtonActivation(event) {
@@ -618,7 +636,7 @@ function handleStartRunButtonActivation(event) {
     return;
   }
 
-  triggerRunStart(event);
+  startRunNow(event);
 }
 
 async function resolveActivitySession(timeoutMs = 3500) {
@@ -1961,10 +1979,10 @@ mobileTapLayerEl?.addEventListener('touchstart', handleMobileTapLayerInput, { pa
 mobileTapLayerEl?.addEventListener('click', handleMobileTapLayerInput);
 
 mainPlayButton.addEventListener('click', () => {
-  triggerRunStart();
+  startRunNow();
 });
-mainPlayButton.addEventListener('pointerdown', triggerRunStart);
-mainPlayButton.addEventListener('touchend', triggerRunStart, { passive: false });
+mainPlayButton.addEventListener('pointerdown', startRunNow);
+mainPlayButton.addEventListener('touchend', startRunNow, { passive: false });
 mainLeaderboardButton.addEventListener('click', () => {
   void unlockAudio();
   showMenu('leaderboard');
