@@ -39,17 +39,18 @@ const ASSET_VERSION = 'transparent3';
 const SETTINGS_KEY = 'discord-mochi-bird-settings';
 
 const params = new URLSearchParams(window.location.search);
+const mochiBootstrap = window.__MOCHI_BOOTSTRAP__ || {};
 let sessionId = params.get('sid');
 let isPracticeMode = !sessionId;
 
 let bestScoreKey = 'discord-mochi-bird-best-practice';
-let activityMode = false;
-let discordClientId = null;
+let activityMode = Boolean(mochiBootstrap.activityMode);
+let discordClientId = mochiBootstrap.discordClientId || null;
 let discordSdk = null;
 let menuView = 'main';
-let leaderboardEntries = [];
+let leaderboardEntries = Array.isArray(mochiBootstrap.leaderboard) ? mochiBootstrap.leaderboard : [];
 let leaderboardLoading = false;
-let leaderboardLoaded = false;
+let leaderboardLoaded = Array.isArray(mochiBootstrap.leaderboard);
 const BIRD_RENDER_SCALE = 3.05;
 const BIRD_MENU_SCALE = 200;
 const BIRD_HITBOX_SCALE = 1.55;
@@ -110,6 +111,7 @@ let audioContext = null;
 let audioMasterGain = null;
 let musicTimer = null;
 let audioUnlocked = false;
+let lastInputAt = 0;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -1287,6 +1289,22 @@ function drawHudOverlay() {
   ctx.restore();
 }
 
+function handleGameInput(event) {
+  if (event) {
+    const now = performance.now();
+    if (now - lastInputAt < 80) {
+      return;
+    }
+    lastInputAt = now;
+    if (typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
+  }
+
+  void unlockAudio();
+  flap();
+}
+
 function drawPauseOverlay() {
   if (!paused || gameOver) {
     return;
@@ -1467,6 +1485,10 @@ function loop(timestamp) {
 async function loadSession() {
   loadSettings();
   applySettings();
+  document.body.classList.toggle('activity-mode', activityMode);
+  if (leaderboardLoaded) {
+    renderLeaderboard(leaderboardEntries);
+  }
 
   try {
     const configResponse = await fetch('/api/mochi/config');
@@ -1593,10 +1615,10 @@ window.addEventListener('keydown', (event) => {
   }
 });
 
-canvas.addEventListener('pointerdown', () => {
-  void unlockAudio();
-  flap();
-});
+canvas.addEventListener('pointerdown', handleGameInput);
+canvas.addEventListener('touchstart', handleGameInput, { passive: false });
+stage.addEventListener('pointerdown', handleGameInput);
+stage.addEventListener('touchstart', handleGameInput, { passive: false });
 
 mainPlayButton.addEventListener('click', () => {
   void unlockAudio();

@@ -7105,6 +7105,19 @@ function buildMochiBaseUrl() {
   return (WEB_BASE_URL || `http://localhost:${WEB_PORT}`).replace(/\/$/, "");
 }
 
+function buildMochiBootstrapPayload() {
+  return {
+    ok: true,
+    activityMode: Boolean(DISCORD_ACTIVITY_MODE),
+    discordClientId: CLIENT_ID || null,
+    gameTitle: "Mochi Bird",
+    publicBaseUrl: buildMochiBaseUrl(),
+    mochiPath: MOCHI_PATH,
+    sessionTtlMinutes: Math.round(MOCHI_SESSION_TTL_MS / 60000),
+    leaderboard: getMochiLeaderboard(10)
+  };
+}
+
 function normalizeMochiPath(value) {
   let next = String(value || "/mochi").trim();
   if (!next.startsWith("/")) next = `/${next}`;
@@ -8754,6 +8767,17 @@ function serveWebStatic(req, res, pathname) {
   fs.readFile(filePath, (error, data) => {
     if (error) {
       return sendWebText(res, 404, "Not found");
+    }
+
+    if (filePath === path.join(webPublicDir, getMochiIndexPath())) {
+      const bootstrapScript = `<script>window.__MOCHI_BOOTSTRAP__ = ${JSON.stringify(buildMochiBootstrapPayload()).replace(/</g, "\\u003c")};</script>`;
+      const html = data.toString("utf8").replace("</head>", `${bootstrapScript}</head>`);
+      res.writeHead(200, {
+        "Content-Type": getWebMimeType(filePath),
+        "Cache-Control": "no-store"
+      });
+      res.end(html);
+      return;
     }
 
     res.writeHead(200, {
