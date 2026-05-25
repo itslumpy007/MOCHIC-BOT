@@ -570,6 +570,47 @@ canvas {
   -webkit-tap-highlight-color: transparent;
 }
 
+.mobile-tap-layer {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: end;
+  justify-content: center;
+  padding: 14px;
+  background: linear-gradient(180deg, rgba(8, 14, 22, 0.01), rgba(8, 14, 22, 0.08));
+  color: #ecf6ff;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  z-index: 3;
+  border: 0;
+}
+
+.mobile-tap-layer span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 170px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(8, 14, 22, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.22);
+}
+
+body.mobile-activity .mobile-tap-layer.tap-ready {
+  display: flex;
+}
+
+body.mobile-activity .mobile-tap-layer.tap-hidden {
+  display: none;
+}
+
+body.desktop-activity .mobile-tap-layer {
+  display: none !important;
+}
+
 .overlay {
   position: absolute;
   inset: 0;

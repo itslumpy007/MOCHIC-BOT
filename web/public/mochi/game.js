@@ -7,6 +7,7 @@ const overlayEl = document.getElementById('overlay');
 const overlayTitleEl = document.getElementById('overlayTitle');
 const overlayTextEl = document.getElementById('overlayText');
 const sessionNoteEl = document.getElementById('sessionNote');
+const mobileTapLayerEl = document.getElementById('mobileTapLayer');
 const introSplashEl = document.getElementById('introSplash');
 const mainPlayButton = document.getElementById('mainPlayButton');
 const mainLeaderboardButton = document.getElementById('mainLeaderboardButton');
@@ -35,7 +36,7 @@ const runSummaryTextEl = document.getElementById('runSummaryText');
 const modeLabelEl = document.getElementById('modeLabel');
 const menuTabs = Array.from(document.querySelectorAll('[data-menu-tab]'));
 const menuPanels = Array.from(document.querySelectorAll('[data-menu-panel]'));
-const ASSET_VERSION = 'mobile-activity3';
+const ASSET_VERSION = 'mobile-activity4';
 const SETTINGS_KEY = 'discord-mochi-bird-settings';
 
 const params = new URLSearchParams(window.location.search);
@@ -714,6 +715,7 @@ function showMenu(view = 'main', options = {}) {
     ? `Running inside Discord as an Activity${session ? ` for ${session.userTag}.` : '.'}`
     : 'Practice mode: this run is local only.';
   overlayEl.classList.remove('hidden');
+  syncMobileTapLayer();
 }
 
 async function launchRun() {
@@ -738,6 +740,7 @@ async function launchRun() {
   bird.velocity = FLAP_VELOCITY;
   started = true;
   playLaunchJingle();
+  syncMobileTapLayer();
 }
 
 function hideOverlay() {
@@ -755,6 +758,7 @@ function togglePause() {
 
   paused = !paused;
   updateStatus(paused ? 'Paused' : 'Session running');
+  syncMobileTapLayer();
 }
 
 async function createActivitySession() {
@@ -936,6 +940,7 @@ function endGame(reason) {
   gameOver = true;
   gameState = 'gameover';
   void autoSaveScore(reason);
+  syncMobileTapLayer();
 }
 
 async function submitScore(reason) {
@@ -1339,10 +1344,30 @@ function handleDocumentGameInput(event) {
   handleGameInput(event);
 }
 
+function handleMobileTapLayerInput(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  handleGameplayInput(event);
+}
+
 function updateViewportMode() {
   const isMobileViewport = mobileViewportQuery.matches || window.innerWidth <= 720;
   document.body.classList.toggle('mobile-activity', isMobileViewport);
   document.body.classList.toggle('desktop-activity', !isMobileViewport);
+  syncMobileTapLayer();
+}
+
+function syncMobileTapLayer() {
+  if (!mobileTapLayerEl) {
+    return;
+  }
+
+  const showTapLayer = document.body.classList.contains('mobile-activity') && gameState === 'playing' && !paused && !gameOver;
+  mobileTapLayerEl.classList.toggle('tap-ready', showTapLayer);
+  mobileTapLayerEl.classList.toggle('tap-hidden', !showTapLayer);
 }
 
 function drawPauseOverlay() {
@@ -1660,6 +1685,9 @@ canvas.addEventListener('touchstart', handleGameInput, { passive: false });
 document.addEventListener('pointerdown', handleDocumentGameInput, { capture: true });
 document.addEventListener('touchstart', handleDocumentGameInput, { capture: true, passive: false });
 document.addEventListener('click', handleDocumentGameInput, { capture: true });
+mobileTapLayerEl?.addEventListener('pointerdown', handleMobileTapLayerInput);
+mobileTapLayerEl?.addEventListener('touchstart', handleMobileTapLayerInput, { passive: false });
+mobileTapLayerEl?.addEventListener('click', handleMobileTapLayerInput);
 
 mainPlayButton.addEventListener('click', () => {
   void unlockAudio();
