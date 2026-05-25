@@ -18,6 +18,7 @@ const audioStateEl = document.getElementById('audioState');
 const reducedMotionStateEl = document.getElementById('reducedMotionState');
 const hardModeStateEl = document.getElementById('hardModeState');
 const leaderboardSummaryEl = document.getElementById('leaderboardSummary');
+const leaderboardPodiumEl = document.getElementById('leaderboardPodium');
 const leaderboardListEl = document.getElementById('leaderboardList');
 const leaderboardUpdatedEl = document.getElementById('leaderboardUpdated');
 const startMenuTextEl = document.getElementById('startMenuText');
@@ -39,6 +40,9 @@ let menuView = 'main';
 let leaderboardEntries = [];
 let leaderboardLoading = false;
 let leaderboardLoaded = false;
+const BIRD_RENDER_SCALE = 3.05;
+const BIRD_MENU_SCALE = 200;
+const BIRD_HITBOX_SCALE = 1.55;
 let settings = {
   audioEnabled: true,
   reducedMotion: false,
@@ -242,6 +246,36 @@ function renderLeaderboard(entries = leaderboardEntries) {
 
   const rows = Array.isArray(entries) ? entries : [];
   const sessionUserId = session?.userId || null;
+  const podiumEntries = rows.slice(0, 3);
+  const remainder = rows.slice(3);
+
+  if (leaderboardPodiumEl) {
+    if (!podiumEntries.length) {
+      leaderboardPodiumEl.innerHTML = '';
+    } else {
+      const podiumSlots = [
+        { key: 'second', entry: podiumEntries[1], label: '#2', title: 'Runner-up' },
+        { key: 'first', entry: podiumEntries[0], label: '#1', title: 'Champion' },
+        { key: 'third', entry: podiumEntries[2], label: '#3', title: 'Third place' }
+      ];
+
+      leaderboardPodiumEl.innerHTML = podiumSlots.map((slot) => {
+        if (!slot.entry) {
+          return `<div class="podium-slot podium-${slot.key} empty"><span class="podium-rank">${slot.label}</span><span class="podium-name">Open spot</span><span class="podium-score">--</span></div>`;
+        }
+
+        const isSelf = sessionUserId && slot.entry.userId === sessionUserId;
+        return `
+          <div class="podium-slot podium-${slot.key}${isSelf ? ' self' : ''}">
+            <span class="podium-rank">${slot.label}</span>
+            <span class="podium-crown">${slot.title}</span>
+            <strong class="podium-name">${escapeHtml(slot.entry.userTag || 'Unknown player')}</strong>
+            <span class="podium-score">${Number(slot.entry.bestScore) || 0}</span>
+          </div>
+        `;
+      }).join('');
+    }
+  }
 
   if (!rows.length) {
     leaderboardListEl.innerHTML = '<li class="leaderboard-empty">No scores yet. Be the first to set one.</li>';
@@ -254,23 +288,26 @@ function renderLeaderboard(entries = leaderboardEntries) {
     return;
   }
 
-  leaderboardListEl.innerHTML = rows.map((entry, index) => {
-    const isSelf = sessionUserId && entry.userId === sessionUserId;
-    const rankLabel = index === 0 ? 'Crown' : `#${index + 1}`;
-    const tag = escapeHtml(entry.userTag || 'Unknown player');
-    const bestScoreValue = Number(entry.bestScore) || 0;
-    const lastScoreValue = Number(entry.lastScore) || bestScoreValue;
-    return `
-      <li class="leaderboard-entry${isSelf ? ' self' : ''}">
-        <span class="leaderboard-rank">${rankLabel}</span>
-        <span class="leaderboard-name">
-          <strong>${tag}</strong>
-          ${isSelf ? '<em>You</em>' : `<em>Last run ${lastScoreValue}</em>`}
-        </span>
-        <span class="leaderboard-score">${bestScoreValue}</span>
-      </li>
-    `;
-  }).join('');
+  leaderboardListEl.innerHTML = remainder.length
+    ? remainder.map((entry, index) => {
+      const rankIndex = index + 4;
+      const isSelf = sessionUserId && entry.userId === sessionUserId;
+      const rankLabel = `#${rankIndex}`;
+      const tag = escapeHtml(entry.userTag || 'Unknown player');
+      const bestScoreValue = Number(entry.bestScore) || 0;
+      const lastScoreValue = Number(entry.lastScore) || bestScoreValue;
+      return `
+        <li class="leaderboard-entry${isSelf ? ' self' : ''}">
+          <span class="leaderboard-rank">${rankLabel}</span>
+          <span class="leaderboard-name">
+            <strong>${tag}</strong>
+            ${isSelf ? '<em>You</em>' : `<em>Last run ${lastScoreValue}</em>`}
+          </span>
+          <span class="leaderboard-score">${bestScoreValue}</span>
+        </li>
+      `;
+    }).join('')
+    : '<li class="leaderboard-empty">Only podium finishers so far.</li>';
 
   const leader = rows[0];
   if (leaderboardSummaryEl) {
@@ -626,11 +663,13 @@ function rectsOverlap(a, b) {
 }
 
 function birdBox() {
+  const width = bird.radius * BIRD_HITBOX_SCALE;
+  const height = bird.radius * BIRD_HITBOX_SCALE * 0.92;
   return {
-    x: bird.x - bird.radius,
-    y: bird.y - bird.radius,
-    width: bird.radius * 2,
-    height: bird.radius * 2
+    x: bird.x - width / 2,
+    y: bird.y - height / 2 + bird.radius * 0.03,
+    width,
+    height
   };
 }
 
@@ -932,7 +971,7 @@ function drawBird() {
   ctx.rotate(tilt);
 
   if (birdSprite.complete && birdSprite.naturalWidth > 0) {
-    const size = bird.radius * 2.7;
+    const size = bird.radius * BIRD_RENDER_SCALE;
     ctx.drawImage(birdSprite, -size / 2, -size / 2, size, size);
   } else {
     ctx.fillStyle = '#ffd84d';
@@ -1000,7 +1039,7 @@ function drawMenuScene() {
     ctx.globalAlpha = 0.26;
     ctx.translate(centerX, centerY);
     ctx.rotate(Math.sin(elapsedMs / 600) * 0.08);
-    const size = 184;
+    const size = BIRD_MENU_SCALE;
     ctx.drawImage(birdSprite, -size / 2, -size / 2, size, size);
     ctx.restore();
   }

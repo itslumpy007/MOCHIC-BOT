@@ -632,6 +632,82 @@ canvas {
   text-align: left;
 }
 
+.leaderboard-podium {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr 1fr;
+  gap: 10px;
+  align-items: end;
+}
+
+.podium-slot {
+  display: grid;
+  gap: 5px;
+  justify-items: center;
+  padding: 14px 12px 12px;
+  border-radius: 20px 20px 18px 18px;
+  background:
+    linear-gradient(180deg, rgba(37, 208, 171, 0.16), rgba(8, 14, 22, 0.74)),
+    rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: center;
+}
+
+.podium-slot.self {
+  background:
+    linear-gradient(180deg, rgba(37, 208, 171, 0.24), rgba(8, 14, 22, 0.76)),
+    rgba(255, 255, 255, 0.04);
+  border-color: rgba(37, 208, 171, 0.28);
+}
+
+.podium-slot.empty {
+  opacity: 0.8;
+}
+
+.podium-first {
+  transform: translateY(-8px);
+  min-height: 160px;
+}
+
+.podium-second,
+.podium-third {
+  min-height: 132px;
+}
+
+.podium-rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(8, 14, 22, 0.64);
+  color: var(--accent-2);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
+.podium-crown {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.podium-name {
+  color: var(--text);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 1.04rem;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.podium-score {
+  color: var(--text);
+  font-size: 1.5rem;
+  font-weight: 800;
+}
+
 .leaderboard-list {
   list-style: none;
   margin: 0;
@@ -917,6 +993,38 @@ button:disabled {
     width: 100%;
   }
 
+  .leaderboard-podium {
+    grid-template-columns: 1fr;
+  }
+
+  .podium-first {
+    transform: none;
+  }
+
+  .podium-slot {
+    min-height: auto;
+  }
+
+  .leaderboard-entry {
+    grid-template-columns: 60px minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 11px 12px;
+  }
+
+  .leaderboard-rank {
+    min-width: 50px;
+    padding-inline: 8px;
+    font-size: 0.86rem;
+  }
+
+  .leaderboard-score {
+    font-size: 1.05rem;
+  }
+
+  .leaderboard-name strong {
+    font-size: 0.92rem;
+  }
+
   body.activity-mode .app-shell {
     width: min(100vw - 12px, 980px);
     padding: 10px 0 14px;
@@ -937,5 +1045,13 @@ button:disabled {
 
   body.activity-mode .stage {
     width: 100%;
+  }
+
+  body.activity-mode .leaderboard-podium {
+    grid-template-columns: 1fr;
+  }
+
+  body.activity-mode .leaderboard-entry {
+    grid-template-columns: 54px minmax(0, 1fr) auto;
   }
 }
