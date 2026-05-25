@@ -388,60 +388,93 @@ body.mobile-activity .menu-tab {
 }
 
 body.desktop-activity .app-shell {
-  width: min(1240px, calc(100vw - 56px));
-  gap: 32px;
+  width: min(1460px, calc(100vw - 56px));
+  padding-top: 88px;
+  gap: 28px 34px;
+  grid-template-columns: minmax(320px, 0.78fr) minmax(720px, 1.22fr);
+  align-items: start;
+}
+
+body.desktop-activity .hero {
+  display: grid;
+  align-content: start;
+  position: sticky;
+  top: 28px;
+  padding: 18px 6px 8px 0;
+  max-width: none;
+}
+
+body.desktop-activity .hero-logo {
+  width: min(100%, 500px);
+}
+
+body.desktop-activity .hero h1 {
+  font-size: clamp(2.9rem, 3.8vw, 4.8rem);
+}
+
+body.desktop-activity .hero p {
+  font-size: 1.08rem;
 }
 
 body.desktop-activity .game-card {
-  padding: 26px;
-  border-radius: 30px;
+  padding: 28px;
+  border-radius: 32px;
 }
 
 body.desktop-activity .stage {
-  width: min(100%, 580px);
+  width: min(100%, 640px);
 }
 
 body.desktop-activity .menu-card {
-  width: min(94%, 680px);
-  padding: 24px;
+  width: min(96%, 760px);
+  padding: 26px;
 }
 
 body.desktop-activity .main-menu-stage {
-  gap: 18px;
-  padding: 18px 10px 8px;
+  gap: 20px;
+  padding: 20px 16px 12px;
 }
 
 body.desktop-activity .main-menu-wordmark {
-  width: min(100%, 480px);
-  min-height: 94px;
-  font-size: clamp(2.4rem, 3.8vw, 3.75rem);
+  width: min(100%, 520px);
+  min-height: 102px;
+  font-size: clamp(2.6rem, 3.9vw, 4rem);
 }
 
 body.desktop-activity .main-menu-avatar {
-  width: 184px;
-  height: 184px;
+  width: 196px;
+  height: 196px;
 }
 
 body.desktop-activity .main-menu-leaderboard {
-  padding: 14px;
-  gap: 12px;
+  padding: 16px;
+  gap: 14px;
 }
 
 body.desktop-activity .main-menu-leaderboard-podium {
-  gap: 10px;
+  gap: 12px;
 }
 
 body.desktop-activity .main-menu-actions {
-  grid-template-columns: 1.2fr 1fr 1fr 0.8fr;
+  grid-template-columns: 1.35fr 1fr 1fr 0.8fr;
 }
 
 body.desktop-activity .main-menu-actions button {
-  min-height: 74px;
-  font-size: 1.16rem;
+  min-height: 78px;
+  font-size: 1.18rem;
 }
 
 body.desktop-activity .leaderboard-entry {
   grid-template-columns: 84px minmax(0, 1fr) auto;
+}
+
+body.desktop-activity .menu-tabs {
+  margin-top: 2px;
+}
+
+body.desktop-activity .menu-tab {
+  min-height: 48px;
+  font-size: 0.98rem;
 }
 
 .hero {
