@@ -443,7 +443,7 @@ async function loadLeaderboard(force = false) {
     return leaderboardEntries;
   }
 
-  if (leaderboardLoaded && leaderboardEntries.length && !force) {
+  if (leaderboardLoaded && !force) {
     renderLeaderboard(leaderboardEntries);
     return leaderboardEntries;
   }
@@ -457,16 +457,6 @@ async function loadLeaderboard(force = false) {
   }
 
   try {
-    const response = await fetch('/api/mochi/leaderboard');
-    const payload = await readResponseJson(response);
-    if (!response.ok) {
-      throw new Error(payload.error || 'Failed to load leaderboard');
-    }
-
-    leaderboardEntries = Array.isArray(payload.leaderboard) ? payload.leaderboard : [];
-    leaderboardLoaded = true;
-    renderLeaderboard(leaderboardEntries);
-  } catch (error) {
     try {
       const configResponse = await fetch('/api/mochi/config');
       const configPayload = await readResponseJson(configResponse);
@@ -476,14 +466,30 @@ async function loadLeaderboard(force = false) {
         renderLeaderboard(leaderboardEntries);
         return leaderboardEntries;
       }
-      throw error;
+      throw new Error('Leaderboard data is unavailable.');
     } catch (fallbackError) {
-      leaderboardEntries = [];
-      if (leaderboardSummaryEl) {
-        leaderboardSummaryEl.textContent = `Could not load the leaderboard: ${fallbackError.message}`;
-      }
-      if (leaderboardListEl) {
-        leaderboardListEl.innerHTML = '<li class="leaderboard-empty">Try opening the leaderboard again in a moment.</li>';
+      try {
+        const response = await fetch('/api/mochi/leaderboard');
+        const payload = await readResponseJson(response);
+        if (!response.ok) {
+          throw new Error(payload.error || 'Failed to load leaderboard');
+        }
+
+        leaderboardEntries = Array.isArray(payload.leaderboard) ? payload.leaderboard : [];
+        leaderboardLoaded = true;
+        renderLeaderboard(leaderboardEntries);
+      } catch (leaderboardError) {
+        if (leaderboardLoaded) {
+          renderLeaderboard(leaderboardEntries);
+          return leaderboardEntries;
+        }
+        leaderboardEntries = [];
+        if (leaderboardSummaryEl) {
+          leaderboardSummaryEl.textContent = `Could not load the leaderboard: ${leaderboardError.message || fallbackError.message}`;
+        }
+        if (leaderboardListEl) {
+          leaderboardListEl.innerHTML = '<li class="leaderboard-empty">Try opening the leaderboard again in a moment.</li>';
+        }
       }
     }
   } finally {
