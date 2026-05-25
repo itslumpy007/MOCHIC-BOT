@@ -36,6 +36,7 @@ const runSummaryTextEl = document.getElementById('runSummaryText');
 const modeLabelEl = document.getElementById('modeLabel');
 const menuTabs = Array.from(document.querySelectorAll('[data-menu-tab]'));
 const menuPanels = Array.from(document.querySelectorAll('[data-menu-panel]'));
+const mainMenuStageEl = document.querySelector('.main-menu-stage');
 const ASSET_VERSION = 'mobile-activity11';
 const DISCORD_SDK_MODULE_URL = `./vendor/discord-sdk/index.mjs?v=${ASSET_VERSION}`;
 const SETTINGS_KEY = 'discord-mochi-bird-settings';
@@ -633,6 +634,18 @@ function handleStartRunButtonActivation(event) {
       event.stopPropagation();
     }
     window.location.reload();
+    return;
+  }
+
+  startRunNow(event);
+}
+
+function handleMainMenuStartFallback(event) {
+  if (menuView !== 'main' || started || gameOver) {
+    return;
+  }
+
+  if (isInteractiveTarget(event.target)) {
     return;
   }
 
@@ -1983,6 +1996,8 @@ mainPlayButton.addEventListener('click', () => {
 });
 mainPlayButton.addEventListener('pointerdown', startRunNow);
 mainPlayButton.addEventListener('touchend', startRunNow, { passive: false });
+mainMenuStageEl?.addEventListener('pointerup', handleMainMenuStartFallback);
+mainMenuStageEl?.addEventListener('touchend', handleMainMenuStartFallback, { passive: false });
 mainLeaderboardButton.addEventListener('click', () => {
   void unlockAudio();
   showMenu('leaderboard');
