@@ -36,7 +36,7 @@ const runSummaryTextEl = document.getElementById('runSummaryText');
 const modeLabelEl = document.getElementById('modeLabel');
 const menuTabs = Array.from(document.querySelectorAll('[data-menu-tab]'));
 const menuPanels = Array.from(document.querySelectorAll('[data-menu-panel]'));
-const ASSET_VERSION = 'mobile-activity4';
+const ASSET_VERSION = 'mobile-activity5';
 const SETTINGS_KEY = 'discord-mochi-bird-settings';
 
 const params = new URLSearchParams(window.location.search);
@@ -67,6 +67,8 @@ let leaderboardEntries = Array.isArray(mochiBootstrap.leaderboard) ? mochiBootst
 let leaderboardLoading = false;
 let leaderboardLoaded = Array.isArray(mochiBootstrap.leaderboard);
 let leaderboardRefreshTimer = null;
+let leaderboardRefreshLabelTimer = null;
+let leaderboardLastRefreshAt = Array.isArray(mochiBootstrap.leaderboard) ? Date.now() : 0;
 const BIRD_RENDER_SCALE = 3.05;
 const BIRD_MENU_SCALE = 200;
 const BIRD_HITBOX_SCALE = 1.55;
@@ -94,6 +96,7 @@ let lastTime = 0;
 let started = false;
 let gameOver = false;
 let submitted = false;
+let scoreSubmissionInFlight = false;
 let score = 0;
 let bestScore = 0;
 let elapsedMs = 0;
@@ -354,6 +357,20 @@ async function readResponseJson(response) {
   return response.json();
 }
 
+async function readResponsePayload(response) {
+  const text = await response.text();
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return { __text: trimmed };
+  }
+}
+
 function formatLeaderboardUpdatedAt(value) {
   if (!value) {
     return 'Updated when the panel opens.';
@@ -365,6 +382,44 @@ function formatLeaderboardUpdatedAt(value) {
   }
 
   return `Updated ${date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
+}
+
+function formatRelativeTime(ms) {
+  if (!ms || ms < 1000) {
+    return 'just now';
+  }
+
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) {
+    return `${seconds} second${seconds === 1 ? '' : 's'}`;
+  }
+
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+  }
+
+  const hours = Math.round(minutes / 60);
+  return `${hours} hour${hours === 1 ? '' : 's'}`;
+}
+
+function updateLeaderboardUpdatedLabel() {
+  if (!leaderboardUpdatedEl) {
+    return;
+  }
+
+  if (!leaderboardLastRefreshAt) {
+    leaderboardUpdatedEl.textContent = 'Last updated just now.';
+    return;
+  }
+
+  const elapsed = Date.now() - leaderboardLastRefreshAt;
+  leaderboardUpdatedEl.textContent = `Last updated ${formatRelativeTime(elapsed)} ago.`;
+}
+
+function markLeaderboardRefreshed() {
+  leaderboardLastRefreshAt = Date.now();
+  updateLeaderboardUpdatedLabel();
 }
 
 function renderLeaderboardPodium(container, rows, sessionUserId) {
@@ -418,9 +473,7 @@ function renderLeaderboard(entries = leaderboardEntries) {
     if (leaderboardSummaryEl) {
       leaderboardSummaryEl.textContent = 'No leaderboard entries yet.';
     }
-    if (leaderboardUpdatedEl) {
-      leaderboardUpdatedEl.textContent = 'Updated when a score is submitted.';
-    }
+    markLeaderboardRefreshed();
     return;
   }
 
@@ -451,9 +504,7 @@ function renderLeaderboard(entries = leaderboardEntries) {
       ? `${leader.userTag || 'The current leader'} is sitting on ${leader.bestScore} points.`
       : `${leader.userTag || 'The current leader'} leads with ${leader.bestScore} points across ${rows.length} entries.`;
   }
-  if (leaderboardUpdatedEl) {
-    leaderboardUpdatedEl.textContent = formatLeaderboardUpdatedAt(leader?.updatedAt);
-  }
+  markLeaderboardRefreshed();
 }
 
 function startLeaderboardAutoRefresh() {
@@ -466,13 +517,26 @@ function startLeaderboardAutoRefresh() {
       return;
     }
     void loadLeaderboard(true);
-  }, 15000);
+  }, 10000);
+
+  if (!leaderboardRefreshLabelTimer) {
+    leaderboardRefreshLabelTimer = window.setInterval(() => {
+      if (!leaderboardLoaded) {
+        return;
+      }
+      updateLeaderboardUpdatedLabel();
+    }, 1000);
+  }
 }
 
 function stopLeaderboardAutoRefresh() {
   if (leaderboardRefreshTimer) {
     clearInterval(leaderboardRefreshTimer);
     leaderboardRefreshTimer = null;
+  }
+  if (leaderboardRefreshLabelTimer) {
+    clearInterval(leaderboardRefreshLabelTimer);
+    leaderboardRefreshLabelTimer = null;
   }
 }
 
@@ -495,21 +559,23 @@ async function loadLeaderboard(force = false) {
   }
 
   try {
-    const configResponse = await fetch('/api/mochi/config');
-    const configPayload = await readResponseJson(configResponse);
-    if (configResponse.ok && Array.isArray(configPayload.leaderboard)) {
+    const configResponse = await fetch('/api/mochi/config', { cache: 'no-store' });
+    const configPayload = await readResponsePayload(configResponse);
+    if (configResponse.ok && configPayload && Array.isArray(configPayload.leaderboard)) {
       leaderboardEntries = configPayload.leaderboard;
       leaderboardLoaded = true;
       renderLeaderboard(leaderboardEntries);
+      markLeaderboardRefreshed();
       return leaderboardEntries;
     }
 
-    const response = await fetch('/api/mochi/leaderboard');
-    const payload = await readResponseJson(response);
-    if (response.ok) {
+    const response = await fetch('/api/mochi/leaderboard', { cache: 'no-store' });
+    const payload = await readResponsePayload(response);
+    if (response.ok && payload && Array.isArray(payload.leaderboard)) {
       leaderboardEntries = Array.isArray(payload.leaderboard) ? payload.leaderboard : [];
       leaderboardLoaded = true;
       renderLeaderboard(leaderboardEntries);
+      markLeaderboardRefreshed();
       return leaderboardEntries;
     }
 
@@ -522,6 +588,17 @@ async function loadLeaderboard(force = false) {
     leaderboardEntries = [];
     leaderboardLoaded = true;
     renderLeaderboard(leaderboardEntries);
+    markLeaderboardRefreshed();
+  } catch {
+    leaderboardLoaded = true;
+    if (leaderboardEntries.length) {
+      renderLeaderboard(leaderboardEntries);
+      markLeaderboardRefreshed();
+    } else {
+      leaderboardEntries = [];
+      renderLeaderboard(leaderboardEntries);
+      markLeaderboardRefreshed();
+    }
   } finally {
     leaderboardLoading = false;
   }
@@ -965,15 +1042,16 @@ function endGame(reason) {
 }
 
 async function submitScore(reason) {
-  if (isPracticeMode || submitted || !sessionId) {
+  if (isPracticeMode || submitted || scoreSubmissionInFlight || !sessionId) {
     return;
   }
 
-  submitted = true;
+  scoreSubmissionInFlight = true;
 
   try {
     const response = await fetch(`/api/mochi/session/${sessionId}/score`, {
       method: 'POST',
+      keepalive: true,
       headers: {
         'Content-Type': 'application/json'
       },
@@ -984,17 +1062,18 @@ async function submitScore(reason) {
       })
     });
 
-    const payload = await response.json();
+    const payload = await readResponsePayload(response);
     if (!response.ok) {
-      throw new Error(payload.error || 'Failed to submit score');
+      throw new Error(payload?.error || payload?.__text || 'Failed to submit score');
     }
 
-    const submittedBest = payload.personalBest?.bestScore ?? score;
+    submitted = true;
+    const submittedBest = payload?.personalBest?.bestScore ?? score;
     bestScore = Math.max(bestScore, submittedBest);
     localStorage.setItem(bestScoreKey, String(bestScore));
     bestScoreEl.textContent = String(bestScore);
     recordRunSnapshot('Saved', `Score saved! Personal best: ${submittedBest}.`);
-    if (Array.isArray(payload.leaderboard)) {
+    if (Array.isArray(payload?.leaderboard)) {
       leaderboardEntries = payload.leaderboard;
       leaderboardLoaded = true;
       renderLeaderboard(leaderboardEntries);
@@ -1004,6 +1083,9 @@ async function submitScore(reason) {
     updateStatus(`Score submitted. Personal best: ${submittedBest}.`);
   } catch (error) {
     updateStatus(`Could not submit score: ${error.message}`);
+    submitted = false;
+  } finally {
+    scoreSubmissionInFlight = false;
   }
 }
 
