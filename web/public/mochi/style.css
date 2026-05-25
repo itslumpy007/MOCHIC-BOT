@@ -297,6 +297,8 @@ body.activity-mode .overlay-card {
 
 .game-card {
   position: relative;
+  width: min(100%, 980px);
+  margin: 0 auto;
   background: linear-gradient(180deg, rgba(14, 24, 36, 0.88), rgba(8, 16, 25, 0.92));
   border: 1px solid var(--border);
   border-radius: 28px;
@@ -389,7 +391,7 @@ body.activity-mode .overlay-card {
 
 .stage {
   position: relative;
-  width: min(100%, 460px);
+  width: min(100%, 520px);
   margin: 0 auto;
   aspect-ratio: 9 / 16;
   border-radius: 24px;
@@ -430,7 +432,7 @@ canvas {
 }
 
 .menu-card {
-  width: min(94%, 520px);
+  width: min(94%, 560px);
   padding: 18px;
 }
 
@@ -502,7 +504,7 @@ canvas {
   align-items: center;
   justify-content: center;
   width: min(100%, 360px);
-  min-height: 70px;
+  min-height: 78px;
   padding: 14px 18px;
   border-radius: 20px;
   background:
@@ -531,8 +533,8 @@ canvas {
 }
 
 .main-menu-avatar {
-  width: 148px;
-  height: 148px;
+  width: 156px;
+  height: 156px;
   padding: 12px;
   border-radius: 32px;
   box-shadow:
@@ -1025,7 +1027,7 @@ button:disabled {
 @media (max-width: 640px) {
   .app-shell {
     width: min(100vw - 18px, 1120px);
-    padding-top: 94px;
+    padding-top: 88px;
   }
 
   .global-brand {
@@ -1040,7 +1042,8 @@ button:disabled {
   }
 
   .game-card {
-    padding: 14px;
+    width: min(100%, 100%);
+    padding: 12px;
     border-radius: 22px;
   }
 
@@ -1068,13 +1071,30 @@ button:disabled {
     text-align: center;
   }
 
+  .menu-card {
+    width: min(96%, 560px);
+    padding: 14px;
+  }
+
   .main-menu-actions {
     grid-template-columns: 1fr;
   }
 
+  .main-menu-stage {
+    gap: 12px;
+    padding: 10px 2px 0;
+  }
+
+  .main-menu-wordmark {
+    width: 100%;
+    min-height: 60px;
+    padding: 12px 14px;
+    font-size: clamp(1.7rem, 11vw, 2.55rem);
+  }
+
   .main-menu-avatar {
-    width: 126px;
-    height: 126px;
+    width: 120px;
+    height: 120px;
   }
 
   .menu-copy {
@@ -1083,6 +1103,12 @@ button:disabled {
 
   .menu-chips {
     justify-content: center;
+    gap: 6px;
+  }
+
+  .menu-tab {
+    flex: 1 1 0;
+    padding-inline: 10px;
   }
 
   .hero-logo {
@@ -1135,7 +1161,7 @@ button:disabled {
   }
 
   body.activity-mode .game-card {
-    padding: 10px;
+    padding: 8px;
   }
 
   body.activity-mode .game-brand {
@@ -1157,5 +1183,51 @@ button:disabled {
 
   body.activity-mode .leaderboard-entry {
     grid-template-columns: 54px minmax(0, 1fr) auto;
+  }
+}
+
+@media (min-width: 901px) {
+  .app-shell {
+    width: min(1140px, calc(100vw - 48px));
+    gap: 28px;
+  }
+
+  .game-card {
+    padding: 22px;
+    border-radius: 30px;
+  }
+
+  .stage {
+    width: min(100%, 540px);
+  }
+
+  .menu-card {
+    width: min(94%, 620px);
+    padding: 22px;
+  }
+
+  .main-menu-stage {
+    gap: 16px;
+    padding: 16px 8px 6px;
+  }
+
+  .main-menu-wordmark {
+    width: min(100%, 420px);
+    min-height: 86px;
+    font-size: clamp(2.2rem, 4.4vw, 3.4rem);
+  }
+
+  .main-menu-avatar {
+    width: 168px;
+    height: 168px;
+  }
+
+  .main-menu-actions button {
+    min-height: 68px;
+    font-size: 1.1rem;
+  }
+
+  .leaderboard-entry {
+    grid-template-columns: 76px minmax(0, 1fr) auto;
   }
 }
