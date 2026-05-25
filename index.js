@@ -8770,9 +8770,13 @@ function serveWebStatic(req, res, pathname) {
     }
 
     if (filePath === path.join(webPublicDir, getMochiIndexPath())) {
-      const bootstrapPayload = JSON.stringify(buildMochiBootstrapPayload()).replace(/</g, "\\u003c");
+      const mochiBootstrap = buildMochiBootstrapPayload();
+      const bootstrapPayload = JSON.stringify(mochiBootstrap).replace(/</g, "\\u003c");
       const bootstrapScript = `<script type="application/json" id="mochi-bootstrap">${bootstrapPayload}</script>`;
-      const html = data.toString("utf8").replace("</head>", `${bootstrapScript}</head>`);
+      const htmlBodyClass = mochiBootstrap.activityMode ? `<body class="activity-mode">` : `<body>`;
+      const html = data.toString("utf8")
+        .replace("<body>", htmlBodyClass)
+        .replace("</head>", `${bootstrapScript}</head>`);
       res.writeHead(200, {
         "Content-Type": getWebMimeType(filePath),
         "Cache-Control": "no-store"
