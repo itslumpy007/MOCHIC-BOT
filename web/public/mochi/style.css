@@ -51,6 +51,10 @@ body {
   transform: scale(1.02);
 }
 
+body.activity-mode .intro-splash {
+  display: none;
+}
+
 .intro-card {
   width: min(92vw, 760px);
   display: grid;
