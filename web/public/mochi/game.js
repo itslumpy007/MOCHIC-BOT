@@ -10,6 +10,7 @@ const sessionNoteEl = document.getElementById('sessionNote');
 const introSplashEl = document.getElementById('introSplash');
 const mainPlayButton = document.getElementById('mainPlayButton');
 const mainLeaderboardButton = document.getElementById('mainLeaderboardButton');
+const mainLeaderboardButtonInline = document.getElementById('mainLeaderboardButtonInline');
 const mainSettingsButton = document.getElementById('mainSettingsButton');
 const startRunButton = document.getElementById('startRunButton');
 const startBackButton = document.getElementById('startBackButton');
@@ -20,6 +21,7 @@ const reducedMotionStateEl = document.getElementById('reducedMotionState');
 const hardModeStateEl = document.getElementById('hardModeState');
 const leaderboardSummaryEl = document.getElementById('leaderboardSummary');
 const leaderboardPodiumEl = document.getElementById('leaderboardPodium');
+const mainMenuLeaderboardPodiumEl = document.getElementById('mainMenuLeaderboardPodium');
 const leaderboardListEl = document.getElementById('leaderboardList');
 const leaderboardUpdatedEl = document.getElementById('leaderboardUpdated');
 const startMenuTextEl = document.getElementById('startMenuText');
@@ -250,6 +252,40 @@ function formatLeaderboardUpdatedAt(value) {
   return `Updated ${date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
 }
 
+function renderLeaderboardPodium(container, rows, sessionUserId) {
+  if (!container) {
+    return;
+  }
+
+  const podiumEntries = (Array.isArray(rows) ? rows : []).slice(0, 3);
+  if (!podiumEntries.length) {
+    container.innerHTML = '<div class="podium-empty">No scores yet.</div>';
+    return;
+  }
+
+  const podiumSlots = [
+    { key: 'second', entry: podiumEntries[1], label: '#2', title: 'Runner-up' },
+    { key: 'first', entry: podiumEntries[0], label: '#1', title: 'Champion' },
+    { key: 'third', entry: podiumEntries[2], label: '#3', title: 'Third place' }
+  ];
+
+  container.innerHTML = podiumSlots.map((slot) => {
+    if (!slot.entry) {
+      return `<div class="podium-slot podium-${slot.key} empty"><span class="podium-rank">${slot.label}</span><span class="podium-name">Open spot</span><span class="podium-score">--</span></div>`;
+    }
+
+    const isSelf = sessionUserId && slot.entry.userId === sessionUserId;
+    return `
+      <div class="podium-slot podium-${slot.key}${isSelf ? ' self' : ''}">
+        <span class="podium-rank">${slot.label}</span>
+        <span class="podium-crown">${slot.title}</span>
+        <strong class="podium-name">${escapeHtml(slot.entry.userTag || 'Unknown player')}</strong>
+        <span class="podium-score">${Number(slot.entry.bestScore) || 0}</span>
+      </div>
+    `;
+  }).join('');
+}
+
 function renderLeaderboard(entries = leaderboardEntries) {
   if (!leaderboardListEl) {
     return;
@@ -260,33 +296,8 @@ function renderLeaderboard(entries = leaderboardEntries) {
   const podiumEntries = rows.slice(0, 3);
   const remainder = rows.slice(3);
 
-  if (leaderboardPodiumEl) {
-    if (!podiumEntries.length) {
-      leaderboardPodiumEl.innerHTML = '';
-    } else {
-      const podiumSlots = [
-        { key: 'second', entry: podiumEntries[1], label: '#2', title: 'Runner-up' },
-        { key: 'first', entry: podiumEntries[0], label: '#1', title: 'Champion' },
-        { key: 'third', entry: podiumEntries[2], label: '#3', title: 'Third place' }
-      ];
-
-      leaderboardPodiumEl.innerHTML = podiumSlots.map((slot) => {
-        if (!slot.entry) {
-          return `<div class="podium-slot podium-${slot.key} empty"><span class="podium-rank">${slot.label}</span><span class="podium-name">Open spot</span><span class="podium-score">--</span></div>`;
-        }
-
-        const isSelf = sessionUserId && slot.entry.userId === sessionUserId;
-        return `
-          <div class="podium-slot podium-${slot.key}${isSelf ? ' self' : ''}">
-            <span class="podium-rank">${slot.label}</span>
-            <span class="podium-crown">${slot.title}</span>
-            <strong class="podium-name">${escapeHtml(slot.entry.userTag || 'Unknown player')}</strong>
-            <span class="podium-score">${Number(slot.entry.bestScore) || 0}</span>
-          </div>
-        `;
-      }).join('');
-    }
-  }
+  renderLeaderboardPodium(leaderboardPodiumEl, rows, sessionUserId);
+  renderLeaderboardPodium(mainMenuLeaderboardPodiumEl, rows, sessionUserId);
 
   if (!rows.length) {
     leaderboardListEl.innerHTML = '<li class="leaderboard-empty">No scores yet. Be the first to set one.</li>';
@@ -1288,6 +1299,10 @@ mainPlayButton.addEventListener('click', () => {
   showMenu('start');
 });
 mainLeaderboardButton.addEventListener('click', () => {
+  void unlockAudio();
+  showMenu('leaderboard');
+});
+mainLeaderboardButtonInline.addEventListener('click', () => {
   void unlockAudio();
   showMenu('leaderboard');
 });
