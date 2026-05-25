@@ -325,13 +325,13 @@ body.mobile-activity .overlay-card {
 }
 
 body.mobile-activity .menu-card {
-  width: min(98%, 560px);
-  padding: 12px;
+  width: min(100%, 520px);
+  padding: 10px;
 }
 
 body.mobile-activity .main-menu-stage {
-  gap: 10px;
-  padding: 8px 0 0;
+  gap: 8px;
+  padding: 4px 0 0;
 }
 
 body.mobile-activity .main-menu-title p {
@@ -359,6 +359,18 @@ body.mobile-activity .main-menu-actions button {
   min-height: 54px;
   font-size: 0.98rem;
   letter-spacing: 0.06em;
+}
+
+body.mobile-activity .menu-logo {
+  display: none;
+}
+
+body.mobile-activity .menu-meta {
+  margin-bottom: 4px;
+}
+
+body.mobile-activity .menu-meta h2 {
+  font-size: 1.35rem;
 }
 
 body.mobile-activity .main-menu-leaderboard,
@@ -1718,8 +1730,8 @@ button:disabled {
   }
 
   .menu-card {
-    width: min(98%, 560px);
-    padding: 12px;
+    width: min(100%, 520px);
+    padding: 10px;
   }
 
   .overlay {

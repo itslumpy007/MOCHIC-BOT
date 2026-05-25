@@ -847,6 +847,14 @@ function setMenuView(view) {
   });
 }
 
+function resetOverlayScroll() {
+  overlayEl.scrollTop = 0;
+  const overlayCard = overlayEl.querySelector('.overlay-card');
+  if (overlayCard) {
+    overlayCard.scrollTop = 0;
+  }
+}
+
 function updateMenuHeader(title, text) {
   overlayTitleEl.textContent = title;
   overlayTextEl.textContent = text;
@@ -888,6 +896,7 @@ function showMenu(view = 'main', options = {}) {
   startRunButton.disabled = startDisabled;
   startRunMode = startAction;
   setMenuView(view);
+  resetOverlayScroll();
   if (view === 'start' && latestRunSnapshot) {
     syncRunSummary(latestRunSnapshot);
   } else if (view === 'start') {
@@ -1902,6 +1911,7 @@ mobileTapLayerEl?.addEventListener('click', handleMobileTapLayerInput);
 
 mainPlayButton.addEventListener('click', () => {
   void unlockAudio();
+  updateStatus('Starting run...');
   void launchRun();
 });
 mainLeaderboardButton.addEventListener('click', () => {
@@ -1922,6 +1932,7 @@ mainMuteButton.addEventListener('click', () => {
 });
 startRunButton.addEventListener('click', () => {
   void unlockAudio();
+  updateStatus('Starting run...');
   if (startRunMode === 'reload') {
     window.location.reload();
     return;
