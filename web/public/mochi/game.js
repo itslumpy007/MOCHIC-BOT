@@ -609,7 +609,7 @@ function scheduleActivityAutoStart(delayMs = 900) {
   activityAutoStartTimer = window.setTimeout(() => {
     activityAutoStartTimer = null;
     if (!started && !gameOver) {
-      startRunNow();
+      void launchRun();
     }
   }, delayMs);
 }
