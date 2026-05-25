@@ -7108,7 +7108,7 @@ function buildMochiBaseUrl() {
 function buildMochiBootstrapPayload() {
   return {
     ok: true,
-    activityMode: Boolean(DISCORD_ACTIVITY_MODE),
+    activityMode: envFlag(process.env.DISCORD_ACTIVITY_MODE, true),
     discordClientId: CLIENT_ID || null,
     gameTitle: "Mochi Bird",
     publicBaseUrl: buildMochiBaseUrl(),
