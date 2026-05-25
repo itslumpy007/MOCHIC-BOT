@@ -71,6 +71,7 @@
                 <div class="menu-tabs" role="tablist" aria-label="Menu sections">
                   <button type="button" class="menu-tab active" data-menu-tab="main">Main</button>
                   <button type="button" class="menu-tab" data-menu-tab="start">Start</button>
+                  <button type="button" class="menu-tab" data-menu-tab="leaderboard">Leaderboard</button>
                   <button type="button" class="menu-tab" data-menu-tab="settings">Settings</button>
                 </div>
 
@@ -143,6 +144,23 @@
                   </div>
                   <div class="menu-actions">
                     <button id="settingsBackButton" type="button" class="secondary-button">Back</button>
+                  </div>
+                </section>
+
+                <section class="menu-panel" data-menu-panel="leaderboard">
+                  <p class="panel-label">Leaderboard</p>
+                  <p class="panel-copy">
+                    The highest Mochi Bird scores saved from Discord runs.
+                  </p>
+                  <div class="leaderboard-summary" id="leaderboardSummary">
+                    Loading leaderboard...
+                  </div>
+                  <ol class="leaderboard-list" id="leaderboardList" aria-live="polite"></ol>
+                  <div class="leaderboard-footer" id="leaderboardUpdated">
+                    Updated when the panel opens.
+                  </div>
+                  <div class="menu-actions">
+                    <button id="leaderboardBackButton" type="button" class="secondary-button">Back</button>
                   </div>
                 </section>
 

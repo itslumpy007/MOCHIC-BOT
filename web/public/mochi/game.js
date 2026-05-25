@@ -12,10 +12,14 @@ const mainPlayButton = document.getElementById('mainPlayButton');
 const mainSettingsButton = document.getElementById('mainSettingsButton');
 const startRunButton = document.getElementById('startRunButton');
 const startBackButton = document.getElementById('startBackButton');
+const leaderboardBackButton = document.getElementById('leaderboardBackButton');
 const settingsBackButton = document.getElementById('settingsBackButton');
 const audioStateEl = document.getElementById('audioState');
 const reducedMotionStateEl = document.getElementById('reducedMotionState');
 const hardModeStateEl = document.getElementById('hardModeState');
+const leaderboardSummaryEl = document.getElementById('leaderboardSummary');
+const leaderboardListEl = document.getElementById('leaderboardList');
+const leaderboardUpdatedEl = document.getElementById('leaderboardUpdated');
 const startMenuTextEl = document.getElementById('startMenuText');
 const modeLabelEl = document.getElementById('modeLabel');
 const menuTabs = Array.from(document.querySelectorAll('[data-menu-tab]'));
@@ -32,6 +36,9 @@ let activityMode = false;
 let discordClientId = null;
 let discordSdk = null;
 let menuView = 'main';
+let leaderboardEntries = [];
+let leaderboardLoading = false;
+let leaderboardLoaded = false;
 let settings = {
   audioEnabled: true,
   reducedMotion: false,
@@ -83,6 +90,16 @@ let audioUnlocked = false;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[character]);
 }
 
 function formatDiscordUser(user) {
@@ -203,6 +220,105 @@ async function unlockAudio() {
   }
 
   return audioUnlocked;
+}
+
+function formatLeaderboardUpdatedAt(value) {
+  if (!value) {
+    return 'Updated when the panel opens.';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'Updated when the panel opens.';
+  }
+
+  return `Updated ${date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`;
+}
+
+function renderLeaderboard(entries = leaderboardEntries) {
+  if (!leaderboardListEl) {
+    return;
+  }
+
+  const rows = Array.isArray(entries) ? entries : [];
+  const sessionUserId = session?.userId || null;
+
+  if (!rows.length) {
+    leaderboardListEl.innerHTML = '<li class="leaderboard-empty">No scores yet. Be the first to set one.</li>';
+    if (leaderboardSummaryEl) {
+      leaderboardSummaryEl.textContent = 'No leaderboard entries yet.';
+    }
+    if (leaderboardUpdatedEl) {
+      leaderboardUpdatedEl.textContent = 'Updated when a score is submitted.';
+    }
+    return;
+  }
+
+  leaderboardListEl.innerHTML = rows.map((entry, index) => {
+    const isSelf = sessionUserId && entry.userId === sessionUserId;
+    const rankLabel = index === 0 ? 'Crown' : `#${index + 1}`;
+    const tag = escapeHtml(entry.userTag || 'Unknown player');
+    const bestScoreValue = Number(entry.bestScore) || 0;
+    const lastScoreValue = Number(entry.lastScore) || bestScoreValue;
+    return `
+      <li class="leaderboard-entry${isSelf ? ' self' : ''}">
+        <span class="leaderboard-rank">${rankLabel}</span>
+        <span class="leaderboard-name">
+          <strong>${tag}</strong>
+          ${isSelf ? '<em>You</em>' : `<em>Last run ${lastScoreValue}</em>`}
+        </span>
+        <span class="leaderboard-score">${bestScoreValue}</span>
+      </li>
+    `;
+  }).join('');
+
+  const leader = rows[0];
+  if (leaderboardSummaryEl) {
+    leaderboardSummaryEl.textContent = rows.length === 1
+      ? `${leader.userTag || 'The current leader'} is sitting on ${leader.bestScore} points.`
+      : `${leader.userTag || 'The current leader'} leads with ${leader.bestScore} points across ${rows.length} entries.`;
+  }
+  if (leaderboardUpdatedEl) {
+    leaderboardUpdatedEl.textContent = formatLeaderboardUpdatedAt(leader?.updatedAt);
+  }
+}
+
+async function loadLeaderboard(force = false) {
+  if (leaderboardLoading && !force) {
+    return leaderboardEntries;
+  }
+
+  leaderboardLoading = true;
+  if (leaderboardSummaryEl) {
+    leaderboardSummaryEl.textContent = 'Loading leaderboard...';
+  }
+  if (leaderboardListEl) {
+    leaderboardListEl.innerHTML = '<li class="leaderboard-empty">Fetching the top scores...</li>';
+  }
+
+  try {
+    const response = await fetch('/api/mochi/leaderboard');
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || 'Failed to load leaderboard');
+    }
+
+    leaderboardEntries = Array.isArray(payload.leaderboard) ? payload.leaderboard : [];
+    leaderboardLoaded = true;
+    renderLeaderboard(leaderboardEntries);
+  } catch (error) {
+    leaderboardEntries = [];
+    if (leaderboardSummaryEl) {
+      leaderboardSummaryEl.textContent = `Could not load the leaderboard: ${error.message}`;
+    }
+    if (leaderboardListEl) {
+      leaderboardListEl.innerHTML = '<li class="leaderboard-empty">Try opening the leaderboard again in a moment.</li>';
+    }
+  } finally {
+    leaderboardLoading = false;
+  }
+
+  return leaderboardEntries;
 }
 
 function stopMusicLoop() {
@@ -360,6 +476,11 @@ function showMenu(view = 'main', options = {}) {
   startRunButton.disabled = startDisabled;
   startRunMode = startAction;
   setMenuView(view);
+  if (view === 'leaderboard') {
+    void loadLeaderboard();
+  } else if (leaderboardLoaded) {
+    renderLeaderboard();
+  }
   updateStatus(
     session
       ? `Ready for ${session.userTag}`
@@ -582,6 +703,12 @@ async function submitScore(reason) {
     bestScore = Math.max(bestScore, submittedBest);
     localStorage.setItem(bestScoreKey, String(bestScore));
     bestScoreEl.textContent = String(bestScore);
+    if (Array.isArray(payload.leaderboard)) {
+      leaderboardEntries = payload.leaderboard;
+      leaderboardLoaded = true;
+      renderLeaderboard(leaderboardEntries);
+    }
+    void loadLeaderboard(true);
     updateStatus(`Score submitted. Personal best: ${submittedBest}.`);
   } catch (error) {
     updateStatus(`Could not submit score: ${error.message}`);
@@ -805,7 +932,7 @@ function drawBird() {
   ctx.rotate(tilt);
 
   if (birdSprite.complete && birdSprite.naturalWidth > 0) {
-    const size = bird.radius * 2.35;
+    const size = bird.radius * 2.7;
     ctx.drawImage(birdSprite, -size / 2, -size / 2, size, size);
   } else {
     ctx.fillStyle = '#ffd84d';
@@ -873,7 +1000,7 @@ function drawMenuScene() {
     ctx.globalAlpha = 0.26;
     ctx.translate(centerX, centerY);
     ctx.rotate(Math.sin(elapsedMs / 600) * 0.08);
-    const size = 156;
+    const size = 184;
     ctx.drawImage(birdSprite, -size / 2, -size / 2, size, size);
     ctx.restore();
   }
@@ -991,6 +1118,9 @@ async function loadSession() {
             localStorage.setItem(bestScoreKey, String(bestScore));
           }
         }
+        if (leaderboardLoaded) {
+          renderLeaderboard();
+        }
         sessionNoteEl.textContent = `Activity session created for ${session.userTag}.`;
         updateStatus(`Ready for ${session.userTag}`);
       }
@@ -1019,6 +1149,9 @@ async function loadSession() {
     bestScoreKey = `discord-mochi-bird-best-${session.userId}`;
     sessionNoteEl.textContent = `Session linked to ${session.userTag}.`;
     updateStatus(`Ready for ${session.userTag}`);
+    if (leaderboardLoaded) {
+      renderLeaderboard();
+    }
     try {
       const bestResponse = await fetch(`/api/mochi/leaderboard/${session.userId}`);
       if (bestResponse.ok) {
@@ -1092,6 +1225,10 @@ startBackButton.addEventListener('click', () => {
   void unlockAudio();
   showMenu('main');
 });
+leaderboardBackButton.addEventListener('click', () => {
+  void unlockAudio();
+  showMenu('main');
+});
 settingsBackButton.addEventListener('click', () => {
   void unlockAudio();
   showMenu('main');
@@ -1125,6 +1262,7 @@ showMenu('main', {
   startButtonLabel: 'Please wait',
   startDisabled: true
 });
+void loadLeaderboard();
 window.setTimeout(() => {
   introSplashEl?.classList.add('hidden');
 }, 1700);

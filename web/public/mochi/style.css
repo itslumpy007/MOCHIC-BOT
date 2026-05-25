@@ -525,8 +525,8 @@ canvas {
 }
 
 .menu-avatar-frame {
-  width: 112px;
-  height: 112px;
+  width: 124px;
+  height: 124px;
   border-radius: 28px;
   padding: 10px;
   background:
@@ -619,6 +619,96 @@ canvas {
 .settings-list {
   display: grid;
   gap: 10px;
+}
+
+.leaderboard-summary {
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  font-size: 0.96rem;
+  line-height: 1.45;
+  text-align: left;
+}
+
+.leaderboard-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.leaderboard-empty {
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  color: var(--muted);
+  text-align: left;
+}
+
+.leaderboard-entry {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  text-align: left;
+}
+
+.leaderboard-entry.self {
+  background: linear-gradient(135deg, rgba(37, 208, 171, 0.16), rgba(255, 200, 87, 0.12));
+  border-color: rgba(37, 208, 171, 0.28);
+}
+
+.leaderboard-rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: rgba(8, 14, 22, 0.6);
+  color: var(--accent-2);
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+
+.leaderboard-name {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.leaderboard-name strong {
+  color: var(--text);
+  font-size: 0.96rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leaderboard-name em {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 0.84rem;
+}
+
+.leaderboard-score {
+  color: var(--text);
+  font-size: 1.2rem;
+  font-weight: 800;
+}
+
+.leaderboard-footer {
+  color: var(--muted);
+  font-size: 0.86rem;
+  text-align: left;
 }
 
 .setting-item {
