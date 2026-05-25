@@ -9,6 +9,7 @@ const overlayTextEl = document.getElementById('overlayText');
 const sessionNoteEl = document.getElementById('sessionNote');
 const introSplashEl = document.getElementById('introSplash');
 const mainPlayButton = document.getElementById('mainPlayButton');
+const mainLeaderboardButton = document.getElementById('mainLeaderboardButton');
 const mainSettingsButton = document.getElementById('mainSettingsButton');
 const startRunButton = document.getElementById('startRunButton');
 const startBackButton = document.getElementById('startBackButton');
@@ -558,7 +559,8 @@ function showMenu(view = 'main', options = {}) {
   overlayEl.classList.remove('hidden');
 }
 
-function launchRun() {
+async function launchRun() {
+  await autoSaveScore('reset');
   started = false;
   gameOver = false;
   submitted = false;
@@ -654,6 +656,15 @@ function collectScore(points = 1) {
   }
 }
 
+async function autoSaveScore(reason = 'reset') {
+  if (isPracticeMode || submitted || !sessionId || score <= 0) {
+    return false;
+  }
+
+  await submitScore(reason);
+  return submitted;
+}
+
 function collectibleBox(item) {
   return {
     x: item.x - item.radius,
@@ -672,7 +683,7 @@ function flap() {
     if (startRunButton?.disabled) {
       return;
     }
-    launchRun();
+    void launchRun();
     return;
   }
 
@@ -737,7 +748,7 @@ function endGame(reason) {
   });
   gameOver = true;
   gameState = 'gameover';
-  submitScore(reason);
+  void autoSaveScore(reason);
 }
 
 async function submitScore(reason) {
@@ -1263,7 +1274,7 @@ window.addEventListener('keydown', (event) => {
   }
   if (event.code === 'KeyR' && gameOver) {
     void unlockAudio();
-    launchRun();
+    void launchRun();
   }
 });
 
@@ -1276,6 +1287,10 @@ mainPlayButton.addEventListener('click', () => {
   void unlockAudio();
   showMenu('start');
 });
+mainLeaderboardButton.addEventListener('click', () => {
+  void unlockAudio();
+  showMenu('leaderboard');
+});
 mainSettingsButton.addEventListener('click', () => {
   void unlockAudio();
   showMenu('settings');
@@ -1287,10 +1302,10 @@ startRunButton.addEventListener('click', () => {
     return;
   }
   if (gameState === 'gameover') {
-    launchRun();
+    void launchRun();
     return;
   }
-  launchRun();
+  void launchRun();
 });
 startBackButton.addEventListener('click', () => {
   void unlockAudio();

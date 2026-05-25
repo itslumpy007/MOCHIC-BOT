@@ -479,6 +479,96 @@ canvas {
   display: grid;
 }
 
+.main-menu-stage {
+  display: grid;
+  gap: 14px;
+  padding: 12px 4px 2px;
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at 50% 22%, rgba(255, 255, 255, 0.18), transparent 28%),
+    linear-gradient(180deg, rgba(120, 207, 250, 0.14), rgba(37, 208, 171, 0.04) 58%, rgba(255, 200, 87, 0.08));
+}
+
+.main-menu-title {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding-top: 2px;
+  text-align: center;
+}
+
+.main-menu-wordmark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: min(100%, 360px);
+  min-height: 70px;
+  padding: 14px 18px;
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(252, 245, 207, 0.24), rgba(184, 245, 100, 0.18)),
+    rgba(14, 24, 36, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #faf4cc;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2rem, 8vw, 3rem);
+  font-weight: 900;
+  letter-spacing: -0.05em;
+  text-shadow: 0 3px 0 rgba(66, 43, 28, 0.72), 0 8px 20px rgba(0, 0, 0, 0.24);
+}
+
+.main-menu-title p {
+  max-width: 38ch;
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.main-menu-hero {
+  display: grid;
+  place-items: center;
+  min-height: 150px;
+}
+
+.main-menu-avatar {
+  width: 148px;
+  height: 148px;
+  padding: 12px;
+  border-radius: 32px;
+  box-shadow:
+    0 18px 32px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.main-menu-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.main-menu-actions button {
+  min-height: 64px;
+  font-size: 1.08rem;
+  letter-spacing: 0.08em;
+}
+
+.primary-action {
+  background: linear-gradient(180deg, #ff8a16, #e36c00);
+  color: #fff8e8;
+  box-shadow: 0 14px 28px rgba(227, 108, 0, 0.28);
+  border: 1px solid rgba(95, 46, 0, 0.28);
+}
+
+.main-menu-chips {
+  justify-content: center;
+  margin-top: 2px;
+}
+
+.main-menu-chips span {
+  background: rgba(8, 14, 22, 0.28);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
 .menu-hero {
   display: grid;
   grid-template-columns: 112px 1fr;
@@ -637,6 +727,7 @@ canvas {
   grid-template-columns: 1fr 1.15fr 1fr;
   gap: 10px;
   align-items: end;
+  margin-top: 2px;
 }
 
 .podium-slot {
@@ -977,6 +1068,15 @@ button:disabled {
     text-align: center;
   }
 
+  .main-menu-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .main-menu-avatar {
+    width: 126px;
+    height: 126px;
+  }
+
   .menu-copy {
     width: 100%;
   }
@@ -991,6 +1091,10 @@ button:disabled {
 
   .stage {
     width: 100%;
+  }
+
+  .leaderboard-podium {
+    gap: 8px;
   }
 
   .leaderboard-podium {
