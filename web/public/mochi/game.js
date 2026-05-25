@@ -36,7 +36,7 @@ const runSummaryTextEl = document.getElementById('runSummaryText');
 const modeLabelEl = document.getElementById('modeLabel');
 const menuTabs = Array.from(document.querySelectorAll('[data-menu-tab]'));
 const menuPanels = Array.from(document.querySelectorAll('[data-menu-panel]'));
-const ASSET_VERSION = 'mobile-activity6';
+const ASSET_VERSION = 'mobile-activity7';
 const DISCORD_SDK_MODULE_URL = `./vendor/discord-sdk/index.mjs?v=${ASSET_VERSION}`;
 const SETTINGS_KEY = 'discord-mochi-bird-settings';
 
@@ -550,10 +550,29 @@ function showReadyMenuForCurrentState() {
       : 'Practice mode: this run is local only.',
     startText: session
       ? 'You are connected and ready to play.'
-      : 'Connecting to Discord in the background. Keep this tab open for a moment.',
-    startButtonLabel: session ? 'Start Run' : 'Please wait',
-    startDisabled: !session
+      : 'Connecting to Discord in the background. You can start a practice run now.',
+    startButtonLabel: session ? 'Start Run' : 'Start Practice',
+    startDisabled: false
   });
+}
+
+async function resolveActivitySession(timeoutMs = 3500) {
+  if (sessionId && session) {
+    return session;
+  }
+
+  if (!activityBootstrapPromise) {
+    void bootstrapActivitySession();
+  }
+
+  if (!activityBootstrapPromise) {
+    return null;
+  }
+
+  return Promise.race([
+    activityBootstrapPromise.then(() => session),
+    new Promise((resolve) => window.setTimeout(() => resolve(null), timeoutMs))
+  ]);
 }
 
 async function bootstrapActivitySession() {
@@ -890,6 +909,9 @@ function showMenu(view = 'main', options = {}) {
 }
 
 async function launchRun() {
+  if (activityMode && !sessionId) {
+    await resolveActivitySession(3500);
+  }
   await autoSaveScore('reset');
   started = false;
   gameOver = false;
@@ -1939,13 +1961,13 @@ document.querySelectorAll('[data-setting-toggle]').forEach((button) => {
 resizeCanvas();
 loadSettings();
 updateViewportMode();
-showMenu('main', {
-  title: 'Launching Activity',
-  text: 'Connecting to Discord and preparing your run.',
-  startText: 'If this takes a moment, the Activity is still loading in the background.',
-  startButtonLabel: 'Please wait',
-  startDisabled: true
-});
+  showMenu('main', {
+    title: 'Launching Activity',
+    text: 'Connecting to Discord and preparing your run.',
+    startText: 'If this takes a moment, the Activity is still connecting in the background.',
+    startButtonLabel: 'Start Practice',
+    startDisabled: false
+  });
 void loadLeaderboard();
 startLeaderboardAutoRefresh();
 window.setTimeout(() => {
