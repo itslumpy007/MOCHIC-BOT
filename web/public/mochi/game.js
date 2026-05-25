@@ -66,6 +66,7 @@ let menuView = 'main';
 let leaderboardEntries = Array.isArray(mochiBootstrap.leaderboard) ? mochiBootstrap.leaderboard : [];
 let leaderboardLoading = false;
 let leaderboardLoaded = Array.isArray(mochiBootstrap.leaderboard);
+let leaderboardRefreshTimer = null;
 const BIRD_RENDER_SCALE = 3.05;
 const BIRD_MENU_SCALE = 200;
 const BIRD_HITBOX_SCALE = 1.55;
@@ -452,6 +453,26 @@ function renderLeaderboard(entries = leaderboardEntries) {
   }
   if (leaderboardUpdatedEl) {
     leaderboardUpdatedEl.textContent = formatLeaderboardUpdatedAt(leader?.updatedAt);
+  }
+}
+
+function startLeaderboardAutoRefresh() {
+  if (leaderboardRefreshTimer) {
+    return;
+  }
+
+  leaderboardRefreshTimer = window.setInterval(() => {
+    if (document.hidden) {
+      return;
+    }
+    void loadLeaderboard(true);
+  }, 15000);
+}
+
+function stopLeaderboardAutoRefresh() {
+  if (leaderboardRefreshTimer) {
+    clearInterval(leaderboardRefreshTimer);
+    leaderboardRefreshTimer = null;
   }
 }
 
@@ -979,6 +1000,7 @@ async function submitScore(reason) {
       renderLeaderboard(leaderboardEntries);
     }
     void loadLeaderboard(true);
+    startLeaderboardAutoRefresh();
     updateStatus(`Score submitted. Personal best: ${submittedBest}.`);
   } catch (error) {
     updateStatus(`Could not submit score: ${error.message}`);
@@ -1324,6 +1346,15 @@ function handleGameplayInput(event) {
   handleGameInput(event);
 }
 
+function handleMobileTapLayerInput(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  handleGameplayInput(event);
+}
+
 function isInteractiveTarget(target) {
   if (!(target instanceof Element)) {
     return false;
@@ -1600,6 +1631,7 @@ async function loadSession() {
         updateStatus(`Ready for ${session.userTag}`);
       }
       void loadLeaderboard(true);
+      startLeaderboardAutoRefresh();
     } catch (error) {
       updateStatus(`Discord Activity handshake failed: ${error.message}`);
     }
@@ -1638,6 +1670,7 @@ async function loadSession() {
       // Best score lookup is optional.
     }
     void loadLeaderboard(true);
+    startLeaderboardAutoRefresh();
     showMenu('main');
   } catch (error) {
     updateStatus(`Session error: ${error.message}`);
@@ -1657,6 +1690,16 @@ window.addEventListener('resize', () => {
   if (gameState === 'menu') {
     showMenu(menuView);
   }
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    stopLeaderboardAutoRefresh();
+    return;
+  }
+
+  void loadLeaderboard(true);
+  startLeaderboardAutoRefresh();
 });
 
 window.addEventListener('keydown', (event) => {
@@ -1764,6 +1807,7 @@ showMenu('main', {
   startDisabled: true
 });
 void loadLeaderboard();
+startLeaderboardAutoRefresh();
 window.setTimeout(() => {
   introSplashEl?.classList.add('hidden');
 }, 1700);
