@@ -1961,13 +1961,7 @@ document.querySelectorAll('[data-setting-toggle]').forEach((button) => {
 resizeCanvas();
 loadSettings();
 updateViewportMode();
-  showMenu('main', {
-    title: 'Launching Activity',
-    text: 'Connecting to Discord and preparing your run.',
-    startText: 'If this takes a moment, the Activity is still connecting in the background.',
-    startButtonLabel: 'Start Practice',
-    startDisabled: false
-  });
+showReadyMenuForCurrentState();
 void loadLeaderboard();
 startLeaderboardAutoRefresh();
 window.setTimeout(() => {
