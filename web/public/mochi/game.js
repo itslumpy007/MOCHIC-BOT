@@ -601,14 +601,14 @@ function cancelActivityAutoStart() {
 }
 
 function scheduleActivityAutoStart(delayMs = 900) {
-  if (!activityMode || started || gameOver) {
+  if (started || gameOver) {
     return;
   }
 
   cancelActivityAutoStart();
   activityAutoStartTimer = window.setTimeout(() => {
     activityAutoStartTimer = null;
-    if (activityMode && !started && !gameOver) {
+    if (!started && !gameOver) {
       startRunNow();
     }
   }, delayMs);
