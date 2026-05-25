@@ -62,23 +62,85 @@
           <canvas id="game"></canvas>
           <div class="overlay" id="overlay">
             <div class="overlay-card menu-card">
-              <div class="menu-logo">Mochi Bird</div>
-              <div class="menu-hero">
-                <div class="menu-avatar-frame">
-                  <img id="menuAvatar" src="./assets/avatar-v3.png?v=transparent3" alt="Mochi Bird avatar" />
-                </div>
-                <div class="menu-copy">
+              <div class="menu-shell">
+                <div class="menu-logo">Mochi Bird</div>
+                <div class="menu-meta">
                   <h2 id="overlayTitle">Main Menu</h2>
                   <p id="overlayText">Loading session data.</p>
-                  <div class="menu-chips" aria-hidden="true">
-                    <span>Space</span>
-                    <span>Click</span>
-                    <span>Tap</span>
-                  </div>
-                  <p class="menu-note" id="sessionNote">Practice mode is available when you open this page directly.</p>
                 </div>
+                <div class="menu-tabs" role="tablist" aria-label="Menu sections">
+                  <button type="button" class="menu-tab active" data-menu-tab="main">Main</button>
+                  <button type="button" class="menu-tab" data-menu-tab="start">Start</button>
+                  <button type="button" class="menu-tab" data-menu-tab="settings">Settings</button>
+                </div>
+
+                <section class="menu-panel active" data-menu-panel="main">
+                  <div class="menu-hero">
+                    <div class="menu-avatar-frame">
+                      <img id="menuAvatar" src="./assets/avatar-v3.png?v=transparent3" alt="Mochi Bird avatar" />
+                    </div>
+                    <div class="menu-copy">
+                      <p class="menu-kicker">Mochi Bird, ready to launch</p>
+                      <p class="menu-description">
+                        Collect cans, dodge pipes, and keep your run alive. Choose Start when you’re ready to fly.
+                      </p>
+                      <div class="menu-chips" aria-hidden="true">
+                        <span>Space</span>
+                        <span>Click</span>
+                        <span>Tap</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="menu-actions">
+                    <button id="mainPlayButton" type="button">Play</button>
+                    <button id="mainSettingsButton" type="button" class="secondary-button">Settings</button>
+                  </div>
+                </section>
+
+                <section class="menu-panel" data-menu-panel="start">
+                  <p class="panel-label">Start Menu</p>
+                  <p class="panel-copy" id="startMenuText">
+                    Ready to start a new run. Use the button below when you want to launch.
+                  </p>
+                  <div class="menu-checklist">
+                    <div class="check-item"><strong>Controls</strong><span>Space, click, or tap to flap.</span></div>
+                    <div class="check-item"><strong>Goal</strong><span>Stay alive and collect cans for points.</span></div>
+                    <div class="check-item"><strong>Mode</strong><span id="modeLabel">Normal</span></div>
+                  </div>
+                  <div class="menu-actions">
+                    <button id="startRunButton" type="button">Start Run</button>
+                    <button id="startBackButton" type="button" class="secondary-button">Back</button>
+                  </div>
+                </section>
+
+                <section class="menu-panel" data-menu-panel="settings">
+                  <p class="panel-label">Settings</p>
+                  <p class="panel-copy">
+                    Tune the game for easier reading or a tougher challenge.
+                  </p>
+                  <div class="settings-list">
+                    <button type="button" class="setting-item" data-setting-toggle="reducedMotion">
+                      <span class="setting-copy">
+                        <strong>Reduced motion</strong>
+                        <span>Minimize floating and splash animations.</span>
+                      </span>
+                      <span class="setting-state" id="reducedMotionState">Off</span>
+                    </button>
+                    <button type="button" class="setting-item" data-setting-toggle="hardMode">
+                      <span class="setting-copy">
+                        <strong>Hard mode</strong>
+                        <span>Tighter gaps and faster pipes.</span>
+                      </span>
+                      <span class="setting-state" id="hardModeState">Off</span>
+                    </button>
+                  </div>
+                  <div class="menu-actions">
+                    <button id="settingsBackButton" type="button" class="secondary-button">Back</button>
+                  </div>
+                </section>
+
+                <p class="menu-note" id="sessionNote">Practice mode is available when you open this page directly.</p>
               </div>
-              <button id="primaryButton" type="button">Play</button>
             </div>
           </div>
         </div>

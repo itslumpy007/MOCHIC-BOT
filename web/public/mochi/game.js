@@ -6,10 +6,21 @@ const statusEl = document.getElementById('status');
 const overlayEl = document.getElementById('overlay');
 const overlayTitleEl = document.getElementById('overlayTitle');
 const overlayTextEl = document.getElementById('overlayText');
-const primaryButton = document.getElementById('primaryButton');
 const sessionNoteEl = document.getElementById('sessionNote');
 const introSplashEl = document.getElementById('introSplash');
+const mainPlayButton = document.getElementById('mainPlayButton');
+const mainSettingsButton = document.getElementById('mainSettingsButton');
+const startRunButton = document.getElementById('startRunButton');
+const startBackButton = document.getElementById('startBackButton');
+const settingsBackButton = document.getElementById('settingsBackButton');
+const reducedMotionStateEl = document.getElementById('reducedMotionState');
+const hardModeStateEl = document.getElementById('hardModeState');
+const startMenuTextEl = document.getElementById('startMenuText');
+const modeLabelEl = document.getElementById('modeLabel');
+const menuTabs = Array.from(document.querySelectorAll('[data-menu-tab]'));
+const menuPanels = Array.from(document.querySelectorAll('[data-menu-panel]'));
 const ASSET_VERSION = 'transparent3';
+const SETTINGS_KEY = 'discord-mochi-bird-settings';
 
 const params = new URLSearchParams(window.location.search);
 let sessionId = params.get('sid');
@@ -19,6 +30,12 @@ let bestScoreKey = 'discord-mochi-bird-best-practice';
 let activityMode = false;
 let discordClientId = null;
 let discordSdk = null;
+let menuView = 'main';
+let settings = {
+  reducedMotion: false,
+  hardMode: false
+};
+let startRunMode = 'start';
 
 let session = null;
 const logoSprite = new Image();
@@ -46,15 +63,15 @@ let backgroundOffset = 0;
 let clouds = [];
 let stars = [];
 let collectibles = [];
-let primaryMode = 'start';
 let gameState = 'menu';
 
+let PIPE_SPEED = 170;
+let PIPE_GAP = 166;
+let PIPE_INTERVAL = 1.35;
+let collectibleChance = 0.7;
 const GRAVITY = 1100;
 const FLAP_VELOCITY = -340;
-const PIPE_SPEED = 170;
 const PIPE_WIDTH = 72;
-const PIPE_GAP = 166;
-const PIPE_INTERVAL = 1.35;
 const GROUND_HEIGHT = 90;
 
 function clamp(value, min, max) {
@@ -108,24 +125,94 @@ function resetBoard() {
   collectibles = [];
 }
 
-function showMenu() {
+function loadSettings() {
+  try {
+    const stored = localStorage.getItem(SETTINGS_KEY);
+    if (!stored) {
+      return;
+    }
+    const parsed = JSON.parse(stored);
+    settings.reducedMotion = Boolean(parsed.reducedMotion);
+    settings.hardMode = Boolean(parsed.hardMode);
+  } catch {
+    // Ignore bad settings payloads.
+  }
+}
+
+function saveSettings() {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+function refreshGameplaySettings() {
+  if (settings.hardMode) {
+    PIPE_SPEED = 205;
+    PIPE_GAP = 138;
+    PIPE_INTERVAL = 1.15;
+    collectibleChance = 0.55;
+  } else {
+    PIPE_SPEED = 170;
+    PIPE_GAP = 166;
+    PIPE_INTERVAL = 1.35;
+    collectibleChance = 0.7;
+  }
+}
+
+function applySettings() {
+  document.body.classList.toggle('reduced-motion', settings.reducedMotion);
+  document.body.classList.toggle('hard-mode', settings.hardMode);
+  refreshGameplaySettings();
+  reducedMotionStateEl.textContent = settings.reducedMotion ? 'On' : 'Off';
+  hardModeStateEl.textContent = settings.hardMode ? 'On' : 'Off';
+  modeLabelEl.textContent = settings.hardMode ? 'Hard' : 'Normal';
+  saveSettings();
+}
+
+function setMenuView(view) {
+  menuView = view;
+  menuTabs.forEach((tab) => {
+    tab.classList.toggle('active', tab.dataset.menuTab === view);
+  });
+  menuPanels.forEach((panel) => {
+    panel.classList.toggle('active', panel.dataset.menuPanel === view);
+  });
+}
+
+function updateMenuHeader(title, text) {
+  overlayTitleEl.textContent = title;
+  overlayTextEl.textContent = text;
+}
+
+function showMenu(view = 'main', options = {}) {
+  const {
+    title = session ? `Ready for ${session.userTag}` : 'Main Menu',
+    text = activityMode
+      ? `Running inside Discord as an Activity${session ? ` for ${session.userTag}.` : '.'}`
+      : 'Practice mode: this run is local only.',
+    startText = 'Ready to start a new run. Use the button below when you want to launch.',
+    startButtonLabel = 'Start Run',
+    startAction = 'start',
+    preserveScore = false
+  } = options;
+
   started = false;
   gameOver = false;
   submitted = false;
-  score = 0;
-  elapsedMs = 0;
   gameState = 'menu';
-  resetBoard();
-  scoreEl.textContent = '0';
+
+  if (!preserveScore) {
+    score = 0;
+    elapsedMs = 0;
+    scoreEl.textContent = '0';
+    resetBoard();
+  }
+
   hydrateBestScore();
-  primaryMode = 'play';
-  showOverlay(
-    session ? `Ready for ${session.userTag}` : 'Main Menu',
-    isPracticeMode
-      ? 'Practice mode is ready. Tap Play to start a local run, then flap with Space, click, or tap.'
-      : 'Discord Activity mode is ready. Tap Play to start your recorded run.',
-    'Play'
-  );
+  applySettings();
+  updateMenuHeader(title, text);
+  startMenuTextEl.textContent = startText;
+  startRunButton.textContent = startButtonLabel;
+  startRunMode = startAction;
+  setMenuView(view);
   updateStatus(
     session
       ? `Ready for ${session.userTag}`
@@ -136,6 +223,7 @@ function showMenu() {
   sessionNoteEl.textContent = activityMode
     ? `Running inside Discord as an Activity${session ? ` for ${session.userTag}.` : '.'}`
     : 'Practice mode: this run is local only.';
+  overlayEl.classList.remove('hidden');
 }
 
 function launchRun() {
@@ -151,17 +239,6 @@ function launchRun() {
   updateStatus(isPracticeMode ? 'Practice mode running' : 'Session running');
   bird.velocity = FLAP_VELOCITY;
   started = true;
-}
-
-function showOverlay(title, text, buttonLabel = 'Start') {
-  overlayTitleEl.textContent = title;
-  overlayTextEl.textContent = text;
-  primaryButton.textContent = buttonLabel;
-  overlayEl.classList.remove('hidden');
-}
-
-function setPrimaryMode(mode) {
-  primaryMode = mode;
 }
 
 function hideOverlay() {
@@ -222,7 +299,7 @@ function addPipe() {
     passed: false
   });
 
-  if (Math.random() < 0.7) {
+  if (Math.random() < collectibleChance) {
     const gapCenter = topHeight + PIPE_GAP / 2;
     collectibles.push({
       x: width + 116,
@@ -313,12 +390,15 @@ function endGame(reason) {
   gameState = 'gameover';
   started = false;
   updateStatus(`Game over: ${reason}`);
-  showOverlay(
-    'Game over',
-    `You scored ${score}. ${isPracticeMode ? 'Press the button to try again.' : 'This run has been recorded in Discord.'}`,
-    'Play again'
-  );
-  setPrimaryMode('restart');
+  showMenu('start', {
+    title: 'Game over',
+    text: `You scored ${score}. ${isPracticeMode ? 'Press Start Run to try again.' : 'This run has been recorded in Discord.'}`,
+    startText: 'Your run ended. Open Start Run when you want another attempt.',
+    startButtonLabel: 'Play again',
+    preserveScore: true
+  });
+  gameOver = true;
+  gameState = 'gameover';
   submitScore(reason);
 }
 
@@ -723,6 +803,9 @@ function loop(timestamp) {
 }
 
 async function loadSession() {
+  loadSettings();
+  applySettings();
+
   try {
     const configResponse = await fetch('/api/mochi/config');
     const configPayload = await configResponse.json();
@@ -769,7 +852,7 @@ async function loadSession() {
     if (!activityMode) {
       sessionNoteEl.textContent = 'Practice mode: this run is local only.';
     }
-    showMenu();
+    showMenu('main');
     return;
   }
 
@@ -796,32 +879,24 @@ async function loadSession() {
     } catch {
       // Best score lookup is optional.
     }
-    showMenu();
+    showMenu('main');
   } catch (error) {
     updateStatus(`Session error: ${error.message}`);
-    setPrimaryMode('reload');
-    showOverlay(
-      'Session unavailable',
-      'The Discord session is missing or expired. Open a fresh run from the bot.',
-      'Reload'
-    );
-  }
-}
-
-function onPrimaryAction() {
-  if (primaryMode === 'reload') {
-    window.location.reload();
-    return;
-  }
-
-  if (primaryMode === 'play' || primaryMode === 'restart') {
-    launchRun();
+    showMenu('start', {
+      title: 'Session unavailable',
+      text: 'The Discord session is missing or expired. Open a fresh run from the bot.',
+      startText: 'Reload the page or start a new session from Discord.',
+      startButtonLabel: 'Reload',
+      startAction: 'reload'
+    });
   }
 }
 
 window.addEventListener('resize', () => {
   resizeCanvas();
-  showMenu();
+  if (gameState === 'menu') {
+    showMenu(menuView);
+  }
 });
 
 window.addEventListener('keydown', (event) => {
@@ -838,7 +913,38 @@ canvas.addEventListener('pointerdown', () => {
   flap();
 });
 
-primaryButton.addEventListener('click', onPrimaryAction);
+mainPlayButton.addEventListener('click', () => showMenu('start'));
+mainSettingsButton.addEventListener('click', () => showMenu('settings'));
+startRunButton.addEventListener('click', () => {
+  if (startRunMode === 'reload') {
+    window.location.reload();
+    return;
+  }
+  if (gameState === 'gameover') {
+    launchRun();
+    return;
+  }
+  launchRun();
+});
+startBackButton.addEventListener('click', () => showMenu('main'));
+settingsBackButton.addEventListener('click', () => showMenu('main'));
+
+menuTabs.forEach((tab) => {
+  tab.addEventListener('click', () => {
+    showMenu(tab.dataset.menuTab || 'main');
+  });
+});
+
+document.querySelectorAll('[data-setting-toggle]').forEach((button) => {
+  button.addEventListener('click', () => {
+    const key = button.dataset.settingToggle;
+    if (!key || !(key in settings)) {
+      return;
+    }
+    settings[key] = !settings[key];
+    applySettings();
+  });
+});
 
 resizeCanvas();
 window.setTimeout(() => {
