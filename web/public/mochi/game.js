@@ -581,11 +581,11 @@ function addPipe() {
 }
 
 function addCan() {
-  const canSize = clamp(Math.round(width * 0.085), 26, 40);
+  const canSize = clamp(Math.round(width * 0.102), 32, 50);
   const minY = Math.max(72, canSize * 1.5);
   const maxY = Math.max(minY + 60, height - GROUND_HEIGHT - canSize * 1.5 - 20);
   cans.push({
-    x: width + canSize + 24,
+    x: width + canSize + 12,
     y: minY + Math.random() * (maxY - minY),
     size: canSize,
     bob: Math.random() * Math.PI * 2,
@@ -951,7 +951,7 @@ function update(deltaSeconds) {
   }
   if (canSpawnTimer <= 0) {
     addCan();
-    canSpawnTimer = 1.6 + Math.random() * 1.4;
+    canSpawnTimer = 1.25 + Math.random() * 0.95;
   }
 
   for (const pipe of pipes) {
@@ -1109,6 +1109,12 @@ async function onPrimaryInput(event) {
   lastPrimaryInputAt = now;
 
   if (event) {
+    const interactiveTarget = event.target && typeof event.target.closest === 'function'
+      ? event.target.closest('button, a, input, textarea, select, [role="button"]')
+      : null;
+    if (interactiveTarget && interactiveTarget !== primaryButton && interactiveTarget !== soundToggleEl) {
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
   }
@@ -1156,11 +1162,18 @@ window.addEventListener('keydown', (event) => {
 });
 
 canvas.addEventListener('pointerdown', onPrimaryInput);
+canvas.addEventListener('pointerup', onPrimaryInput);
 canvas.addEventListener('touchstart', onPrimaryInput, { passive: false });
+canvas.addEventListener('touchend', onPrimaryInput, { passive: false });
 stageEl.addEventListener('pointerdown', onPrimaryInput);
+stageEl.addEventListener('pointerup', onPrimaryInput);
 stageEl.addEventListener('touchstart', onPrimaryInput, { passive: false });
+stageEl.addEventListener('touchend', onPrimaryInput, { passive: false });
 stageEl.addEventListener('click', onPrimaryInput);
+window.addEventListener('pointerup', onPrimaryInput, { capture: true });
+window.addEventListener('touchend', onPrimaryInput, { passive: false, capture: true });
 primaryButton.addEventListener('pointerdown', onPrimaryInput);
+primaryButton.addEventListener('pointerup', onPrimaryInput);
 primaryButton.addEventListener('touchend', onPrimaryInput, { passive: false });
 soundToggleEl.addEventListener('click', toggleSound);
 
