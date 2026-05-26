@@ -581,9 +581,6 @@ function showReadyMenuForCurrentState() {
     sessionNoteEl.textContent = session
       ? `Running inside Discord as an Activity for ${session.userTag}.`
       : 'Running inside Discord as an Activity. Discord connects in the background.';
-    if (!started && !gameOver) {
-      void launchRun();
-    }
     return;
   }
 
@@ -1032,6 +1029,34 @@ function launchRun() {
     void resolveActivitySession(3500);
   }
   startRunNow();
+}
+
+function startActivityGameplay() {
+  cancelActivityAutoStart();
+  if (started && gameState === 'playing' && !gameOver) {
+    return;
+  }
+
+  started = false;
+  gameOver = false;
+  submitted = false;
+  score = 0;
+  elapsedMs = 0;
+  cansCollected = 0;
+  paused = false;
+  gameOverReason = '';
+  particles = [];
+  trailPoints = [];
+  shakeTime = 0;
+  shakeStrength = 0;
+  gameState = 'playing';
+  resetBoard();
+  scoreEl.textContent = '0';
+  hideOverlay();
+  updateStatus(session ? `Session running for ${session.userTag}` : 'Ready to play');
+  bird.velocity = 0;
+  started = true;
+  syncMobileTapLayer();
 }
 
 function hideOverlay() {
@@ -1890,7 +1915,8 @@ async function loadSession() {
   if (activityMode && discordClientId) {
     void bootstrapActivitySession();
   } else if (activityMode) {
-    showReadyMenuForCurrentState();
+    updateStatus('Ready to play');
+    sessionNoteEl.textContent = 'Running inside Discord as an Activity. Discord connects in the background.';
   }
 
   if (!sessionId && isPracticeMode) {
@@ -1903,9 +1929,7 @@ async function loadSession() {
 
     updateStatus('Activity practice ready');
     sessionNoteEl.textContent = 'Running inside Discord as an Activity. Discord connects in the background.';
-    if (!started && !gameOver) {
-      void launchRun();
-    }
+    startActivityGameplay();
     return;
   }
 
@@ -1934,10 +1958,18 @@ async function loadSession() {
     }
     void loadLeaderboard(true);
     startLeaderboardAutoRefresh();
-    if (!started && gameState === 'menu' && !gameOver) {
-      showMenu('main');
+    if (activityMode) {
+      startActivityGameplay();
+      return;
     }
   } catch (error) {
+    if (activityMode) {
+      updateStatus(`Session warning: ${error.message}`);
+      sessionNoteEl.textContent = 'Discord session is missing or expired. Running local gameplay while we recover.';
+      startActivityGameplay();
+      return;
+    }
+
     updateStatus(`Session error: ${error.message}`);
     showMenu('start', {
       title: 'Session unavailable',
@@ -2074,7 +2106,7 @@ if (activityMode) {
   introSplashEl?.classList.add('hidden');
 }
 if (activityMode) {
-  void launchRun();
+  startActivityGameplay();
 } else {
   showReadyMenuForCurrentState();
 }
