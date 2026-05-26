@@ -49,7 +49,7 @@ let runCanCount = 0;
 const birdSprite = new Image();
 birdSprite.src = './assets/avatar-v3.png?v=reset3';
 const canSprite = new Image();
-canSprite.src = './assets/dr-pepper-can-v3.png?v=reset3';
+canSprite.src = './assets/dr-pepper-can-v3.png?v=reset4';
 
 let width = 360;
 let height = 640;
@@ -501,7 +501,7 @@ function addPipe() {
 }
 
 function addCan() {
-  const canSize = clamp(Math.round(width * 0.06), 18, 28);
+  const canSize = clamp(Math.round(width * 0.085), 26, 40);
   const minY = Math.max(72, canSize * 1.5);
   const maxY = Math.max(minY + 60, height - GROUND_HEIGHT - canSize * 1.5 - 20);
   cans.push({
@@ -532,7 +532,7 @@ function birdBox() {
 }
 
 function canBox(can) {
-  const size = can.size * 0.9;
+  const size = can.size * 0.96;
   return {
     x: can.x - size / 2,
     y: can.y - size / 2,
