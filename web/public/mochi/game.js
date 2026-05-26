@@ -1551,6 +1551,10 @@ function drawBrandWatermark() {
 }
 
 function drawBird() {
+  if (!bird) {
+    return;
+  }
+
   const tilt = clamp(bird.velocity / 400, -0.6, 0.8);
   ctx.save();
   ctx.translate(bird.x, bird.y);
@@ -2071,6 +2075,17 @@ window.setTimeout(() => {
 }, 1700);
 if (activityMode) {
   introSplashEl?.classList.add('hidden');
+}
+if (activityMode) {
+  resetBoard();
+  bird.velocity = FLAP_VELOCITY;
+  started = true;
+  gameOver = false;
+  submitted = false;
+  gameState = 'playing';
+  hideOverlay();
+  updateStatus('Session running');
+  syncMobileTapLayer();
 }
 if (activityMode) {
   void launchRun();
