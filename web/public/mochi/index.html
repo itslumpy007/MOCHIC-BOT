@@ -3,49 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Mochi Bird Activity</title>
-    <link rel="stylesheet" href="./style.css?v=mobile-activity15" />
+    <title>Mochi Bird</title>
+    <link rel="stylesheet" href="./style.css?v=reset1" />
   </head>
   <body>
-    <div class="intro-splash" id="introSplash" aria-hidden="true">
-      <div class="intro-card">
-        <img class="intro-logo" src="./assets/mochi-logo.svg?v=mobile-activity15" alt="Mochi Bird" />
-        <div class="intro-stage">
-          <img class="intro-can" src="./assets/dr-pepper-can-v3.png?v=mobile-activity15" alt="" aria-hidden="true" />
-          <div class="intro-ring ring-a"></div>
-          <div class="intro-ring ring-b"></div>
-        </div>
-        <div class="intro-copy">Launching Activity</div>
-        <div class="intro-dots" aria-hidden="true">
-          <span></span><span></span><span></span>
-        </div>
-      </div>
-    </div>
-
     <div class="background-orb orb-a"></div>
     <div class="background-orb orb-b"></div>
-    <div class="global-brand" aria-label="Mochi Bird">
-      <span class="global-brand-pill">Mochi Bird</span>
-      <span class="global-brand-copy">Collect cans, dodge pipes, and keep your run alive.</span>
-    </div>
+
     <main class="app-shell">
       <section class="hero">
         <div class="eyebrow">Discord launch game</div>
-        <img class="hero-logo" src="./assets/mochi-logo.svg?v=mobile-activity15" alt="Mochi Bird" />
+        <h1>Mochi Bird</h1>
         <p>
-          A browser-first Mochi Bird that opens from Discord, records your score, and keeps a
-          leaderboard. Collect soda cans, dodge pipes, and chase a personal best.
+          Tap to flap, dodge pipes, and collect cans. Your score saves when the run ends.
         </p>
       </section>
 
       <section class="game-card">
-        <div class="game-brand">
-          <div class="game-brand-mark">Mochi Bird</div>
-          <div class="game-brand-copy">
-            <strong>Mochi Bird</strong>
-            <span>Collect cans, dodge pipes, chase the crown.</span>
-          </div>
-        </div>
         <div class="hud">
           <div class="stat">
             <span>Score</span>
@@ -55,154 +29,28 @@
             <span>Best</span>
             <strong id="bestScore">0</strong>
           </div>
-          <div class="status" id="status">Ready to play</div>
+          <div class="status" id="status">Loading...</div>
         </div>
 
-        <div class="stage">
+        <div class="stage" id="stage">
           <canvas id="game"></canvas>
-          <button id="mobileTapLayer" class="mobile-tap-layer" type="button" aria-label="Tap to flap">
-            <span>Tap to flap</span>
-          </button>
-          <div class="overlay" id="overlay">
-            <div class="overlay-card menu-card">
-              <div class="menu-shell">
-                <div class="menu-logo">Mochi Bird</div>
-                <div class="menu-meta">
-                  <h2 id="overlayTitle">Main Menu</h2>
-                  <p id="overlayText">Ready to play. Discord connects in the background.</p>
-                </div>
-                <div class="menu-tabs" role="tablist" aria-label="Menu sections">
-                  <button type="button" class="menu-tab active" data-menu-tab="main">Main</button>
-                  <button type="button" class="menu-tab" data-menu-tab="start">Start</button>
-                  <button type="button" class="menu-tab" data-menu-tab="leaderboard">Leaderboard</button>
-                  <button type="button" class="menu-tab" data-menu-tab="settings">Settings</button>
-                </div>
-
-                <section class="menu-panel active" data-menu-panel="main">
-                  <div class="main-menu-stage">
-                    <div class="main-menu-title">
-                      <div class="main-menu-wordmark">Mochi Bird</div>
-                      <p>Collect cans, dodge pipes, and keep your run alive.</p>
-                    </div>
-                    <div class="main-menu-hero">
-                      <div class="menu-avatar-frame main-menu-avatar">
-                        <img id="menuAvatar" src="./assets/avatar-v3.png?v=mobile-activity15" alt="Mochi Bird avatar" />
-                      </div>
-                    </div>
-                    <div class="menu-actions main-menu-actions">
-                      <button id="mainPlayButton" type="button" class="primary-action">Play</button>
-                      <button id="mainLeaderboardButton" type="button" class="secondary-button">Score</button>
-                      <button id="mainSettingsButton" type="button" class="secondary-button">Rate</button>
-                      <button id="mainMuteButton" type="button" class="secondary-button">Mute</button>
-                    </div>
-                    <div class="menu-chips main-menu-chips" aria-hidden="true">
-                      <span>Space</span>
-                      <span>Click</span>
-                      <span>Tap</span>
-                    </div>
-                    <div class="main-menu-leaderboard" aria-label="Leaderboard preview">
-                      <div class="main-menu-leaderboard-head">
-                        <span>High Scores</span>
-                        <button id="mainLeaderboardButtonInline" type="button" class="text-button">Open</button>
-                      </div>
-                      <div class="main-menu-leaderboard-podium" id="mainMenuLeaderboardPodium"></div>
-                    </div>
-                  </div>
-                </section>
-
-                <section class="menu-panel" data-menu-panel="start">
-                  <p class="panel-label">Start Menu</p>
-                  <p class="panel-copy" id="startMenuText">
-                    Ready to start a new run. Use the button below when you want to launch.
-                  </p>
-                  <div class="run-summary" id="runSummary">
-                    <div class="run-summary-head">
-                      <span>Run Summary</span>
-                      <strong id="runSummaryState">Ready</strong>
-                    </div>
-                    <div class="run-summary-grid">
-                      <div><span>Score</span><strong id="runSummaryScore">0</strong></div>
-                      <div><span>Best</span><strong id="runSummaryBest">0</strong></div>
-                      <div><span>Cans</span><strong id="runSummaryCans">0</strong></div>
-                      <div><span>Time</span><strong id="runSummaryTime">0:00</strong></div>
-                    </div>
-                    <p id="runSummaryText">Your latest run stats will appear here after you play.</p>
-                  </div>
-                  <div class="menu-checklist">
-                    <div class="check-item"><strong>Controls</strong><span>Space, click, or tap to flap.</span></div>
-                    <div class="check-item"><strong>Goal</strong><span>Stay alive and collect cans for points.</span></div>
-                    <div class="check-item"><strong>Mode</strong><span id="modeLabel">Normal</span></div>
-                  </div>
-                  <div class="menu-actions">
-                    <button id="startRunButton" type="button">Start Run</button>
-                    <button id="startBackButton" type="button" class="secondary-button">Back</button>
-                  </div>
-                </section>
-
-                <section class="menu-panel" data-menu-panel="settings">
-                  <p class="panel-label">Settings</p>
-                  <p class="panel-copy">
-                    Tune the game for easier reading or a tougher challenge.
-                  </p>
-                  <div class="settings-list">
-                    <button type="button" class="setting-item" data-setting-toggle="audioEnabled">
-                      <span class="setting-copy">
-                        <strong>Music & SFX</strong>
-                        <span>Play the background loop and pickup chimes.</span>
-                      </span>
-                      <span class="setting-state" id="audioState">On</span>
-                    </button>
-                    <button type="button" class="setting-item" data-setting-toggle="reducedMotion">
-                      <span class="setting-copy">
-                        <strong>Reduced motion</strong>
-                        <span>Minimize floating and splash animations.</span>
-                      </span>
-                      <span class="setting-state" id="reducedMotionState">Off</span>
-                    </button>
-                    <button type="button" class="setting-item" data-setting-toggle="hardMode">
-                      <span class="setting-copy">
-                        <strong>Hard mode</strong>
-                        <span>Tighter gaps and faster pipes.</span>
-                      </span>
-                      <span class="setting-state" id="hardModeState">Off</span>
-                    </button>
-                  </div>
-                  <div class="menu-actions">
-                    <button id="settingsBackButton" type="button" class="secondary-button">Back</button>
-                  </div>
-                </section>
-
-                <section class="menu-panel" data-menu-panel="leaderboard">
-                  <p class="panel-label">Leaderboard</p>
-                  <p class="panel-copy">
-                    The highest Mochi Bird scores saved from Discord runs.
-                  </p>
-                  <div class="leaderboard-summary" id="leaderboardSummary">
-                    Loading leaderboard...
-                  </div>
-                  <div class="leaderboard-podium" id="leaderboardPodium" aria-label="Top three leaderboard entries"></div>
-                  <ol class="leaderboard-list" id="leaderboardList" aria-live="polite"></ol>
-                  <div class="leaderboard-footer" id="leaderboardUpdated">
-                    Updated when the panel opens.
-                  </div>
-                  <div class="menu-actions">
-                    <button id="leaderboardBackButton" type="button" class="secondary-button">Back</button>
-                  </div>
-                </section>
-
-                <p class="menu-note" id="sessionNote">Practice mode is available when you open this page directly.</p>
-              </div>
+          <div class="overlay" id="overlay" aria-live="polite">
+            <div class="overlay-card">
+              <h2 id="overlayTitle">Ready to play</h2>
+              <p id="overlayText">
+                Tap anywhere, click, or press Space to start.
+              </p>
             </div>
           </div>
         </div>
 
         <div class="footer">
-          <p>Flap with Space, click, or tap. Opened from Discord? Your score will be recorded automatically.</p>
-          <p>Use the Play button to start from the main menu, then keep the bird alive as long as you can.</p>
+          <p>Opened from Discord? Your score will be recorded automatically.</p>
+          <p id="sessionNote">Practice mode is available when you open this page directly.</p>
         </div>
       </section>
     </main>
 
-    <script type="module" src="./game.js?v=mobile-activity15"></script>
+    <script type="module" src="./game.js?v=reset1"></script>
   </body>
 </html>
