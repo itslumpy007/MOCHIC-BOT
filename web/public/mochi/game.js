@@ -576,6 +576,17 @@ function stopLeaderboardAutoRefresh() {
 }
 
 function showReadyMenuForCurrentState() {
+  if (activityMode) {
+    updateStatus(session ? `Ready for ${session.userTag}` : 'Ready to play');
+    sessionNoteEl.textContent = session
+      ? `Running inside Discord as an Activity for ${session.userTag}.`
+      : 'Running inside Discord as an Activity. Discord connects in the background.';
+    if (!started && !gameOver) {
+      void launchRun();
+    }
+    return;
+  }
+
   showMenu('main', {
     title: session ? `Ready for ${session.userTag}` : 'Main Menu',
     text: activityMode
@@ -1876,7 +1887,6 @@ async function loadSession() {
   }
 
   if (activityMode && discordClientId) {
-    showReadyMenuForCurrentState();
     void bootstrapActivitySession();
   } else if (activityMode) {
     showReadyMenuForCurrentState();
@@ -1891,7 +1901,10 @@ async function loadSession() {
     }
 
     updateStatus('Activity practice ready');
-    showReadyMenuForCurrentState();
+    sessionNoteEl.textContent = 'Running inside Discord as an Activity. Discord connects in the background.';
+    if (!started && !gameOver) {
+      void launchRun();
+    }
     return;
   }
 
