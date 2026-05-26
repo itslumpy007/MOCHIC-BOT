@@ -589,7 +589,7 @@ function showReadyMenuForCurrentState() {
   });
 
   if (activityMode && !started && !gameOver) {
-    scheduleActivityAutoStart();
+    void launchRun();
   }
 }
 
@@ -598,20 +598,6 @@ function cancelActivityAutoStart() {
     clearTimeout(activityAutoStartTimer);
     activityAutoStartTimer = null;
   }
-}
-
-function scheduleActivityAutoStart(delayMs = 900) {
-  if (started || gameOver) {
-    return;
-  }
-
-  cancelActivityAutoStart();
-  activityAutoStartTimer = window.setTimeout(() => {
-    activityAutoStartTimer = null;
-    if (!started && !gameOver) {
-      void launchRun();
-    }
-  }, delayMs);
 }
 
 function startRunNow(event) {
@@ -2074,7 +2060,6 @@ window.setTimeout(() => {
 if (activityMode) {
   introSplashEl?.classList.add('hidden');
 }
-scheduleActivityAutoStart(1200);
 loadSession().catch((error) => {
   updateStatus(`Startup error: ${error.message}`);
 });
