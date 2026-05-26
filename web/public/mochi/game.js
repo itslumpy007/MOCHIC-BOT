@@ -8,15 +8,32 @@ const overlayTitleEl = document.getElementById('overlayTitle');
 const overlayTextEl = document.getElementById('overlayText');
 const sessionNoteEl = document.getElementById('sessionNote');
 const stageEl = document.getElementById('stage');
+const overlaySummaryEl = document.getElementById('overlaySummary');
+const primaryButton = document.getElementById('primaryButton');
+const leaderboardListEl = document.getElementById('leaderboardList');
+const leaderboardEmptyEl = document.getElementById('leaderboardEmpty');
+const leaderboardStatusEl = document.getElementById('leaderboardStatus');
+const leaderboardUpdatedEl = document.getElementById('leaderboardUpdated');
+const soundToggleEl = document.getElementById('soundToggle');
 
 const params = new URLSearchParams(window.location.search);
 let sessionId = params.get('sid');
 let isPracticeMode = !sessionId;
 let session = null;
 let bestScoreKey = 'discord-mochi-bird-best-practice';
+let leaderboardCacheKey = 'discord-mochi-bird-leaderboard-cache';
+let leaderboardEntries = [];
+let leaderboardUpdatedAt = 0;
+let leaderboardRefreshTimer = 0;
+let leaderboardLoading = false;
+let leaderboardLastFetchAt = 0;
+let audioEnabled = localStorage.getItem('discord-mochi-bird-audio') !== 'off';
+let audioContext = null;
+let musicTimer = 0;
+let musicStep = 0;
 
 const birdSprite = new Image();
-birdSprite.src = './assets/avatar.png?v=reset1';
+birdSprite.src = './assets/avatar.png?v=reset2';
 
 let width = 360;
 let height = 640;
@@ -34,6 +51,10 @@ let pipes = [];
 let clouds = [];
 let spawnTimer = 0.7;
 let bgOffset = 0;
+let particles = [];
+let shakeTime = 0;
+let shakePower = 0;
+let lastPrimaryInputAt = 0;
 
 const GRAVITY = 1100;
 const FLAP_VELOCITY = -340;
@@ -62,11 +83,333 @@ function hydrateBestScore() {
   bestScoreEl.textContent = String(bestScore);
 }
 
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes <= 0) {
+    return `${seconds}s`;
+  }
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+}
+
+function formatRelativeTime(timestamp) {
+  if (!timestamp) {
+    return 'Last updated just now';
+  }
+
+  const diffSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (diffSeconds < 5) {
+    return 'Last updated just now';
+  }
+  if (diffSeconds < 60) {
+    return `Last updated ${diffSeconds}s ago`;
+  }
+  const minutes = Math.floor(diffSeconds / 60);
+  if (minutes < 60) {
+    return `Last updated ${minutes}m ago`;
+  }
+  const hours = Math.floor(minutes / 60);
+  return `Last updated ${hours}h ago`;
+}
+
+function renderLeaderboard(entries, updatedAt = Date.now()) {
+  leaderboardEntries = Array.isArray(entries) ? entries.slice(0, 10) : [];
+  leaderboardListEl.replaceChildren();
+
+  if (!leaderboardEntries.length) {
+    leaderboardEmptyEl.classList.remove('hidden');
+    leaderboardStatusEl.textContent = 'No scores yet.';
+    leaderboardUpdatedAt = updatedAt;
+    leaderboardUpdatedEl.textContent = formatRelativeTime(leaderboardUpdatedAt);
+    return;
+  }
+
+  leaderboardEmptyEl.classList.add('hidden');
+  leaderboardStatusEl.textContent = `${leaderboardEntries.length} top scores saved from Discord runs.`;
+
+  for (let index = 0; index < leaderboardEntries.length; index += 1) {
+    const entry = leaderboardEntries[index];
+    const item = document.createElement('li');
+    item.className = 'leaderboard-entry';
+    if (index === 0) {
+      item.classList.add('leaderboard-entry--top');
+    }
+
+    const rank = document.createElement('span');
+    rank.className = 'leaderboard-rank';
+    rank.textContent = `#${index + 1}`;
+
+    const meta = document.createElement('div');
+    meta.className = 'leaderboard-meta-block';
+    const user = document.createElement('strong');
+    user.textContent = entry.userTag || entry.userName || `Player ${index + 1}`;
+    const sub = document.createElement('span');
+    const timeText = entry.updatedAt
+      ? `Saved ${formatRelativeTime(entry.updatedAt).replace('Last updated ', '')}`
+      : 'Recorded run';
+    sub.textContent = `${timeText} · ${formatDuration(Number(entry.durationMs || 0))}`;
+    meta.append(user, sub);
+
+    const score = document.createElement('strong');
+    score.className = 'leaderboard-score';
+    score.textContent = String(entry.bestScore ?? entry.score ?? 0);
+
+    item.append(rank, meta, score);
+    leaderboardListEl.appendChild(item);
+  }
+
+  leaderboardUpdatedAt = updatedAt;
+  leaderboardUpdatedEl.textContent = formatRelativeTime(leaderboardUpdatedAt);
+  localStorage.setItem(
+    leaderboardCacheKey,
+    JSON.stringify({ updatedAt: leaderboardUpdatedAt, entries: leaderboardEntries })
+  );
+}
+
+function hydrateLeaderboardCache() {
+  try {
+    const raw = localStorage.getItem(leaderboardCacheKey);
+    if (!raw) {
+      return;
+    }
+
+    const payload = JSON.parse(raw);
+    if (Array.isArray(payload.entries)) {
+      leaderboardUpdatedAt = Number(payload.updatedAt) || 0;
+      leaderboardLastFetchAt = leaderboardUpdatedAt || Date.now();
+      renderLeaderboard(payload.entries, leaderboardUpdatedAt || Date.now());
+    }
+  } catch {
+    // Cached leaderboard is optional.
+  }
+}
+
+async function loadLeaderboard({ quiet = false } = {}) {
+  if (leaderboardLoading) {
+    return;
+  }
+
+  leaderboardLoading = true;
+  try {
+    if (!quiet) {
+      leaderboardStatusEl.textContent = 'Refreshing top scores...';
+    }
+
+    const response = await fetch('/api/mochi/leaderboard', { cache: 'no-store' });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(payload?.error || 'Could not load leaderboard');
+    }
+
+    const entries = Array.isArray(payload?.leaderboard) ? payload.leaderboard : [];
+    renderLeaderboard(entries);
+    leaderboardLastFetchAt = Date.now();
+  } catch (error) {
+    if (!leaderboardEntries.length) {
+      leaderboardStatusEl.textContent = `Leaderboard unavailable: ${error.message}`;
+      leaderboardEmptyEl.classList.remove('hidden');
+      leaderboardEmptyEl.textContent = 'Waiting for the first saved score...';
+    }
+  } finally {
+    leaderboardLoading = false;
+    leaderboardLastFetchAt = Date.now();
+  }
+}
+
+function tickLeaderboardLabel() {
+  leaderboardUpdatedEl.textContent = formatRelativeTime(leaderboardUpdatedAt);
+}
+
+function scheduleLeaderboardRefresh() {
+  if (leaderboardRefreshTimer) {
+    return;
+  }
+
+  leaderboardRefreshTimer = window.setInterval(() => {
+    tickLeaderboardLabel();
+    if (!document.hidden && Date.now() - leaderboardLastFetchAt > 15000) {
+      void loadLeaderboard({ quiet: true });
+    }
+  }, 1000);
+}
+
+function ensureAudioContext() {
+  if (audioContext) {
+    return audioContext;
+  }
+
+  const AudioCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioCtor) {
+    return null;
+  }
+
+  audioContext = new AudioCtor();
+  return audioContext;
+}
+
+async function unlockAudio() {
+  if (!audioEnabled) {
+    return null;
+  }
+
+  const context = ensureAudioContext();
+  if (!context) {
+    return null;
+  }
+
+  if (context.state === 'suspended') {
+    try {
+      await context.resume();
+    } catch {
+      // Ignore audio resume failures; the game still works without sound.
+    }
+  }
+
+  return context;
+}
+
+function playTone({ frequency, duration = 0.16, type = 'sine', gain = 0.04, slideTo = null }) {
+  if (!audioEnabled) {
+    return;
+  }
+
+  const context = ensureAudioContext();
+  if (!context) {
+    return;
+  }
+
+  const oscillator = context.createOscillator();
+  const envelope = context.createGain();
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(frequency, context.currentTime);
+  if (slideTo) {
+    oscillator.frequency.exponentialRampToValueAtTime(slideTo, context.currentTime + duration);
+  }
+  envelope.gain.setValueAtTime(0.0001, context.currentTime);
+  envelope.gain.exponentialRampToValueAtTime(gain, context.currentTime + 0.02);
+  envelope.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + duration);
+  oscillator.connect(envelope).connect(context.destination);
+  oscillator.start();
+  oscillator.stop(context.currentTime + duration + 0.02);
+}
+
+function playFlapSound() {
+  playTone({ frequency: 520, slideTo: 760, duration: 0.08, gain: 0.03, type: 'triangle' });
+}
+
+function playScoreSound() {
+  playTone({ frequency: 660, slideTo: 880, duration: 0.09, gain: 0.03, type: 'square' });
+  window.setTimeout(() => playTone({ frequency: 990, slideTo: 1320, duration: 0.08, gain: 0.025, type: 'triangle' }), 70);
+}
+
+function playHitSound() {
+  playTone({ frequency: 220, slideTo: 140, duration: 0.18, gain: 0.05, type: 'sawtooth' });
+}
+
+function startMusicLoop() {
+  if (!audioEnabled || musicTimer) {
+    return;
+  }
+
+  const pattern = [587.33, 523.25, 659.25, 493.88];
+  musicStep = 0;
+  playTone({ frequency: 174.61, duration: 0.24, gain: 0.015, type: 'triangle' });
+  musicTimer = window.setInterval(() => {
+    if (!started || gameOver || !audioEnabled) {
+      return;
+    }
+    const note = pattern[musicStep % pattern.length];
+    const octave = musicStep % 8 === 7 ? note / 2 : note;
+    playTone({ frequency: octave, duration: 0.14, gain: 0.012, type: 'triangle' });
+    musicStep += 1;
+  }, 420);
+}
+
+function stopMusicLoop() {
+  if (musicTimer) {
+    window.clearInterval(musicTimer);
+    musicTimer = 0;
+  }
+}
+
+function setSoundButtonLabel() {
+  soundToggleEl.textContent = audioEnabled ? 'Sound: On' : 'Sound: Off';
+  soundToggleEl.setAttribute('aria-pressed', audioEnabled ? 'true' : 'false');
+}
+
+function toggleSound() {
+  audioEnabled = !audioEnabled;
+  localStorage.setItem('discord-mochi-bird-audio', audioEnabled ? 'on' : 'off');
+  setSoundButtonLabel();
+  if (!audioEnabled) {
+    stopMusicLoop();
+  } else if (started && !gameOver) {
+    void unlockAudio().then(() => startMusicLoop());
+  }
+}
+
+function emitParticles(x, y, color = 'rgba(255,255,255,0.8)', count = 8) {
+  for (let index = 0; index < count; index += 1) {
+    const angle = (Math.PI * 2 * index) / count + Math.random() * 0.2;
+    const speed = 80 + Math.random() * 140;
+    particles.push({
+      x,
+      y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 40,
+      life: 0.55 + Math.random() * 0.2,
+      age: 0,
+      color,
+      size: 2 + Math.random() * 2
+    });
+  }
+}
+
+function nudgeScreenShake(power = 5, duration = 0.14) {
+  shakePower = Math.max(shakePower, power);
+  shakeTime = Math.max(shakeTime, duration);
+}
+
+function updateParticles(deltaSeconds) {
+  particles = particles.filter((particle) => {
+    particle.age += deltaSeconds;
+    particle.x += particle.vx * deltaSeconds;
+    particle.y += particle.vy * deltaSeconds;
+    particle.vy += 240 * deltaSeconds;
+    return particle.age < particle.life;
+  });
+
+  if (shakeTime > 0) {
+    shakeTime = Math.max(0, shakeTime - deltaSeconds);
+  } else {
+    shakePower = 0;
+  }
+}
+
+function drawParticles() {
+  if (!particles.length) {
+    return;
+  }
+
+  ctx.save();
+  for (const particle of particles) {
+    const alpha = 1 - particle.age / particle.life;
+    ctx.globalAlpha = Math.max(0, alpha);
+    ctx.fillStyle = particle.color;
+    ctx.beginPath();
+    ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
 function resetBoard() {
   bird = {
     x: width * 0.28,
     y: height * 0.42,
-    radius: 14,
+    radius: Math.max(15, Math.min(18, Math.round(width * 0.045))),
     velocity: 0
   };
   pipes = [];
@@ -293,8 +636,13 @@ function roundRect(context, x, y, w, h, r, fill = true, stroke = false) {
 }
 
 function resetRun() {
+  stopMusicLoop();
+  shakeTime = 0;
+  shakePower = 0;
   resetBoard();
+  overlaySummaryEl.replaceChildren();
   showOverlay('Ready to play', 'Tap anywhere, click, or press Space to start.');
+  primaryButton.textContent = 'Play';
   updateStatus(isPracticeMode ? 'Practice mode ready' : 'Ready to play');
 }
 
@@ -306,8 +654,12 @@ function startRun() {
   started = true;
   gameOver = false;
   hideOverlay();
+  overlaySummaryEl.replaceChildren();
   updateStatus(isPracticeMode ? 'Practice mode running' : 'Session running');
   bird.velocity = FLAP_VELOCITY;
+  emitParticles(bird.x, bird.y, 'rgba(255,255,255,0.45)', 5);
+  playFlapSound();
+  void unlockAudio().then(() => startMusicLoop());
 }
 
 function flap() {
@@ -323,6 +675,8 @@ function flap() {
   }
 
   bird.velocity = FLAP_VELOCITY;
+  emitParticles(bird.x - 2, bird.y + 4, 'rgba(255, 210, 90, 0.85)', 4);
+  playFlapSound();
 }
 
 function endGame(reason) {
@@ -332,9 +686,32 @@ function endGame(reason) {
 
   gameOver = true;
   started = false;
+  stopMusicLoop();
   updateStatus(`Game over: ${reason}`);
-  showOverlay('Game over', `You scored ${score}. Tap to play again.`);
+  const isNewBest = score > bestScore;
+  const summary = [
+    { label: 'Score', value: String(score) },
+    { label: 'Best', value: String(Math.max(bestScore, score)) },
+    { label: 'Time', value: formatDuration(elapsedMs) }
+  ];
+
+  overlaySummaryEl.replaceChildren();
+  for (const item of summary) {
+    const pill = document.createElement('div');
+    pill.className = 'overlay-pill';
+    pill.innerHTML = `<span>${item.label}</span><strong>${item.value}</strong>`;
+    overlaySummaryEl.appendChild(pill);
+  }
+
+  showOverlay(
+    'Game over',
+    `${isNewBest ? 'New best score! ' : ''}You scored ${score}. Tap play again to run it back.`
+  );
+  primaryButton.textContent = 'Play again';
   void submitScore(reason);
+  playHitSound();
+  emitParticles(bird.x, Math.max(0, bird.y), 'rgba(255, 105, 105, 0.9)', 14);
+  nudgeScreenShake(8, 0.2);
 }
 
 async function submitScore(reason) {
@@ -367,6 +744,7 @@ async function submitScore(reason) {
     localStorage.setItem(bestScoreKey, String(bestScore));
     bestScoreEl.textContent = String(bestScore);
     updateStatus(`Score submitted. Personal best: ${submittedBest}.`);
+    void loadLeaderboard({ quiet: true });
   } catch (error) {
     submitted = false;
     updateStatus(`Could not submit score: ${error.message}`);
@@ -374,6 +752,8 @@ async function submitScore(reason) {
 }
 
 function update(deltaSeconds) {
+  updateParticles(deltaSeconds);
+
   if (!started || gameOver) {
     return;
   }
@@ -419,6 +799,8 @@ function update(deltaSeconds) {
       pipe.passed = true;
       score += 1;
       scoreEl.textContent = String(score);
+      playScoreSound();
+      emitParticles(pipe.x + PIPE_WIDTH * 0.5, pipe.topHeight + PIPE_GAP * 0.5, 'rgba(37, 208, 171, 0.95)', 10);
       if (score > bestScore) {
         bestScore = score;
         bestScoreEl.textContent = String(bestScore);
@@ -430,6 +812,13 @@ function update(deltaSeconds) {
 
 function render() {
   ctx.clearRect(0, 0, width, height);
+  ctx.save();
+  if (shakeTime > 0 && shakePower > 0) {
+    const jitterX = (Math.random() - 0.5) * shakePower;
+    const jitterY = (Math.random() - 0.5) * shakePower;
+    ctx.translate(jitterX, jitterY);
+  }
+
   drawSky();
 
   for (const cloud of clouds) {
@@ -443,8 +832,10 @@ function render() {
 
   drawPipes();
   drawGround();
+  drawParticles();
   drawBird();
   drawHudOverlay();
+  ctx.restore();
 }
 
 function loop(timestamp) {
@@ -498,23 +889,44 @@ async function loadSession() {
     updateStatus(`Session warning: ${error.message}`);
     isPracticeMode = true;
   }
+
+  void loadLeaderboard({ quiet: true });
 }
 
-function onPrimaryInput(event) {
+async function onPrimaryInput(event) {
+  const now = Date.now();
+  if (now - lastPrimaryInputAt < 120) {
+    return;
+  }
+  lastPrimaryInputAt = now;
+
   if (event) {
     event.preventDefault();
+    event.stopPropagation();
   }
+  await unlockAudio();
   flap();
 }
 
 resizeCanvas();
 hydrateBestScore();
+hydrateLeaderboardCache();
+setSoundButtonLabel();
 resetRun();
 void loadSession();
+scheduleLeaderboardRefresh();
+void loadLeaderboard({ quiet: true });
 
 window.addEventListener('resize', () => {
   resizeCanvas();
   resetRun();
+});
+
+window.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    void loadLeaderboard({ quiet: true });
+    tickLeaderboardLabel();
+  }
 });
 
 window.addEventListener('keydown', (event) => {
@@ -530,8 +942,11 @@ window.addEventListener('keydown', (event) => {
 
 canvas.addEventListener('pointerdown', onPrimaryInput);
 canvas.addEventListener('touchstart', onPrimaryInput, { passive: false });
+stageEl.addEventListener('pointerdown', onPrimaryInput);
+stageEl.addEventListener('touchstart', onPrimaryInput, { passive: false });
 stageEl.addEventListener('click', onPrimaryInput);
-
-overlayEl.addEventListener('click', onPrimaryInput);
+primaryButton.addEventListener('pointerdown', onPrimaryInput);
+primaryButton.addEventListener('touchend', onPrimaryInput, { passive: false });
+soundToggleEl.addEventListener('click', toggleSound);
 
 raf = requestAnimationFrame(loop);

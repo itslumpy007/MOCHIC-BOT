@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mochi Bird</title>
-    <link rel="stylesheet" href="./style.css?v=reset1" />
+    <link rel="stylesheet" href="./style.css?v=reset2" />
   </head>
   <body>
     <div class="background-orb orb-a"></div>
@@ -19,38 +19,57 @@
         </p>
       </section>
 
-      <section class="game-card">
-        <div class="hud">
-          <div class="stat">
-            <span>Score</span>
-            <strong id="score">0</strong>
+      <div class="content-grid">
+        <section class="game-card">
+          <div class="hud">
+            <div class="stat">
+              <span>Score</span>
+              <strong id="score">0</strong>
+            </div>
+            <div class="stat">
+              <span>Best</span>
+              <strong id="bestScore">0</strong>
+            </div>
+            <div class="status" id="status">Loading...</div>
           </div>
-          <div class="stat">
-            <span>Best</span>
-            <strong id="bestScore">0</strong>
-          </div>
-          <div class="status" id="status">Loading...</div>
-        </div>
 
-        <div class="stage" id="stage">
-          <canvas id="game"></canvas>
-          <div class="overlay" id="overlay" aria-live="polite">
-            <div class="overlay-card">
-              <h2 id="overlayTitle">Ready to play</h2>
-              <p id="overlayText">
-                Tap anywhere, click, or press Space to start.
-              </p>
+          <div class="stage" id="stage">
+            <canvas id="game"></canvas>
+            <div class="overlay" id="overlay" aria-live="polite">
+              <div class="overlay-card">
+                <h2 id="overlayTitle">Ready to play</h2>
+                <p id="overlayText">
+                  Tap anywhere, click, or press Space to start.
+                </p>
+                <div class="overlay-summary" id="overlaySummary"></div>
+                <button id="primaryButton" type="button">Play</button>
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="footer">
-          <p>Opened from Discord? Your score will be recorded automatically.</p>
-          <p id="sessionNote">Practice mode is available when you open this page directly.</p>
-        </div>
-      </section>
+          <div class="footer">
+            <p>Opened from Discord? Your score will be recorded automatically.</p>
+            <p id="sessionNote">Practice mode is available when you open this page directly.</p>
+            <button id="soundToggle" type="button" class="ghost-button">Sound: On</button>
+          </div>
+        </section>
+
+        <aside class="leaderboard-card" aria-label="Leaderboard">
+          <div class="leaderboard-head">
+            <div>
+              <div class="eyebrow">Discord runs</div>
+              <h2>Leaderboard</h2>
+            </div>
+            <div class="leaderboard-meta" id="leaderboardUpdated">Last updated just now</div>
+          </div>
+
+          <div class="leaderboard-status" id="leaderboardStatus">Loading top scores...</div>
+          <ol class="leaderboard-list" id="leaderboardList"></ol>
+          <div class="leaderboard-empty hidden" id="leaderboardEmpty">No scores yet. Be the first one in.</div>
+        </aside>
+      </div>
     </main>
 
-    <script type="module" src="./game.js?v=reset1"></script>
+    <script type="module" src="./game.js?v=reset2"></script>
   </body>
 </html>
