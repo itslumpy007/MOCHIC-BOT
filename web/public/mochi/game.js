@@ -15,6 +15,16 @@ const leaderboardEmptyEl = document.getElementById('leaderboardEmpty');
 const leaderboardStatusEl = document.getElementById('leaderboardStatus');
 const leaderboardUpdatedEl = document.getElementById('leaderboardUpdated');
 const soundToggleEl = document.getElementById('soundToggle');
+const bootstrapEl = document.getElementById('mochi-bootstrap');
+
+let bootstrapPayload = null;
+if (bootstrapEl?.textContent) {
+  try {
+    bootstrapPayload = JSON.parse(bootstrapEl.textContent);
+  } catch {
+    bootstrapPayload = null;
+  }
+}
 
 const params = new URLSearchParams(window.location.search);
 let sessionId = params.get('sid');
@@ -198,18 +208,22 @@ async function loadLeaderboard({ quiet = false } = {}) {
 
     const response = await fetch('/api/mochi/leaderboard', { cache: 'no-store' });
     const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      throw new Error(payload?.error || 'Could not load leaderboard');
-    }
-
-    const entries = Array.isArray(payload?.leaderboard) ? payload.leaderboard : [];
-    renderLeaderboard(entries);
-    leaderboardLastFetchAt = Date.now();
-  } catch (error) {
-    if (!leaderboardEntries.length) {
-      leaderboardStatusEl.textContent = `Leaderboard unavailable: ${error.message}`;
+    if (response.ok) {
+      const entries = Array.isArray(payload?.leaderboard) ? payload.leaderboard : [];
+      if (entries.length || !leaderboardEntries.length) {
+        renderLeaderboard(entries, Date.now());
+      } else {
+        leaderboardStatusEl.textContent = `${leaderboardEntries.length} top scores saved from Discord runs.`;
+      }
+      leaderboardLastFetchAt = Date.now();
+    } else if (!leaderboardEntries.length) {
+      leaderboardStatusEl.textContent = 'Leaderboard will show after the first saved score.';
       leaderboardEmptyEl.classList.remove('hidden');
       leaderboardEmptyEl.textContent = 'Waiting for the first saved score...';
+    }
+  } catch {
+    if (!leaderboardEntries.length && bootstrapPayload?.leaderboard && Array.isArray(bootstrapPayload.leaderboard)) {
+      renderLeaderboard(bootstrapPayload.leaderboard, Date.now());
     }
   } finally {
     leaderboardLoading = false;
@@ -912,6 +926,9 @@ resizeCanvas();
 hydrateBestScore();
 hydrateLeaderboardCache();
 setSoundButtonLabel();
+if (bootstrapPayload?.leaderboard && Array.isArray(bootstrapPayload.leaderboard)) {
+  renderLeaderboard(bootstrapPayload.leaderboard, Date.now());
+}
 resetRun();
 void loadSession();
 scheduleLeaderboardRefresh();
