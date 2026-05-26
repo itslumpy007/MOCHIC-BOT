@@ -2077,17 +2077,6 @@ if (activityMode) {
   introSplashEl?.classList.add('hidden');
 }
 if (activityMode) {
-  resetBoard();
-  bird.velocity = FLAP_VELOCITY;
-  started = true;
-  gameOver = false;
-  submitted = false;
-  gameState = 'playing';
-  hideOverlay();
-  updateStatus('Session running');
-  syncMobileTapLayer();
-}
-if (activityMode) {
   void launchRun();
 } else {
   showReadyMenuForCurrentState();
