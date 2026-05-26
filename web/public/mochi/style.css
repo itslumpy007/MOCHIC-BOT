@@ -164,6 +164,34 @@ body {
   gap: 10px;
 }
 
+.leaderboard-subsection {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.leaderboard-subhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.88rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.leaderboard-submeta {
+  font-size: 0.8rem;
+  text-transform: none;
+  letter-spacing: 0;
+  text-align: right;
+}
+
+.leaderboard-list--recent .leaderboard-entry {
+  padding: 10px 12px;
+}
+
 .leaderboard-entry {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;

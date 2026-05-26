@@ -157,6 +157,7 @@ const MOCHI_SESSION_TTL_MS = Number.isFinite(Number(process.env.MOCHI_SESSION_TT
   ? Math.max(5, Number(process.env.MOCHI_SESSION_TTL_MINUTES)) * 60 * 1000
   : 30 * 60 * 1000;
 let mochiLeaderboardCache = null;
+let mochiRecentRunsCache = null;
 let tempBanInterval = null;
 let scheduledReportInterval = null;
 let googleBlockListInterval = null;
@@ -165,6 +166,7 @@ let birthdaySweepInterval = null;
 
 const dataDir = path.join(__dirname, "data");
 const mochiLeaderboardPath = path.join(dataDir, "mochi-leaderboard.json");
+const mochiRunsPath = path.join(dataDir, "mochi-runs.json");
 const configPath = path.join(dataDir, "config.json");
 const messageArchivePath = path.join(dataDir, "message-archive.jsonl");
 let messageArchiveLastPruneAt = 0;
@@ -7114,7 +7116,8 @@ function buildMochiBootstrapPayload() {
     publicBaseUrl: buildMochiBaseUrl(),
     mochiPath: MOCHI_PATH,
     sessionTtlMinutes: Math.round(MOCHI_SESSION_TTL_MS / 60000),
-    leaderboard: getMochiLeaderboard(10)
+    leaderboard: getMochiLeaderboard(10),
+    recentRuns: getMochiRecentRuns(8)
   };
 }
 
@@ -7232,10 +7235,51 @@ function loadMochiLeaderboard() {
   return mochiLeaderboardCache;
 }
 
+function loadMochiRecentRuns() {
+  if (mochiRecentRunsCache) return mochiRecentRunsCache;
+
+  try {
+    const raw = fs.readFileSync(mochiRunsPath, "utf8");
+    const parsed = JSON.parse(raw);
+    mochiRecentRunsCache = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    mochiRecentRunsCache = [];
+  }
+
+  return mochiRecentRunsCache;
+}
+
 function persistMochiLeaderboard() {
   fs.mkdirSync(dataDir, { recursive: true });
   const entries = [...loadMochiLeaderboard().values()].sort((a, b) => b.bestScore - a.bestScore || String(a.userTag).localeCompare(String(b.userTag)));
   fs.writeFileSync(mochiLeaderboardPath, JSON.stringify(entries, null, 2), "utf8");
+}
+
+function persistMochiRecentRuns() {
+  fs.mkdirSync(dataDir, { recursive: true });
+  const entries = loadMochiRecentRuns().slice(0, 50);
+  fs.writeFileSync(mochiRunsPath, JSON.stringify(entries, null, 2), "utf8");
+}
+
+function recordMochiRun({ userId, userTag, score, durationMs = 0, cans = 0, reason = "game_over" }) {
+  const runs = loadMochiRecentRuns();
+  const entry = {
+    userId,
+    userTag,
+    score: Math.floor(Number(score) || 0),
+    durationMs: Math.max(0, Math.floor(Number(durationMs) || 0)),
+    cans: Math.max(0, Math.floor(Number(cans) || 0)),
+    reason: String(reason || "game_over"),
+    updatedAt: new Date().toISOString()
+  };
+
+  runs.unshift(entry);
+  if (runs.length > 50) {
+    runs.length = 50;
+  }
+
+  persistMochiRecentRuns();
+  return entry;
 }
 
 function recordMochiScore({ userId, userTag, score }) {
@@ -7253,6 +7297,13 @@ function recordMochiScore({ userId, userTag, score }) {
   board.set(userId, entry);
   persistMochiLeaderboard();
   return entry;
+}
+
+function getMochiRecentRuns(limit = 8) {
+  return loadMochiRecentRuns()
+    .slice()
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    .slice(0, limit);
 }
 
 function getMochiLeaderboard(limit = 10) {
@@ -8807,7 +8858,8 @@ async function handleWebApi(req, res, pathname) {
       publicBaseUrl: buildMochiBaseUrl(),
       mochiPath: MOCHI_PATH,
       sessionTtlMinutes: Math.round(MOCHI_SESSION_TTL_MS / 60000),
-      leaderboard: getMochiLeaderboard(10)
+      leaderboard: getMochiLeaderboard(10),
+      recentRuns: getMochiRecentRuns(8)
     });
   }
 
@@ -8836,7 +8888,11 @@ async function handleWebApi(req, res, pathname) {
   }
 
   if (req.method === "GET" && pathname === "/api/mochi/leaderboard") {
-    return sendWebJson(res, 200, { ok: true, leaderboard: getMochiLeaderboard(10) });
+    return sendWebJson(res, 200, {
+      ok: true,
+      leaderboard: getMochiLeaderboard(10),
+      recentRuns: getMochiRecentRuns(8)
+    });
   }
 
   if (req.method === "GET" && pathname.startsWith("/api/mochi/leaderboard/")) {
@@ -8872,7 +8928,16 @@ async function handleWebApi(req, res, pathname) {
       userTag: completedSession.userTag,
       score: Math.floor(score)
     });
+    const recentRun = recordMochiRun({
+      userId: completedSession.userId,
+      userTag: completedSession.userTag,
+      score: Math.floor(score),
+      durationMs,
+      cans: Number(body.cans) || 0,
+      reason
+    });
     const leaderboard = getMochiLeaderboard(10);
+    const recentRuns = getMochiRecentRuns(8);
 
     if (completedSession.channelId) {
       client.channels.fetch(completedSession.channelId).then(async channel => {
@@ -8889,7 +8954,9 @@ async function handleWebApi(req, res, pathname) {
       ok: true,
       session: publicMochiSession(completedSession),
       personalBest,
-      leaderboard
+      leaderboard,
+      recentRun,
+      recentRuns
     });
   }
 
@@ -11689,16 +11756,26 @@ client.on("interactionCreate", async interaction => {
 
     if (interaction.commandName === "mochi-leaderboard") {
       const leaderboard = getMochiLeaderboard(10);
+      const recentRuns = getMochiRecentRuns(5);
       const description = leaderboard.length
         ? leaderboard.map((entry, index) => `${index + 1}. ${entry.userTag} - ${entry.bestScore}`).join("\n")
         : "No scores yet. Be the first to flap.";
+      const recentDescription = recentRuns.length
+        ? recentRuns.map((entry, index) => `${index + 1}. ${entry.userTag} - ${entry.score}`).join("\n")
+        : "No recent runs yet.";
 
       return interaction.reply({
         embeds: [
           makeEmbed({
             title: "Mochi Bird Leaderboard",
             description,
-            color: COLORS.yellow
+            color: COLORS.yellow,
+            fields: [
+              {
+                name: "Recent runs",
+                value: recentDescription
+              }
+            ]
           })
         ],
         ephemeral: true

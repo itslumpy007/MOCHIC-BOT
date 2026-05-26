@@ -14,6 +14,9 @@ const leaderboardListEl = document.getElementById('leaderboardList');
 const leaderboardEmptyEl = document.getElementById('leaderboardEmpty');
 const leaderboardStatusEl = document.getElementById('leaderboardStatus');
 const leaderboardUpdatedEl = document.getElementById('leaderboardUpdated');
+const recentRunsListEl = document.getElementById('recentRunsList');
+const recentRunsEmptyEl = document.getElementById('recentRunsEmpty');
+const recentRunsUpdatedEl = document.getElementById('recentRunsUpdated');
 const canCountEl = document.getElementById('canCount');
 const soundToggleEl = document.getElementById('soundToggle');
 const bootstrapEl = document.getElementById('mochi-bootstrap');
@@ -36,6 +39,8 @@ let canWalletKey = 'discord-mochi-bird-can-wallet-practice';
 let leaderboardCacheKey = 'discord-mochi-bird-leaderboard-cache';
 let leaderboardEntries = [];
 let leaderboardUpdatedAt = 0;
+let recentRunsEntries = [];
+let recentRunsUpdatedAt = 0;
 let leaderboardRefreshTimer = 0;
 let leaderboardLoading = false;
 let leaderboardLastFetchAt = 0;
@@ -191,7 +196,68 @@ function renderLeaderboard(entries, updatedAt = Date.now()) {
   leaderboardUpdatedEl.textContent = formatRelativeTime(leaderboardUpdatedAt);
   localStorage.setItem(
     leaderboardCacheKey,
-    JSON.stringify({ updatedAt: leaderboardUpdatedAt, entries: leaderboardEntries })
+    JSON.stringify({
+      updatedAt: leaderboardUpdatedAt,
+      entries: leaderboardEntries,
+      recentUpdatedAt: recentRunsUpdatedAt,
+      recentRuns: recentRunsEntries
+    })
+  );
+}
+
+function renderRecentRuns(entries, updatedAt = Date.now()) {
+  recentRunsEntries = Array.isArray(entries) ? entries.slice(0, 8) : [];
+  recentRunsListEl.replaceChildren();
+
+  if (!recentRunsEntries.length) {
+    recentRunsEmptyEl.classList.remove('hidden');
+    recentRunsUpdatedAt = updatedAt;
+    recentRunsUpdatedEl.textContent = formatRelativeTime(recentRunsUpdatedAt);
+    return;
+  }
+
+  recentRunsEmptyEl.classList.add('hidden');
+
+  for (let index = 0; index < recentRunsEntries.length; index += 1) {
+    const entry = recentRunsEntries[index];
+    const item = document.createElement('li');
+    item.className = 'leaderboard-entry';
+
+    const rank = document.createElement('span');
+    rank.className = 'leaderboard-rank';
+    rank.textContent = `#${index + 1}`;
+
+    const meta = document.createElement('div');
+    meta.className = 'leaderboard-meta-block';
+    const user = document.createElement('strong');
+    user.textContent = entry.userTag || entry.userName || `Player ${index + 1}`;
+    const sub = document.createElement('span');
+    const scoreText = Number(entry.score ?? entry.bestScore ?? 0);
+    const canText = Number(entry.cans || 0);
+    const timeText = entry.updatedAt
+      ? `Saved ${formatRelativeTime(entry.updatedAt).replace('Last updated ', '')}`
+      : 'Recorded run';
+    sub.textContent = `${timeText} · Score ${scoreText}${canText ? ` · ${canText} cans` : ''}`;
+    meta.append(user, sub);
+
+    const score = document.createElement('strong');
+    score.className = 'leaderboard-score';
+    score.textContent = String(scoreText);
+
+    item.append(rank, meta, score);
+    recentRunsListEl.appendChild(item);
+  }
+
+  recentRunsUpdatedAt = updatedAt;
+  recentRunsUpdatedEl.textContent = formatRelativeTime(recentRunsUpdatedAt);
+  localStorage.setItem(
+    leaderboardCacheKey,
+    JSON.stringify({
+      updatedAt: leaderboardUpdatedAt,
+      entries: leaderboardEntries,
+      recentUpdatedAt: recentRunsUpdatedAt,
+      recentRuns: recentRunsEntries
+    })
   );
 }
 
@@ -207,6 +273,10 @@ function hydrateLeaderboardCache() {
       leaderboardUpdatedAt = Number(payload.updatedAt) || 0;
       leaderboardLastFetchAt = leaderboardUpdatedAt || Date.now();
       renderLeaderboard(payload.entries, leaderboardUpdatedAt || Date.now());
+    }
+    if (Array.isArray(payload.recentRuns)) {
+      recentRunsUpdatedAt = Number(payload.recentUpdatedAt) || Number(payload.updatedAt) || 0;
+      renderRecentRuns(payload.recentRuns, recentRunsUpdatedAt || Date.now());
     }
   } catch {
     // Cached leaderboard is optional.
@@ -234,6 +304,7 @@ async function loadLeaderboard({ quiet = false } = {}) {
     }
 
     const entries = Array.isArray(payload?.leaderboard) ? payload.leaderboard : [];
+    const recentRuns = Array.isArray(payload?.recentRuns) ? payload.recentRuns : [];
     if (response.ok && entries.length) {
       renderLeaderboard(entries, Date.now());
     } else if (response.ok && !entries.length && bootstrapPayload?.leaderboard && Array.isArray(bootstrapPayload.leaderboard)) {
@@ -244,12 +315,20 @@ async function loadLeaderboard({ quiet = false } = {}) {
       leaderboardStatusEl.textContent = `${leaderboardEntries.length} top scores saved from Discord runs.`;
       leaderboardEmptyEl.classList.add('hidden');
     }
+    if (response.ok && recentRuns.length) {
+      renderRecentRuns(recentRuns, Date.now());
+    } else if (!recentRunsEntries.length && bootstrapPayload?.recentRuns && Array.isArray(bootstrapPayload.recentRuns)) {
+      renderRecentRuns(bootstrapPayload.recentRuns, Date.now());
+    }
   } catch {
     if (leaderboardEntries.length) {
       leaderboardStatusEl.textContent = `${leaderboardEntries.length} top scores saved from Discord runs.`;
       leaderboardEmptyEl.classList.add('hidden');
     } else if (bootstrapPayload?.leaderboard && Array.isArray(bootstrapPayload.leaderboard)) {
       renderLeaderboard(bootstrapPayload.leaderboard, Date.now());
+    }
+    if (!recentRunsEntries.length && bootstrapPayload?.recentRuns && Array.isArray(bootstrapPayload.recentRuns)) {
+      renderRecentRuns(bootstrapPayload.recentRuns, Date.now());
     }
   } finally {
     leaderboardLoading = false;
@@ -259,6 +338,7 @@ async function loadLeaderboard({ quiet = false } = {}) {
 
 function tickLeaderboardLabel() {
   leaderboardUpdatedEl.textContent = formatRelativeTime(leaderboardUpdatedAt);
+  recentRunsUpdatedEl.textContent = formatRelativeTime(recentRunsUpdatedAt);
 }
 
 function scheduleLeaderboardRefresh() {
@@ -1043,6 +1123,9 @@ hydrateLeaderboardCache();
 setSoundButtonLabel();
 if (bootstrapPayload?.leaderboard && Array.isArray(bootstrapPayload.leaderboard)) {
   renderLeaderboard(bootstrapPayload.leaderboard, Date.now());
+}
+if (bootstrapPayload?.recentRuns && Array.isArray(bootstrapPayload.recentRuns)) {
+  renderRecentRuns(bootstrapPayload.recentRuns, Date.now());
 }
 resetRun();
 void loadSession();
