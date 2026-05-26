@@ -37,7 +37,7 @@ const modeLabelEl = document.getElementById('modeLabel');
 const menuTabs = Array.from(document.querySelectorAll('[data-menu-tab]'));
 const menuPanels = Array.from(document.querySelectorAll('[data-menu-panel]'));
 const mainMenuStageEl = document.querySelector('.main-menu-stage');
-const ASSET_VERSION = 'mobile-activity14';
+const ASSET_VERSION = 'mobile-activity15';
 const DISCORD_SDK_MODULE_URL = `./vendor/discord-sdk/index.mjs?v=${ASSET_VERSION}`;
 const SETTINGS_KEY = 'discord-mochi-bird-settings';
 const LEADERBOARD_CACHE_KEY = 'discord-mochi-bird-leaderboard-cache';
