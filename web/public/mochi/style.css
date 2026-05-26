@@ -264,6 +264,10 @@ body.activity-mode .overlay-card {
   width: min(90%, 340px);
 }
 
+body.activity-mode .overlay {
+  display: none !important;
+}
+
 body.mobile-activity .global-brand {
   display: none;
 }
