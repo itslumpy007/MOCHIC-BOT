@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mochi Bird</title>
-    <link rel="stylesheet" href="./style.css?v=reset2" />
+    <link rel="stylesheet" href="./style.css?v=reset3" />
   </head>
   <body>
     <div class="background-orb orb-a"></div>
@@ -21,17 +21,21 @@
 
       <div class="content-grid">
         <section class="game-card">
-          <div class="hud">
-            <div class="stat">
-              <span>Score</span>
-              <strong id="score">0</strong>
-            </div>
-            <div class="stat">
-              <span>Best</span>
-              <strong id="bestScore">0</strong>
-            </div>
-            <div class="status" id="status">Loading...</div>
+        <div class="hud">
+          <div class="stat">
+            <span>Score</span>
+            <strong id="score">0</strong>
           </div>
+          <div class="stat">
+            <span>Best</span>
+            <strong id="bestScore">0</strong>
+          </div>
+          <div class="stat">
+            <span>Cans</span>
+            <strong id="canCount">0</strong>
+          </div>
+          <div class="status" id="status">Loading...</div>
+        </div>
 
           <div class="stage" id="stage">
             <canvas id="game"></canvas>
@@ -70,6 +74,6 @@
       </div>
     </main>
 
-    <script type="module" src="./game.js?v=reset2"></script>
+    <script type="module" src="./game.js?v=reset3"></script>
   </body>
 </html>

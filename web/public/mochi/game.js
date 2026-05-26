@@ -14,6 +14,7 @@ const leaderboardListEl = document.getElementById('leaderboardList');
 const leaderboardEmptyEl = document.getElementById('leaderboardEmpty');
 const leaderboardStatusEl = document.getElementById('leaderboardStatus');
 const leaderboardUpdatedEl = document.getElementById('leaderboardUpdated');
+const canCountEl = document.getElementById('canCount');
 const soundToggleEl = document.getElementById('soundToggle');
 const bootstrapEl = document.getElementById('mochi-bootstrap');
 
@@ -31,6 +32,7 @@ let sessionId = params.get('sid');
 let isPracticeMode = !sessionId;
 let session = null;
 let bestScoreKey = 'discord-mochi-bird-best-practice';
+let canWalletKey = 'discord-mochi-bird-can-wallet-practice';
 let leaderboardCacheKey = 'discord-mochi-bird-leaderboard-cache';
 let leaderboardEntries = [];
 let leaderboardUpdatedAt = 0;
@@ -41,9 +43,13 @@ let audioEnabled = localStorage.getItem('discord-mochi-bird-audio') !== 'off';
 let audioContext = null;
 let musicTimer = 0;
 let musicStep = 0;
+let canWallet = Number(localStorage.getItem(canWalletKey) || 0);
+let runCanCount = 0;
 
 const birdSprite = new Image();
-birdSprite.src = './assets/avatar.png?v=reset2';
+birdSprite.src = './assets/avatar-v3.png?v=reset3';
+const canSprite = new Image();
+canSprite.src = './assets/dr-pepper-can-v3.png?v=reset3';
 
 let width = 360;
 let height = 640;
@@ -58,8 +64,10 @@ let bestScore = 0;
 let elapsedMs = 0;
 let bird = null;
 let pipes = [];
+let cans = [];
 let clouds = [];
 let spawnTimer = 0.7;
+let canSpawnTimer = 1.1;
 let bgOffset = 0;
 let particles = [];
 let shakeTime = 0;
@@ -91,6 +99,16 @@ function resizeCanvas() {
 function hydrateBestScore() {
   bestScore = Number(localStorage.getItem(bestScoreKey) || 0);
   bestScoreEl.textContent = String(bestScore);
+}
+
+function hydrateCanWallet() {
+  canWallet = Number(localStorage.getItem(canWalletKey) || 0);
+  canCountEl.textContent = String(canWallet);
+}
+
+function persistCanWallet() {
+  localStorage.setItem(canWalletKey, String(canWallet));
+  canCountEl.textContent = String(canWallet);
 }
 
 function formatDuration(ms) {
@@ -207,22 +225,30 @@ async function loadLeaderboard({ quiet = false } = {}) {
     }
 
     const response = await fetch('/api/mochi/leaderboard', { cache: 'no-store' });
-    const payload = await response.json().catch(() => null);
-    if (response.ok) {
-      const entries = Array.isArray(payload?.leaderboard) ? payload.leaderboard : [];
-      if (entries.length || !leaderboardEntries.length) {
-        renderLeaderboard(entries, Date.now());
-      } else {
-        leaderboardStatusEl.textContent = `${leaderboardEntries.length} top scores saved from Discord runs.`;
-      }
-      leaderboardLastFetchAt = Date.now();
-    } else if (!leaderboardEntries.length) {
-      leaderboardStatusEl.textContent = 'Leaderboard will show after the first saved score.';
-      leaderboardEmptyEl.classList.remove('hidden');
-      leaderboardEmptyEl.textContent = 'Waiting for the first saved score...';
+    const payloadText = await response.text();
+    let payload = null;
+    try {
+      payload = JSON.parse(payloadText);
+    } catch {
+      payload = null;
+    }
+
+    const entries = Array.isArray(payload?.leaderboard) ? payload.leaderboard : [];
+    if (response.ok && entries.length) {
+      renderLeaderboard(entries, Date.now());
+    } else if (response.ok && !entries.length && bootstrapPayload?.leaderboard && Array.isArray(bootstrapPayload.leaderboard)) {
+      renderLeaderboard(bootstrapPayload.leaderboard, Date.now());
+    } else if (!leaderboardEntries.length && bootstrapPayload?.leaderboard && Array.isArray(bootstrapPayload.leaderboard)) {
+      renderLeaderboard(bootstrapPayload.leaderboard, Date.now());
+    } else if (leaderboardEntries.length) {
+      leaderboardStatusEl.textContent = `${leaderboardEntries.length} top scores saved from Discord runs.`;
+      leaderboardEmptyEl.classList.add('hidden');
     }
   } catch {
-    if (!leaderboardEntries.length && bootstrapPayload?.leaderboard && Array.isArray(bootstrapPayload.leaderboard)) {
+    if (leaderboardEntries.length) {
+      leaderboardStatusEl.textContent = `${leaderboardEntries.length} top scores saved from Discord runs.`;
+      leaderboardEmptyEl.classList.add('hidden');
+    } else if (bootstrapPayload?.leaderboard && Array.isArray(bootstrapPayload.leaderboard)) {
       renderLeaderboard(bootstrapPayload.leaderboard, Date.now());
     }
   } finally {
@@ -319,6 +345,11 @@ function playScoreSound() {
 
 function playHitSound() {
   playTone({ frequency: 220, slideTo: 140, duration: 0.18, gain: 0.05, type: 'sawtooth' });
+}
+
+function playCanSound() {
+  playTone({ frequency: 880, slideTo: 1120, duration: 0.08, gain: 0.028, type: 'triangle' });
+  window.setTimeout(() => playTone({ frequency: 1320, slideTo: 1640, duration: 0.07, gain: 0.022, type: 'sine' }), 55);
 }
 
 function startMusicLoop() {
@@ -427,7 +458,9 @@ function resetBoard() {
     velocity: 0
   };
   pipes = [];
+  cans = [];
   spawnTimer = 0.65;
+  canSpawnTimer = 0.95;
   bgOffset = 0;
   clouds = Array.from({ length: 5 }, (_, index) => ({
     x: width * (0.2 + index * 0.22),
@@ -437,6 +470,7 @@ function resetBoard() {
   }));
   score = 0;
   elapsedMs = 0;
+  runCanCount = 0;
   started = false;
   gameOver = false;
   submitted = false;
@@ -466,6 +500,19 @@ function addPipe() {
   });
 }
 
+function addCan() {
+  const canSize = clamp(Math.round(width * 0.06), 18, 28);
+  const minY = Math.max(72, canSize * 1.5);
+  const maxY = Math.max(minY + 60, height - GROUND_HEIGHT - canSize * 1.5 - 20);
+  cans.push({
+    x: width + canSize + 24,
+    y: minY + Math.random() * (maxY - minY),
+    size: canSize,
+    bob: Math.random() * Math.PI * 2,
+    collected: false
+  });
+}
+
 function rectsOverlap(a, b) {
   return (
     a.x < b.x + b.width &&
@@ -481,6 +528,16 @@ function birdBox() {
     y: bird.y - bird.radius,
     width: bird.radius * 2,
     height: bird.radius * 2
+  };
+}
+
+function canBox(can) {
+  const size = can.size * 0.9;
+  return {
+    x: can.x - size / 2,
+    y: can.y - size / 2,
+    width: size,
+    height: size
   };
 }
 
@@ -614,6 +671,33 @@ function drawBird() {
   ctx.restore();
 }
 
+function drawCans() {
+  if (!cans.length) {
+    return;
+  }
+
+  for (const can of cans) {
+    const wobble = Math.sin(can.bob) * 3;
+    can.bob += 0.08;
+
+    ctx.save();
+    ctx.translate(can.x, can.y + wobble);
+    ctx.rotate(Math.sin(can.bob * 0.8) * 0.12);
+
+    if (canSprite.complete && canSprite.naturalWidth > 0) {
+      ctx.drawImage(canSprite, -can.size / 2, -can.size / 2, can.size, can.size);
+    } else {
+      const fallbackWidth = can.size * 0.82;
+      const fallbackHeight = can.size * 1.1;
+      ctx.fillStyle = '#b51030';
+      roundRect(ctx, -fallbackWidth / 2, -fallbackHeight / 2, fallbackWidth, fallbackHeight, 5);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+}
+
 function drawHudOverlay() {
   if (started || gameOver) {
     return;
@@ -706,6 +790,7 @@ function endGame(reason) {
   const summary = [
     { label: 'Score', value: String(score) },
     { label: 'Best', value: String(Math.max(bestScore, score)) },
+    { label: 'Cans', value: String(runCanCount) },
     { label: 'Time', value: formatDuration(elapsedMs) }
   ];
 
@@ -744,6 +829,7 @@ async function submitScore(reason) {
       body: JSON.stringify({
         score,
         durationMs: Math.round(elapsedMs),
+        cans: runCanCount,
         reason
       })
     });
@@ -778,9 +864,14 @@ function update(deltaSeconds) {
   bgOffset = (bgOffset + PIPE_SPEED * deltaSeconds) % width;
 
   spawnTimer -= deltaSeconds;
+  canSpawnTimer -= deltaSeconds;
   if (spawnTimer <= 0) {
     addPipe();
     spawnTimer = PIPE_INTERVAL;
+  }
+  if (canSpawnTimer <= 0) {
+    addCan();
+    canSpawnTimer = 1.6 + Math.random() * 1.4;
   }
 
   for (const pipe of pipes) {
@@ -788,6 +879,10 @@ function update(deltaSeconds) {
   }
 
   pipes = pipes.filter((pipe) => pipe.x > -PIPE_WIDTH - 40);
+  for (const can of cans) {
+    can.x -= PIPE_SPEED * deltaSeconds * 0.92;
+  }
+  cans = cans.filter((can) => can.x > -80 && !can.collected);
 
   const birdBounds = birdBox();
 
@@ -822,6 +917,21 @@ function update(deltaSeconds) {
       }
     }
   }
+
+  for (const can of cans) {
+    if (can.collected) {
+      continue;
+    }
+
+    if (rectsOverlap(birdBounds, canBox(can))) {
+      can.collected = true;
+      runCanCount += 1;
+      canWallet += 1;
+      persistCanWallet();
+      playCanSound();
+      emitParticles(can.x, can.y, 'rgba(255, 200, 87, 0.95)', 12);
+    }
+  }
 }
 
 function render() {
@@ -845,6 +955,7 @@ function render() {
   }
 
   drawPipes();
+  drawCans();
   drawGround();
   drawParticles();
   drawBird();
@@ -882,6 +993,7 @@ async function loadSession() {
 
     session = payload.session;
     bestScoreKey = `discord-mochi-bird-best-${session.userId}`;
+    canWalletKey = `discord-mochi-bird-can-wallet-${session.userId}`;
     sessionNoteEl.textContent = `Session linked to ${session.userTag}.`;
     updateStatus(`Ready for ${session.userTag}`);
 
@@ -898,6 +1010,8 @@ async function loadSession() {
     } catch {
       // Best score lookup is optional.
     }
+
+    hydrateCanWallet();
   } catch (error) {
     sessionNoteEl.textContent = 'Discord session is missing or expired. Practice mode is still available.';
     updateStatus(`Session warning: ${error.message}`);
@@ -924,6 +1038,7 @@ async function onPrimaryInput(event) {
 
 resizeCanvas();
 hydrateBestScore();
+hydrateCanWallet();
 hydrateLeaderboardCache();
 setSoundButtonLabel();
 if (bootstrapPayload?.leaderboard && Array.isArray(bootstrapPayload.leaderboard)) {
