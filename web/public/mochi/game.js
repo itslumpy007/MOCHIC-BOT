@@ -1030,32 +1030,11 @@ function showMenu(view = 'main', options = {}) {
   syncMobileTapLayer();
 }
 
-async function launchRun() {
+function launchRun() {
   if (activityMode && !sessionId) {
     void resolveActivitySession(3500);
   }
-  await autoSaveScore('reset');
-  started = false;
-  gameOver = false;
-  submitted = false;
-  score = 0;
-  elapsedMs = 0;
-  cansCollected = 0;
-  paused = false;
-  gameOverReason = '';
-  particles = [];
-  trailPoints = [];
-  shakeTime = 0;
-  shakeStrength = 0;
-  gameState = 'playing';
-  resetBoard();
-  scoreEl.textContent = '0';
-  hideOverlay();
-  updateStatus(isPracticeMode ? 'Practice mode running' : 'Session running');
-  bird.velocity = FLAP_VELOCITY;
-  started = true;
-  playLaunchJingle();
-  syncMobileTapLayer();
+  startRunNow();
 }
 
 function hideOverlay() {
