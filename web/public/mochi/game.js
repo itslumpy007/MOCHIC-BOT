@@ -2060,7 +2060,6 @@ resizeCanvas();
 loadSettings();
 hydrateLeaderboardCache();
 updateViewportMode();
-showReadyMenuForCurrentState();
 void loadLeaderboard();
 startLeaderboardAutoRefresh();
 window.setTimeout(() => {
@@ -2072,6 +2071,11 @@ window.setTimeout(() => {
 }, 1700);
 if (activityMode) {
   introSplashEl?.classList.add('hidden');
+}
+if (activityMode) {
+  void launchRun();
+} else {
+  showReadyMenuForCurrentState();
 }
 loadSession().catch((error) => {
   updateStatus(`Startup error: ${error.message}`);
