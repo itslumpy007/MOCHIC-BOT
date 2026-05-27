@@ -431,6 +431,7 @@ canvas {
   display: grid;
   place-items: center;
   padding: 18px;
+  overflow: hidden;
 }
 
 .wardrobe-modal.hidden {
@@ -448,14 +449,16 @@ canvas {
   position: relative;
   z-index: 1;
   width: min(1080px, 100%);
-  max-height: min(88vh, 920px);
+  height: min(88vh, 920px);
+  max-height: calc(100dvh - 36px);
   overflow: hidden;
   border-radius: 28px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: linear-gradient(180deg, rgba(12, 22, 35, 0.96), rgba(7, 14, 22, 0.98));
   box-shadow: var(--shadow);
   padding: 20px;
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 16px;
 }
 
@@ -531,8 +534,13 @@ canvas {
   display: grid;
   gap: 16px;
   overflow: auto;
+  min-height: 0;
+  flex: 1 1 auto;
   padding-right: 2px;
   padding-bottom: 2px;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 .wardrobe-section {
@@ -639,17 +647,22 @@ canvas {
 .wardrobe-actions {
   display: flex;
   justify-content: flex-end;
+  flex: 0 0 auto;
 }
 
 @media (max-width: 640px) {
   .wardrobe-modal {
     padding: 8px;
+    place-items: stretch;
   }
 
   .wardrobe-sheet {
-    max-height: 92vh;
-    padding: 14px;
+    width: 100%;
+    height: calc(100dvh - 16px);
+    max-height: none;
+    padding: 14px 14px 16px;
     border-radius: 22px;
+    gap: 12px;
   }
 
   .wardrobe-head {
@@ -665,8 +678,34 @@ canvas {
     grid-template-columns: 1fr;
   }
 
+  .wardrobe-grid {
+    gap: 12px;
+    padding-bottom: 0;
+  }
+
   .wardrobe-shelf {
     grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  }
+
+  .wardrobe-card {
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .wardrobe-card strong {
+    font-size: 0.88rem;
+  }
+
+  .wardrobe-card p {
+    font-size: 0.8rem;
+  }
+
+  .wardrobe-actions {
+    justify-content: stretch;
+  }
+
+  .wardrobe-actions .ghost-button {
+    width: 100%;
   }
 }
 
