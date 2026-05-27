@@ -50,6 +50,8 @@ let musicTimer = 0;
 let musicStep = 0;
 let canWallet = Number(localStorage.getItem(canWalletKey) || 0);
 let runCanCount = 0;
+let lastHandledInputAt = 0;
+let lastHandledPointerId = null;
 
 const birdSprite = new Image();
 birdSprite.src = './assets/avatar-v3.png?v=reset3';
@@ -77,7 +79,6 @@ let bgOffset = 0;
 let particles = [];
 let shakeTime = 0;
 let shakePower = 0;
-let lastPrimaryInputAt = 0;
 
 const GRAVITY = 1100;
 const FLAP_VELOCITY = -340;
@@ -1103,10 +1104,16 @@ async function loadSession() {
 
 async function onPrimaryInput(event) {
   const now = Date.now();
-  if (now - lastPrimaryInputAt < 120) {
+  const pointerId = event && Number.isFinite(Number(event.pointerId)) ? Number(event.pointerId) : null;
+
+  if (pointerId !== null && pointerId === lastHandledPointerId && now - lastHandledInputAt < 160) {
     return;
   }
-  lastPrimaryInputAt = now;
+  if (now - lastHandledInputAt < 60) {
+    return;
+  }
+  lastHandledInputAt = now;
+  lastHandledPointerId = pointerId;
 
   if (event) {
     const interactiveTarget = event.target && typeof event.target.closest === 'function'
@@ -1118,7 +1125,7 @@ async function onPrimaryInput(event) {
     event.preventDefault();
     event.stopPropagation();
   }
-  await unlockAudio();
+  void unlockAudio();
   flap();
 }
 
@@ -1161,20 +1168,8 @@ window.addEventListener('keydown', (event) => {
   }
 });
 
-canvas.addEventListener('pointerdown', onPrimaryInput);
-canvas.addEventListener('pointerup', onPrimaryInput);
-canvas.addEventListener('touchstart', onPrimaryInput, { passive: false });
-canvas.addEventListener('touchend', onPrimaryInput, { passive: false });
 stageEl.addEventListener('pointerdown', onPrimaryInput);
-stageEl.addEventListener('pointerup', onPrimaryInput);
-stageEl.addEventListener('touchstart', onPrimaryInput, { passive: false });
-stageEl.addEventListener('touchend', onPrimaryInput, { passive: false });
-stageEl.addEventListener('click', onPrimaryInput);
-window.addEventListener('pointerup', onPrimaryInput, { capture: true });
-window.addEventListener('touchend', onPrimaryInput, { passive: false, capture: true });
 primaryButton.addEventListener('pointerdown', onPrimaryInput);
-primaryButton.addEventListener('pointerup', onPrimaryInput);
-primaryButton.addEventListener('touchend', onPrimaryInput, { passive: false });
 soundToggleEl.addEventListener('click', toggleSound);
 
 raf = requestAnimationFrame(loop);
