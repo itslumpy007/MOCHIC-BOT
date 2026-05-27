@@ -47,6 +47,15 @@ function envFlag(value, fallback = false) {
   return ["1", "true", "yes", "on"].includes(String(value).trim().toLowerCase());
 }
 
+function resolveDataDir(value, fallback) {
+  const raw = typeof value === "string" ? value.trim() : "";
+  if (!raw) {
+    return fallback;
+  }
+
+  return path.isAbsolute(raw) ? raw : path.resolve(__dirname, raw);
+}
+
 const ENABLE_CORE_BOT = envFlag(process.env.ENABLE_CORE_BOT, true);
 const WEB_PORT = Number(process.env.PORT || process.env.WEB_PORT || 3000);
 const WEB_ADMIN_TOKEN = process.env.WEB_ADMIN_TOKEN || "";
@@ -165,7 +174,10 @@ let googleBlockListInterval = null;
 let generalChatSweepInterval = null;
 let birthdaySweepInterval = null;
 
-const dataDir = path.join(__dirname, "data");
+const dataDir = resolveDataDir(
+  process.env.MOCHI_DATA_DIR || process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH,
+  path.join(__dirname, "data")
+);
 const mochiLeaderboardPath = path.join(dataDir, "mochi-leaderboard.json");
 const mochiRunsPath = path.join(dataDir, "mochi-runs.json");
 const mochiProfilesPath = path.join(dataDir, "mochi-profiles.json");
@@ -7234,6 +7246,14 @@ function loadMochiLeaderboard() {
     mochiLeaderboardCache = new Map();
   }
 
+  if (!mochiLeaderboardCache.size) {
+    const rebuilt = rebuildMochiLeaderboardFromRecentRuns();
+    if (rebuilt.size) {
+      mochiLeaderboardCache = rebuilt;
+      persistMochiLeaderboard();
+    }
+  }
+
   return mochiLeaderboardCache;
 }
 
@@ -7249,6 +7269,30 @@ function loadMochiRecentRuns() {
   }
 
   return mochiRecentRunsCache;
+}
+
+function rebuildMochiLeaderboardFromRecentRuns() {
+  const board = new Map();
+
+  for (const run of loadMochiRecentRuns()) {
+    const userId = String(run?.userId || "").trim();
+    if (!userId) {
+      continue;
+    }
+
+    const score = Math.max(0, Math.floor(Number(run?.score) || 0));
+    const existing = board.get(userId) || null;
+    const bestScore = existing ? Math.max(existing.bestScore, score) : score;
+    board.set(userId, {
+      userId,
+      userTag: String(run?.userTag || existing?.userTag || userId).trim(),
+      bestScore,
+      lastScore: score,
+      updatedAt: typeof run?.updatedAt === "string" ? run.updatedAt : new Date().toISOString()
+    });
+  }
+
+  return board;
 }
 
 function persistMochiLeaderboard() {

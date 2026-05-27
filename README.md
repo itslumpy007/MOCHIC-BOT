@@ -68,6 +68,7 @@ The bot serves a web dashboard from the same Node process.
 - The game defaults to `/mochi`.
 - If you want a different path, set `MOCHI_PATH=/your-path` in your Railway variables.
 - The matching URL becomes `https://your-domain/your-path`.
+- If your Railway service uses a persistent volume, set `MOCHI_DATA_DIR` to that mount path so scores, cans, outfits, and leaderboard data survive deploys. If you do not set it, the bot falls back to `./data` next to the app.
 - AutoMod also supports dry-run mode, quiet hours, channel rule overrides, link reputation checks, language-aware filtering, and a preview tool for testing sample messages before applying changes.
 - Channel profiles can be entered in the Ops tab with lines like `#general: standard` or `#promo: dryrun=on, preset=strict`.
 - Optional AI moderation can be enabled from the AutoMod tab's `AI Settings` after setting `OPENAI_API_KEY`. AI review starts as alert-only via the `ai-review` rule and appears in the AI Review tab and AutoMod cases.
