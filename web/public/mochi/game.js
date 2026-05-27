@@ -19,6 +19,15 @@ const recentRunsEmptyEl = document.getElementById('recentRunsEmpty');
 const recentRunsUpdatedEl = document.getElementById('recentRunsUpdated');
 const canCountEl = document.getElementById('canCount');
 const soundToggleEl = document.getElementById('soundToggle');
+const wardrobeButtonEl = document.getElementById('wardrobeButton');
+const wardrobeModalEl = document.getElementById('wardrobeModal');
+const wardrobeBackdropEl = document.getElementById('wardrobeBackdrop');
+const wardrobeCloseButtonEl = document.getElementById('wardrobeCloseButton');
+const wardrobeGridEl = document.getElementById('wardrobeGrid');
+const wardrobeWalletEl = document.getElementById('wardrobeWallet');
+const wardrobeSelectedEl = document.getElementById('wardrobeSelected');
+const wardrobeOwnedEl = document.getElementById('wardrobeOwned');
+const wardrobeStatusEl = document.getElementById('wardrobeStatus');
 const bootstrapEl = document.getElementById('mochi-bootstrap');
 
 let bootstrapPayload = null;
@@ -54,9 +63,32 @@ let lastHandledInputAt = 0;
 let lastHandledPointerId = null;
 
 const birdSprite = new Image();
-birdSprite.src = './assets/avatar-v3.png?v=reset3';
+const assetVersion = 'outfits1';
+const cosmeticManifestUrl = `./assets/cosmetics/manifest.json?v=${assetVersion}`;
+const defaultCosmetic = {
+  id: 'avatar-v3',
+  label: 'Default Avatar',
+  file: 'avatar-v3.png',
+  src: `./assets/avatar-v3.png?v=${assetVersion}`,
+  cost: 0,
+  category: 'Base'
+};
+const cosmeticCategoryOrder = ['Base', 'Hair Styles', 'Can Outfits', 'Special'];
+let cosmeticManifest = [];
+let cosmeticCatalog = [defaultCosmetic];
+let cosmeticSprites = new Map([[defaultCosmetic.id, birdSprite]]);
+let cosmeticState = {
+  selectedId: defaultCosmetic.id,
+  ownedIds: new Set([defaultCosmetic.id])
+};
+let cosmeticStorageKey = 'discord-mochi-bird-cosmetics-practice';
+let cosmeticManifestReady = false;
+let wardrobeNotice = '';
+let wardrobeNoticeTimer = 0;
+
+birdSprite.src = defaultCosmetic.src;
 const canSprite = new Image();
-canSprite.src = './assets/dr-pepper-can-v3.png?v=reset4';
+canSprite.src = `./assets/dr-pepper-can-v3.png?v=${assetVersion}`;
 
 let width = 360;
 let height = 640;
@@ -110,11 +142,410 @@ function hydrateBestScore() {
 function hydrateCanWallet() {
   canWallet = Number(localStorage.getItem(canWalletKey) || 0);
   canCountEl.textContent = String(canWallet);
+  updateWardrobeHeader();
 }
 
 function persistCanWallet() {
   localStorage.setItem(canWalletKey, String(canWallet));
   canCountEl.textContent = String(canWallet);
+  updateWardrobeHeader();
+  if (wardrobeModalEl && !wardrobeModalEl.classList.contains('hidden')) {
+    renderWardrobe();
+  }
+}
+
+function getCosmeticStorageKey() {
+  return session?.userId
+    ? `discord-mochi-bird-cosmetics-${session.userId}`
+    : 'discord-mochi-bird-cosmetics-practice';
+}
+
+function normalizeCosmeticState(raw) {
+  const ownedIds = new Set([defaultCosmetic.id]);
+
+  if (Array.isArray(raw?.ownedIds)) {
+    for (const id of raw.ownedIds) {
+      if (typeof id === 'string' && id.trim()) {
+        ownedIds.add(id);
+      }
+    }
+  }
+
+  let selectedId = typeof raw?.selectedId === 'string' ? raw.selectedId : defaultCosmetic.id;
+  if (!ownedIds.has(selectedId)) {
+    selectedId = defaultCosmetic.id;
+  }
+
+  return { selectedId, ownedIds };
+}
+
+function loadCosmeticStateFromStorage(storageKey) {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) {
+      return null;
+    }
+    return normalizeCosmeticState(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function snapshotCosmeticState() {
+  return {
+    selectedId: cosmeticState.selectedId,
+    ownedIds: new Set(cosmeticState.ownedIds)
+  };
+}
+
+function persistCosmeticState() {
+  localStorage.setItem(
+    cosmeticStorageKey,
+    JSON.stringify({
+      selectedId: cosmeticState.selectedId,
+      ownedIds: [...cosmeticState.ownedIds]
+    })
+  );
+}
+
+function switchCosmeticProfile(nextStorageKey, preserveCurrentState = true) {
+  if (!nextStorageKey) {
+    return;
+  }
+
+  const previousState = preserveCurrentState ? snapshotCosmeticState() : null;
+  cosmeticStorageKey = nextStorageKey;
+
+  const storedState = loadCosmeticStateFromStorage(nextStorageKey);
+  cosmeticState = storedState || previousState || normalizeCosmeticState(null);
+  persistCosmeticState();
+  updateWardrobeHeader();
+  renderWardrobe();
+}
+
+function formatCosmeticLabel(id) {
+  if (id === defaultCosmetic.id) {
+    return defaultCosmetic.label;
+  }
+
+  const paddedMatch = id.match(/-(\d+)$/);
+  const suffix = paddedMatch ? ` ${String(Number(paddedMatch[1])).padStart(2, '0')}` : '';
+
+  if (id.startsWith('dr-shelly-set-2-')) {
+    return `Dr Shelly Set 2${suffix}`;
+  }
+  if (id.startsWith('dr-shelly-')) {
+    return `Dr Shelly${suffix}`;
+  }
+  if (id.startsWith('shalani-energy-')) {
+    return `Shalani Energy${suffix}`;
+  }
+  if (id.startsWith('sussballs-')) {
+    return `SussBalls${suffix}`;
+  }
+  if (id.startsWith('hair-dark-')) {
+    return `Dark Hair${suffix}`;
+  }
+  if (id.startsWith('hair-brown-')) {
+    return `Brown Hair${suffix}`;
+  }
+  if (id.startsWith('watermelon-')) {
+    return 'Watermelon';
+  }
+
+  return id
+    .replaceAll('-', ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function getCosmeticCategory(id) {
+  if (id === defaultCosmetic.id) {
+    return 'Base';
+  }
+  if (id.startsWith('hair-dark-') || id.startsWith('hair-brown-')) {
+    return 'Hair Styles';
+  }
+  if (id.startsWith('watermelon-')) {
+    return 'Special';
+  }
+  if (id.startsWith('dr-shelly-') || id.startsWith('shalani-energy-') || id.startsWith('sussballs-')) {
+    return 'Can Outfits';
+  }
+
+  return 'Special';
+}
+
+function getCosmeticCost(item) {
+  if (!item || item.id === defaultCosmetic.id) {
+    return 0;
+  }
+
+  if (item.category === 'Hair Styles') {
+    return 12;
+  }
+  if (item.id.startsWith('watermelon-')) {
+    return 45;
+  }
+  if (item.category === 'Special') {
+    return 32;
+  }
+
+  return 18;
+}
+
+function decorateCosmetic(item, index, sourceGroup) {
+  const label = item.label || formatCosmeticLabel(item.id);
+  const category = item.category || getCosmeticCategory(item.id);
+  const cost = Number.isFinite(item.cost) ? item.cost : getCosmeticCost({ ...item, category });
+  return {
+    id: item.id,
+    label,
+    category,
+    cost,
+    file: item.file,
+    src: item.src,
+    source: item.source,
+    sourceGroup,
+    index
+  };
+}
+
+function getSelectedCosmeticDefinition() {
+  return cosmeticCatalog.find((item) => item.id === cosmeticState.selectedId) || defaultCosmetic;
+}
+
+function getSelectedCosmeticSprite() {
+  const cosmetic = getSelectedCosmeticDefinition();
+  return cosmeticSprites.get(cosmetic.id) || birdSprite;
+}
+
+function updateWardrobeHeader() {
+  if (wardrobeWalletEl) {
+    wardrobeWalletEl.textContent = String(canWallet);
+  }
+  if (wardrobeSelectedEl) {
+    wardrobeSelectedEl.textContent = getSelectedCosmeticDefinition().label;
+  }
+  if (wardrobeOwnedEl) {
+    wardrobeOwnedEl.textContent = String(cosmeticState.ownedIds.size);
+  }
+  if (wardrobeStatusEl) {
+    wardrobeStatusEl.textContent = wardrobeNotice
+      || (cosmeticManifestReady
+        ? 'Tap an outfit to equip or unlock it.'
+        : 'Loading outfits...');
+  }
+}
+
+function setWardrobeMessage(text) {
+  wardrobeNotice = text;
+  if (wardrobeStatusEl) {
+    wardrobeStatusEl.textContent = text;
+  }
+  if (wardrobeNoticeTimer) {
+    window.clearTimeout(wardrobeNoticeTimer);
+  }
+  wardrobeNoticeTimer = window.setTimeout(() => {
+    wardrobeNotice = '';
+    wardrobeNoticeTimer = 0;
+    updateWardrobeHeader();
+  }, 2200);
+}
+
+function setWardrobeOpen(open) {
+  if (!wardrobeModalEl) {
+    return;
+  }
+
+  wardrobeModalEl.classList.toggle('hidden', !open);
+  wardrobeModalEl.setAttribute('aria-hidden', String(!open));
+  document.body.classList.toggle('wardrobe-open', open);
+  if (open) {
+    renderWardrobe();
+  }
+}
+
+function openWardrobe() {
+  setWardrobeOpen(true);
+}
+
+function closeWardrobe() {
+  setWardrobeOpen(false);
+}
+
+function isCosmeticOwned(id) {
+  return cosmeticState.ownedIds.has(id);
+}
+
+function equipCosmetic(id, { silent = false } = {}) {
+  const cosmetic = cosmeticCatalog.find((item) => item.id === id);
+  if (!cosmetic) {
+    return;
+  }
+
+  const alreadyOwned = isCosmeticOwned(id);
+  const cost = cosmetic.cost || 0;
+
+  if (!alreadyOwned && cost > 0) {
+    if (canWallet < cost) {
+      setWardrobeMessage(`Need ${cost - canWallet} more cans to unlock ${cosmetic.label}.`);
+      return;
+    }
+
+    canWallet -= cost;
+    persistCanWallet();
+    cosmeticState.ownedIds.add(id);
+    setWardrobeMessage(`${cosmetic.label} unlocked.`);
+  }
+
+  cosmeticState.selectedId = id;
+  cosmeticState.ownedIds.add(id);
+  persistCosmeticState();
+  updateWardrobeHeader();
+  renderWardrobe();
+
+  if (!silent) {
+    updateStatus(`${cosmetic.label} equipped.`);
+  }
+}
+
+function renderWardrobe() {
+  if (!wardrobeGridEl) {
+    return;
+  }
+
+  updateWardrobeHeader();
+  wardrobeGridEl.replaceChildren();
+
+  if (!cosmeticManifestReady) {
+    const loading = document.createElement('div');
+    loading.className = 'leaderboard-empty';
+    loading.textContent = 'Loading outfit catalog...';
+    wardrobeGridEl.appendChild(loading);
+    return;
+  }
+
+  const groupedItems = new Map();
+  for (const item of cosmeticCatalog) {
+    const group = item.category || 'Special';
+    if (!groupedItems.has(group)) {
+      groupedItems.set(group, []);
+    }
+    groupedItems.get(group).push(item);
+  }
+
+  const orderedGroups = [...cosmeticCategoryOrder, ...groupedItems.keys()]
+    .filter((group, index, list) => list.indexOf(group) === index && groupedItems.has(group));
+
+  for (const groupName of orderedGroups) {
+    const items = groupedItems.get(groupName) || [];
+    const section = document.createElement('section');
+    section.className = 'wardrobe-section';
+
+    const head = document.createElement('div');
+    head.className = 'wardrobe-section-head';
+
+    const title = document.createElement('h3');
+    title.textContent = groupName;
+
+    const count = document.createElement('span');
+    count.textContent = `${items.length} outfit${items.length === 1 ? '' : 's'}`;
+
+    head.append(title, count);
+
+    const shelf = document.createElement('div');
+    shelf.className = 'wardrobe-shelf';
+
+    for (const item of items) {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'wardrobe-card';
+
+      const owned = isCosmeticOwned(item.id);
+      const equipped = cosmeticState.selectedId === item.id;
+      if (equipped) {
+        card.classList.add('wardrobe-card--equipped');
+      }
+      if (!owned && item.id !== defaultCosmetic.id) {
+        card.classList.add('wardrobe-card--locked');
+      }
+
+      const sprite = cosmeticSprites.get(item.id) || birdSprite;
+      const image = document.createElement('img');
+      image.src = sprite.src || item.src;
+      image.alt = item.label;
+      image.loading = 'lazy';
+
+      const name = document.createElement('strong');
+      name.textContent = item.label;
+
+      const description = document.createElement('p');
+      if (item.id === defaultCosmetic.id) {
+        description.textContent = 'Always free. Your base Mochi look.';
+      } else if (owned) {
+        description.textContent = equipped ? 'Currently equipped.' : 'Owned. Tap to equip.';
+      } else {
+        description.textContent = `Unlock for ${item.cost} cans.`;
+      }
+
+      const tags = document.createElement('div');
+      tags.className = 'wardrobe-tag-row';
+
+      const costTag = document.createElement('span');
+      costTag.className = 'wardrobe-tag';
+      costTag.textContent = item.id === defaultCosmetic.id ? 'Free' : `${item.cost} cans`;
+
+      const statusTag = document.createElement('span');
+      statusTag.className = 'wardrobe-tag';
+      statusTag.textContent = equipped ? 'Equipped' : owned ? 'Owned' : canWallet >= item.cost ? 'Buyable' : 'Locked';
+
+      tags.append(costTag, statusTag);
+
+      card.append(image, name, description, tags);
+      card.addEventListener('click', () => equipCosmetic(item.id));
+
+      shelf.appendChild(card);
+    }
+
+    section.append(head, shelf);
+    wardrobeGridEl.appendChild(section);
+  }
+}
+
+async function loadCosmeticCatalog() {
+  try {
+    const response = await fetch(cosmeticManifestUrl, { cache: 'no-store' });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || 'Cosmetics not found');
+    }
+
+    cosmeticManifest = Array.isArray(payload) ? payload : [];
+  } catch {
+    cosmeticManifest = [];
+  }
+
+  cosmeticCatalog = [defaultCosmetic];
+  cosmeticSprites = new Map([[defaultCosmetic.id, birdSprite]]);
+
+  for (const [index, item] of cosmeticManifest.entries()) {
+    const decorated = decorateCosmetic({
+      id: item.id,
+      file: item.file,
+      src: `./assets/cosmetics/${item.file}?v=${assetVersion}`,
+      source: item.source
+    }, index);
+
+    cosmeticCatalog.push(decorated);
+    const sprite = new Image();
+    sprite.decoding = 'async';
+    sprite.src = decorated.src;
+    cosmeticSprites.set(decorated.id, sprite);
+  }
+
+  cosmeticManifestReady = true;
+  updateWardrobeHeader();
+  renderWardrobe();
 }
 
 function formatDuration(ms) {
@@ -711,6 +1142,20 @@ function drawGround() {
   }
 }
 
+function drawContainedSprite(image, boxSize) {
+  const naturalWidth = image?.naturalWidth || image?.width || 0;
+  const naturalHeight = image?.naturalHeight || image?.height || 0;
+  if (!naturalWidth || !naturalHeight) {
+    return false;
+  }
+
+  const scale = Math.min(boxSize / naturalWidth, boxSize / naturalHeight);
+  const drawWidth = naturalWidth * scale;
+  const drawHeight = naturalHeight * scale;
+  ctx.drawImage(image, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+  return true;
+}
+
 function drawBird() {
   if (!bird) {
     return;
@@ -721,9 +1166,13 @@ function drawBird() {
   ctx.translate(bird.x, bird.y);
   ctx.rotate(tilt);
 
-  if (birdSprite.complete && birdSprite.naturalWidth > 0) {
-    const size = bird.radius * 2.35;
-    ctx.drawImage(birdSprite, -size / 2, -size / 2, size, size);
+  const selectedSprite = getSelectedCosmeticSprite();
+  if (selectedSprite.complete && selectedSprite.naturalWidth > 0) {
+    const size = bird.radius * 2.7;
+    drawContainedSprite(selectedSprite, size);
+  } else if (birdSprite.complete && birdSprite.naturalWidth > 0) {
+    const size = bird.radius * 2.7;
+    drawContainedSprite(birdSprite, size);
   } else {
     ctx.fillStyle = '#ffd84d';
     ctx.beginPath();
@@ -1062,6 +1511,7 @@ async function loadSession() {
     isPracticeMode = true;
     sessionNoteEl.textContent = 'Practice mode: this run is local only.';
     hydrateBestScore();
+    switchCosmeticProfile(getCosmeticStorageKey(), false);
     return;
   }
 
@@ -1093,10 +1543,12 @@ async function loadSession() {
     }
 
     hydrateCanWallet();
+    switchCosmeticProfile(getCosmeticStorageKey(), true);
   } catch (error) {
     sessionNoteEl.textContent = 'Discord session is missing or expired. Practice mode is still available.';
     updateStatus(`Session warning: ${error.message}`);
     isPracticeMode = true;
+    switchCosmeticProfile(getCosmeticStorageKey(), false);
   }
 
   void loadLeaderboard({ quiet: true });
@@ -1132,8 +1584,11 @@ async function onPrimaryInput(event) {
 resizeCanvas();
 hydrateBestScore();
 hydrateCanWallet();
+cosmeticStorageKey = getCosmeticStorageKey();
+cosmeticState = loadCosmeticStateFromStorage(cosmeticStorageKey) || normalizeCosmeticState(null);
 hydrateLeaderboardCache();
 setSoundButtonLabel();
+updateWardrobeHeader();
 if (bootstrapPayload?.leaderboard && Array.isArray(bootstrapPayload.leaderboard)) {
   renderLeaderboard(bootstrapPayload.leaderboard, Date.now());
 }
@@ -1141,6 +1596,7 @@ if (bootstrapPayload?.recentRuns && Array.isArray(bootstrapPayload.recentRuns)) 
   renderRecentRuns(bootstrapPayload.recentRuns, Date.now());
 }
 resetRun();
+void loadCosmeticCatalog();
 void loadSession();
 scheduleLeaderboardRefresh();
 void loadLeaderboard({ quiet: true });
@@ -1158,6 +1614,9 @@ window.addEventListener('visibilitychange', () => {
 });
 
 window.addEventListener('keydown', (event) => {
+  if (!wardrobeModalEl.classList.contains('hidden') && event.code !== 'Escape') {
+    return;
+  }
   if (event.code === 'Space' || event.code === 'ArrowUp') {
     event.preventDefault();
     onPrimaryInput(event);
@@ -1166,10 +1625,17 @@ window.addEventListener('keydown', (event) => {
     event.preventDefault();
     resetRun();
   }
+  if (event.code === 'Escape' && !wardrobeModalEl.classList.contains('hidden')) {
+    event.preventDefault();
+    closeWardrobe();
+  }
 });
 
 stageEl.addEventListener('pointerdown', onPrimaryInput);
 primaryButton.addEventListener('pointerdown', onPrimaryInput);
 soundToggleEl.addEventListener('click', toggleSound);
+wardrobeButtonEl?.addEventListener('click', openWardrobe);
+wardrobeCloseButtonEl?.addEventListener('click', closeWardrobe);
+wardrobeBackdropEl?.addEventListener('click', closeWardrobe);
 
 raf = requestAnimationFrame(loop);

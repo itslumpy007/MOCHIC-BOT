@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mochi Bird</title>
-    <link rel="stylesheet" href="./style.css?v=reset6" />
+    <link rel="stylesheet" href="./style.css?v=outfits1" />
   </head>
   <body>
     <div class="background-orb orb-a"></div>
@@ -55,6 +55,7 @@
             <p>Opened from Discord? Your score will be recorded automatically.</p>
             <p id="sessionNote">Practice mode is available when you open this page directly.</p>
             <button id="soundToggle" type="button" class="ghost-button">Sound: On</button>
+            <button id="wardrobeButton" type="button" class="ghost-button">Wardrobe</button>
           </div>
         </section>
 
@@ -83,6 +84,46 @@
       </div>
     </main>
 
-    <script type="module" src="./game.js?v=reset6"></script>
+    <div class="wardrobe-modal hidden" id="wardrobeModal" aria-hidden="true">
+      <div class="wardrobe-backdrop" id="wardrobeBackdrop"></div>
+      <section class="wardrobe-sheet" role="dialog" aria-modal="true" aria-labelledby="wardrobeTitle">
+        <div class="wardrobe-head">
+          <div>
+            <div class="eyebrow">Cosmetic outfits</div>
+            <h2 id="wardrobeTitle">Wardrobe</h2>
+            <p class="wardrobe-copy">
+              Spend Dr. Pepper cans to unlock outfits, hair, and special skins.
+            </p>
+          </div>
+          <div class="wardrobe-wallet">
+            <span>Cans</span>
+            <strong id="wardrobeWallet">0</strong>
+          </div>
+        </div>
+
+        <div class="wardrobe-info">
+          <div class="wardrobe-pill">
+            <span>Equipped</span>
+            <strong id="wardrobeSelected">Default Avatar</strong>
+          </div>
+          <div class="wardrobe-pill">
+            <span>Owned</span>
+            <strong id="wardrobeOwned">1</strong>
+          </div>
+          <div class="wardrobe-pill">
+            <span>Tip</span>
+            <strong id="wardrobeStatus">Tap an outfit to buy or equip.</strong>
+          </div>
+        </div>
+
+        <div class="wardrobe-grid" id="wardrobeGrid" aria-live="polite"></div>
+
+        <div class="wardrobe-actions">
+          <button id="wardrobeCloseButton" type="button" class="ghost-button">Close</button>
+        </div>
+      </section>
+    </div>
+
+    <script type="module" src="./game.js?v=outfits1"></script>
   </body>
 </html>
