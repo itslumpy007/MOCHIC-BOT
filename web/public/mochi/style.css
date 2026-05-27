@@ -663,6 +663,8 @@ canvas {
     padding: 14px 14px 16px;
     border-radius: 22px;
     gap: 12px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .wardrobe-head {
@@ -679,12 +681,23 @@ canvas {
   }
 
   .wardrobe-grid {
+    overflow: visible;
+    flex: 0 0 auto;
     gap: 12px;
     padding-bottom: 0;
   }
 
+  .wardrobe-section-head {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 6px 0 4px;
+    background: linear-gradient(180deg, rgba(12, 22, 35, 0.98), rgba(12, 22, 35, 0.84));
+    backdrop-filter: blur(10px);
+  }
+
   .wardrobe-shelf {
-    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(138px, 1fr));
   }
 
   .wardrobe-card {
