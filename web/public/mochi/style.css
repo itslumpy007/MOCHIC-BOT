@@ -654,17 +654,22 @@ canvas {
   .wardrobe-modal {
     padding: 8px;
     place-items: stretch;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
   }
 
   .wardrobe-sheet {
     width: 100%;
-    height: calc(100dvh - 16px);
+    height: auto;
+    min-height: calc(100dvh - 16px);
     max-height: none;
     padding: 14px 14px 16px;
     border-radius: 22px;
     gap: 12px;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
+    margin: auto 0;
   }
 
   .wardrobe-head {
