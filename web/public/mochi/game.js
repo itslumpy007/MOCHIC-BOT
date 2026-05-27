@@ -85,6 +85,10 @@ let cosmeticStorageKey = 'discord-mochi-bird-cosmetics-practice';
 let cosmeticManifestReady = false;
 let wardrobeNotice = '';
 let wardrobeNoticeTimer = 0;
+let profileSyncTimer = 0;
+let profileSyncInFlight = false;
+let profileSyncQueued = false;
+let profileSyncReady = false;
 
 birdSprite.src = defaultCosmetic.src;
 const canSprite = new Image();
@@ -145,12 +149,15 @@ function hydrateCanWallet() {
   updateWardrobeHeader();
 }
 
-function persistCanWallet() {
+function persistCanWallet({ sync = true } = {}) {
   localStorage.setItem(canWalletKey, String(canWallet));
   canCountEl.textContent = String(canWallet);
   updateWardrobeHeader();
   if (wardrobeModalEl && !wardrobeModalEl.classList.contains('hidden')) {
     renderWardrobe();
+  }
+  if (sync) {
+    scheduleProfileSync();
   }
 }
 
@@ -179,6 +186,103 @@ function normalizeCosmeticState(raw) {
   return { selectedId, ownedIds };
 }
 
+function normalizeSharedProfile(raw) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const cosmeticSource = source.cosmeticState && typeof source.cosmeticState === 'object' ? source.cosmeticState : null;
+  const ownedIds = cosmeticSource?.ownedIds instanceof Set
+    ? [...cosmeticSource.ownedIds]
+    : Array.isArray(cosmeticSource?.ownedIds)
+      ? cosmeticSource.ownedIds
+      : [];
+  return {
+    canWallet: Math.max(0, Math.floor(Number(source.canWallet) || 0)),
+    cosmeticState: normalizeCosmeticState({
+      selectedId: cosmeticSource?.selectedId,
+      ownedIds
+    })
+  };
+}
+
+function applySharedProfile(profile, { persist = true, sync = false } = {}) {
+  const normalized = normalizeSharedProfile(profile);
+  canWallet = normalized.canWallet;
+  cosmeticState = normalized.cosmeticState;
+  canCountEl.textContent = String(canWallet);
+  updateWardrobeHeader();
+  if (persist) {
+    localStorage.setItem(canWalletKey, String(canWallet));
+    persistCosmeticState({ sync });
+  }
+  if (wardrobeModalEl && !wardrobeModalEl.classList.contains('hidden')) {
+    renderWardrobe();
+  }
+}
+
+function buildSharedProfilePayload() {
+  return {
+    canWallet,
+    cosmeticState: {
+      selectedId: cosmeticState.selectedId,
+      ownedIds: [...cosmeticState.ownedIds]
+    }
+  };
+}
+
+function scheduleProfileSync(delayMs = 400) {
+  if (!profileSyncReady || isPracticeMode || !sessionId) {
+    return;
+  }
+
+  if (profileSyncTimer) {
+    window.clearTimeout(profileSyncTimer);
+  }
+
+  profileSyncTimer = window.setTimeout(() => {
+    profileSyncTimer = 0;
+    void syncSharedProfile();
+  }, delayMs);
+}
+
+async function syncSharedProfile() {
+  if (!profileSyncReady || isPracticeMode || !sessionId) {
+    return;
+  }
+
+  if (profileSyncInFlight) {
+    profileSyncQueued = true;
+    return;
+  }
+
+  profileSyncInFlight = true;
+
+  try {
+    const response = await fetch(`/api/mochi/session/${sessionId}/profile`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(buildSharedProfilePayload())
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.error || 'Failed to save profile');
+    }
+
+    if (payload?.profile) {
+      applySharedProfile(payload.profile, { persist: true });
+    }
+  } catch {
+    // Best effort: local cache still keeps progress if the network hiccups.
+  } finally {
+    profileSyncInFlight = false;
+    if (profileSyncQueued) {
+      profileSyncQueued = false;
+      scheduleProfileSync(0);
+    }
+  }
+}
+
 function loadCosmeticStateFromStorage(storageKey) {
   try {
     const raw = localStorage.getItem(storageKey);
@@ -198,7 +302,7 @@ function snapshotCosmeticState() {
   };
 }
 
-function persistCosmeticState() {
+function persistCosmeticState({ sync = true } = {}) {
   localStorage.setItem(
     cosmeticStorageKey,
     JSON.stringify({
@@ -206,6 +310,9 @@ function persistCosmeticState() {
       ownedIds: [...cosmeticState.ownedIds]
     })
   );
+  if (sync) {
+    scheduleProfileSync();
+  }
 }
 
 function switchCosmeticProfile(nextStorageKey, preserveCurrentState = true) {
@@ -1525,8 +1632,41 @@ async function loadSession() {
     session = payload.session;
     bestScoreKey = `discord-mochi-bird-best-${session.userId}`;
     canWalletKey = `discord-mochi-bird-can-wallet-${session.userId}`;
+    cosmeticStorageKey = getCosmeticStorageKey();
     sessionNoteEl.textContent = `Session linked to ${session.userTag}.`;
     updateStatus(`Ready for ${session.userTag}`);
+
+    const serverProfile = normalizeSharedProfile(payload.profile || null);
+    const userLocalProfile = {
+      canWallet: Number(localStorage.getItem(canWalletKey) || 0),
+      cosmeticState: loadCosmeticStateFromStorage(cosmeticStorageKey) || normalizeCosmeticState(null)
+    };
+    const practiceLocalProfile = {
+      canWallet: Number(localStorage.getItem('discord-mochi-bird-can-wallet-practice') || 0),
+      cosmeticState: loadCosmeticStateFromStorage('discord-mochi-bird-cosmetics-practice') || normalizeCosmeticState(null)
+    };
+    const localProfile = [userLocalProfile, practiceLocalProfile].sort((a, b) => {
+      const aScore = a.canWallet + a.cosmeticState.ownedIds.size * 100;
+      const bScore = b.canWallet + b.cosmeticState.ownedIds.size * 100;
+      return bScore - aScore;
+    })[0];
+    const hasServerProgress = serverProfile.canWallet > 0
+      || (serverProfile.cosmeticState?.ownedIds || []).length > 1
+      || serverProfile.cosmeticState?.selectedId !== defaultCosmetic.id;
+    const hasLocalProgress = localProfile.canWallet > 0
+      || localProfile.cosmeticState.ownedIds.size > 1
+      || localProfile.cosmeticState.selectedId !== defaultCosmetic.id;
+
+    profileSyncReady = true;
+
+    if (hasServerProgress) {
+      applySharedProfile(serverProfile);
+    } else if (hasLocalProgress) {
+      applySharedProfile(localProfile);
+      scheduleProfileSync(0);
+    } else {
+      applySharedProfile(serverProfile);
+    }
 
     try {
       const bestResponse = await fetch(`/api/mochi/leaderboard/${session.userId}`, { cache: 'no-store' });
@@ -1541,13 +1681,11 @@ async function loadSession() {
     } catch {
       // Best score lookup is optional.
     }
-
-    hydrateCanWallet();
-    switchCosmeticProfile(getCosmeticStorageKey(), true);
   } catch (error) {
     sessionNoteEl.textContent = 'Discord session is missing or expired. Practice mode is still available.';
     updateStatus(`Session warning: ${error.message}`);
     isPracticeMode = true;
+    profileSyncReady = false;
     switchCosmeticProfile(getCosmeticStorageKey(), false);
   }
 

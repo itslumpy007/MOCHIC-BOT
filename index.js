@@ -158,6 +158,7 @@ const MOCHI_SESSION_TTL_MS = Number.isFinite(Number(process.env.MOCHI_SESSION_TT
   : 30 * 60 * 1000;
 let mochiLeaderboardCache = null;
 let mochiRecentRunsCache = null;
+let mochiProfilesCache = null;
 let tempBanInterval = null;
 let scheduledReportInterval = null;
 let googleBlockListInterval = null;
@@ -167,6 +168,7 @@ let birthdaySweepInterval = null;
 const dataDir = path.join(__dirname, "data");
 const mochiLeaderboardPath = path.join(dataDir, "mochi-leaderboard.json");
 const mochiRunsPath = path.join(dataDir, "mochi-runs.json");
+const mochiProfilesPath = path.join(dataDir, "mochi-profiles.json");
 const configPath = path.join(dataDir, "config.json");
 const messageArchivePath = path.join(dataDir, "message-archive.jsonl");
 let messageArchiveLastPruneAt = 0;
@@ -7316,6 +7318,107 @@ function getMochiPersonalBest(userId) {
   return loadMochiLeaderboard().get(userId) || null;
 }
 
+function loadMochiProfiles() {
+  if (mochiProfilesCache) return mochiProfilesCache;
+
+  try {
+    const raw = fs.readFileSync(mochiProfilesPath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      mochiProfilesCache = new Map(Object.entries(parsed));
+    } else {
+      mochiProfilesCache = new Map();
+    }
+  } catch {
+    mochiProfilesCache = new Map();
+  }
+
+  return mochiProfilesCache;
+}
+
+function persistMochiProfiles() {
+  fs.mkdirSync(dataDir, { recursive: true });
+  const payload = Object.fromEntries([...loadMochiProfiles().entries()].sort(([a], [b]) => String(a).localeCompare(String(b))));
+  fs.writeFileSync(mochiProfilesPath, JSON.stringify(payload, null, 2), "utf8");
+}
+
+function normalizeMochiCosmeticState(raw) {
+  const ownedIds = new Set(["avatar-v3"]);
+  const ownedSource = Array.isArray(raw?.ownedIds) ? raw.ownedIds : [];
+
+  for (const id of ownedSource) {
+    if (typeof id === "string" && id.trim()) {
+      ownedIds.add(id.trim());
+    }
+  }
+
+  let selectedId = typeof raw?.selectedId === "string" ? raw.selectedId.trim() : "avatar-v3";
+  if (!ownedIds.has(selectedId)) {
+    selectedId = "avatar-v3";
+  }
+
+  return {
+    selectedId,
+    ownedIds: [...ownedIds]
+  };
+}
+
+function normalizeMochiProfile(raw, fallbackUserId = "") {
+  const profile = raw && typeof raw === "object" ? raw : {};
+  const userId = String(profile.userId || fallbackUserId || "").trim();
+  const canWallet = Math.max(0, Math.floor(Number(profile.canWallet) || 0));
+  const cosmeticState = normalizeMochiCosmeticState(profile.cosmeticState);
+
+  return {
+    userId,
+    userTag: typeof profile.userTag === "string" ? profile.userTag : "",
+    canWallet,
+    cosmeticState,
+    updatedAt: typeof profile.updatedAt === "string" ? profile.updatedAt : null
+  };
+}
+
+function getMochiProfile(userId) {
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedUserId) {
+    return normalizeMochiProfile(null, "");
+  }
+
+  return loadMochiProfiles().get(normalizedUserId) || normalizeMochiProfile({ userId: normalizedUserId });
+}
+
+function upsertMochiProfile(userId, patch = {}) {
+  const normalizedUserId = String(userId || "").trim();
+  if (!normalizedUserId) {
+    return normalizeMochiProfile(null, "");
+  }
+
+  const profiles = loadMochiProfiles();
+  const current = normalizeMochiProfile(profiles.get(normalizedUserId) || null, normalizedUserId);
+  const next = {
+    ...current,
+    userId: normalizedUserId
+  };
+
+  if (typeof patch.userTag === "string" && patch.userTag.trim()) {
+    next.userTag = patch.userTag.trim();
+  }
+  if (patch.canWallet !== undefined) {
+    next.canWallet = Math.max(0, Math.floor(Number(patch.canWallet) || 0));
+  }
+  if (patch.cosmeticState) {
+    next.cosmeticState = normalizeMochiCosmeticState({
+      selectedId: patch.cosmeticState.selectedId,
+      ownedIds: patch.cosmeticState.ownedIds
+    });
+  }
+
+  next.updatedAt = new Date().toISOString();
+  profiles.set(normalizedUserId, next);
+  persistMochiProfiles();
+  return next;
+}
+
 function buildWebUserPayload(session = null) {
   return {
     authenticated: Boolean(session),
@@ -8878,13 +8981,39 @@ async function handleWebApi(req, res, pathname) {
     return sendWebJson(res, 200, { ok: true, session: publicMochiSession(session) });
   }
 
+  if (pathname.startsWith("/api/mochi/session/") && pathname.endsWith("/profile")) {
+    const sessionId = pathname.split("/").filter(Boolean)[3];
+    const session = sessionId ? getMochiSession(sessionId) : null;
+    if (!session) {
+      return sendWebJson(res, 404, { ok: false, error: "Session not found or expired." });
+    }
+
+    if (req.method === "GET") {
+      return sendWebJson(res, 200, { ok: true, profile: getMochiProfile(session.userId) });
+    }
+
+    if (req.method === "POST") {
+      const body = await readWebJsonBody(req);
+      const profile = upsertMochiProfile(session.userId, {
+        userTag: session.userTag,
+        canWallet: body.canWallet,
+        cosmeticState: body.cosmeticState
+      });
+      return sendWebJson(res, 200, { ok: true, profile });
+    }
+  }
+
   if (req.method === "GET" && pathname.startsWith("/api/mochi/session/")) {
     const sessionId = pathname.split("/").filter(Boolean)[3];
     const session = sessionId ? getMochiSession(sessionId) : null;
     if (!session) {
       return sendWebJson(res, 404, { ok: false, error: "Session not found or expired." });
     }
-    return sendWebJson(res, 200, { ok: true, session: publicMochiSession(session) });
+    return sendWebJson(res, 200, {
+      ok: true,
+      session: publicMochiSession(session),
+      profile: getMochiProfile(session.userId)
+    });
   }
 
   if (req.method === "GET" && pathname === "/api/mochi/leaderboard") {
