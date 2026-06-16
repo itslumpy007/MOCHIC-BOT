@@ -152,6 +152,7 @@ const SUSPICIOUS_SCAM_DOMAINS = [
 const spamTracker = new Map();
 const joinTracker = new Map();
 const anonymousAffirmationCooldowns = new Map();
+const verificationButtonCooldowns = new Map();
 const generalChatActivityCache = new Map();
 const googleBlockListSyncState = {
   running: false,
@@ -162,6 +163,7 @@ const webSessions = new Map();
 const webOauthStates = new Map();
 const mochiSessions = new Map();
 const MOCHI_PATH = normalizeMochiPath(process.env.MOCHI_PATH || "/mochi");
+const WEB_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const MOCHI_SESSION_TTL_MS = Number.isFinite(Number(process.env.MOCHI_SESSION_TTL_MINUTES))
   ? Math.max(5, Number(process.env.MOCHI_SESSION_TTL_MINUTES)) * 60 * 1000
   : 30 * 60 * 1000;
@@ -188,6 +190,7 @@ let messageArchiveLastPruneAt = 0;
 function createDefaultConfig() {
   return {
     verifyMessageId: null,
+    bonusVerifyMessageId: null,
     birthdays: {},
     warnings: {},
     notes: {},
@@ -579,6 +582,36 @@ async function postRuleVerifyPanel(source = "manual") {
     channelId: verifyChannelId,
     messageId: sentMessage.id,
     source
+  };
+}
+
+async function postOnboardingRepair(source = "manual") {
+  const rulesResult = await postRulesMessage(source).catch(error => {
+    throw new Error(`Rules panel: ${error.message}`);
+  });
+  const verifyResult = await postRuleVerifyPanel(source).catch(error => {
+    throw new Error(`Verify panel: ${error.message}`);
+  });
+  let bonusResult = null;
+  if (isTikTokVerificationEnabled()) {
+    bonusResult = await postTikTokVerifyPanel(source).catch(error => {
+      throw new Error(`TikTok bonus panel: ${error.message}`);
+    });
+  }
+
+  recordAuditLog(source, "onboarding-repaired", {
+    rulesChannelId: rulesResult.channelId,
+    verifyChannelId: verifyResult.channelId,
+    verifyMessageId: verifyResult.messageId,
+    bonusPanelPosted: Boolean(bonusResult),
+    bonusChannelId: bonusResult?.channelId || null,
+    bonusMessageId: bonusResult?.messageId || null
+  });
+
+  return {
+    rules: rulesResult,
+    verify: verifyResult,
+    bonus: bonusResult
   };
 }
 
@@ -3811,6 +3844,35 @@ function buildCuteRulesMessage() {
   return { attachment, embed };
 }
 
+async function postRulesMessage(source = "manual") {
+  const rulesChannelId = getRulesChannelId();
+  if (!rulesChannelId) {
+    throw new Error("Set the rules channel first.");
+  }
+
+  const rulesChannel = await client.channels.fetch(rulesChannelId).catch(() => null);
+  if (!rulesChannel || typeof rulesChannel.send !== "function") {
+    throw new Error("The rules channel could not be found or cannot send messages.");
+  }
+
+  const { attachment, embed } = buildCuteRulesMessage();
+  const message = await rulesChannel.send({
+    files: [attachment],
+    embeds: [embed]
+  });
+
+  recordAuditLog(source, "rules-panel-posted", {
+    channelId: rulesChannelId,
+    messageId: message.id
+  });
+
+  return {
+    channelId: rulesChannelId,
+    messageId: message.id,
+    source
+  };
+}
+
 async function logEmbed(embed) {
   try {
     const logChannelId = getLogChannelId();
@@ -3821,6 +3883,14 @@ async function logEmbed(embed) {
   } catch (error) {
     console.error("Log send error:", error.message);
   }
+}
+
+async function sendSecurityAlert(embed) {
+  await logEmbed(embed);
+  recordAuditLog("AutoMod", "raid-alert", {
+    title: embed.data?.title || "Security alert",
+    description: String(embed.data?.description || "").slice(0, 500)
+  });
 }
 
 async function logAutoModEmbed(embed) {
@@ -3856,27 +3926,71 @@ async function resolveVerifyMessageId() {
 
     if (config.verifyMessageId) {
       const cachedMessage = await channel.messages.fetch(config.verifyMessageId).catch(() => null);
-      if (cachedMessage) return config.verifyMessageId;
-      config.verifyMessageId = null;
-      saveConfig();
+      const cachedIsRulesPanel = Boolean(
+        cachedMessage?.author?.id === client.user.id &&
+        (
+          cachedMessage.embeds?.some(embed =>
+            typeof embed.title === "string" &&
+            embed.title.toLowerCase().includes("rules check + verification")
+          ) ||
+          cachedMessage.components?.some(row =>
+            row.components?.some(component => component.customId === "verify:rules-check")
+          )
+        )
+      );
+      const cachedIsBonusPanel = Boolean(
+        cachedMessage?.author?.id === client.user.id &&
+        (
+          cachedMessage.embeds?.some(embed =>
+            typeof embed.title === "string" &&
+            embed.title.toLowerCase().includes("tiktok bonus verification")
+          ) ||
+          cachedMessage.components?.some(row =>
+            row.components?.some(component => component.customId === "verify:tiktok-check")
+          )
+        )
+      );
+
+      if (cachedMessage && cachedIsRulesPanel) return config.verifyMessageId;
+      if (cachedMessage && cachedIsBonusPanel) {
+        config.bonusVerifyMessageId = cachedMessage.id;
+        config.verifyMessageId = null;
+        saveConfig();
+      } else {
+        config.verifyMessageId = null;
+        saveConfig();
+      }
     }
 
-    const isVerifyPanelMessage = message => {
+    const isRulesVerifyPanelMessage = message => {
       if (!message || message.author?.id !== client.user.id) {
         return false;
       }
 
       const hasExpectedEmbed = message.embeds?.some(embed =>
         typeof embed.title === "string" &&
-        (
-          embed.title.toLowerCase().includes("rules check + verification") ||
-          embed.title.toLowerCase().includes("tiktok bonus verification") ||
-          embed.title.toLowerCase().includes("welcome to the mochi garden")
-        )
+        embed.title.toLowerCase().includes("rules check + verification")
       );
 
       const hasExpectedButton = message.components?.some(row =>
-        row.components?.some(component => ["verify:rules-check", "verify:tiktok-check"].includes(component.customId))
+        row.components?.some(component => component.customId === "verify:rules-check")
+      );
+
+      return Boolean(hasExpectedEmbed || hasExpectedButton);
+    };
+
+    const isBonusVerifyPanelMessage = message => {
+      if (!message || message.author?.id !== client.user.id) {
+        return false;
+      }
+
+      const hasExpectedEmbed = message.embeds?.some(embed =>
+        typeof embed.title === "string" &&
+        embed.title.toLowerCase().includes("tiktok bonus verification")
+      );
+
+      const hasExpectedButton = message.components?.some(row =>
+        row.components?.some(component => component.customId === "verify:tiktok-check")
       );
 
       return Boolean(hasExpectedEmbed || hasExpectedButton);
@@ -3894,7 +4008,7 @@ async function resolveVerifyMessageId() {
           return null;
         }
 
-        const verifyMessage = messages.find(isVerifyPanelMessage);
+        const verifyMessage = messages.find(isRulesVerifyPanelMessage) || messages.find(isBonusVerifyPanelMessage);
         if (verifyMessage) {
           return verifyMessage;
         }
@@ -3912,9 +4026,19 @@ async function resolveVerifyMessageId() {
 
     if (!verifyMessage) return null;
 
-    config.verifyMessageId = verifyMessage.id;
-    saveConfig();
-    return verifyMessage.id;
+    if (isRulesVerifyPanelMessage(verifyMessage)) {
+      config.verifyMessageId = verifyMessage.id;
+      saveConfig();
+      return verifyMessage.id;
+    }
+
+    if (isBonusVerifyPanelMessage(verifyMessage)) {
+      config.bonusVerifyMessageId = verifyMessage.id;
+      saveConfig();
+      return verifyMessage.id;
+    }
+
+    return null;
   } catch (error) {
     console.error("Failed to resolve verify message:", error.message);
     return null;
@@ -4015,7 +4139,11 @@ function isPanelAuditAction(action) {
     "channel-rule-override-added",
     "google-block-list-synced",
     "google-block-list-sync-failed",
+    "raid-alert",
+    "rules-panel-posted",
     "verification-panel-posted",
+    "onboarding-repaired",
+    "bonus-panel-posted",
     "affirmations-panel-posted"
   ].includes(String(action || ""));
 }
@@ -5282,8 +5410,8 @@ function buildTikTokVerifyEmbed() {
       { name: "✨ Verified role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
       { name: "🫧 Unverified role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Optional", inline: true },
       { name: "🍡 Saved nicknames", value: aliases.length ? `${aliases.length} saved` : "None saved", inline: false },
-      { name: "🍥 Flavor roles", value: "React below if you want a flavor role. They are optional.", inline: false },
-      { name: "How it works", value: "1. Tap Set My Name\n2. Type your TikTok username\n3. Enjoy the garden if it matches", inline: false }
+      { name: "How it works", value: "1. Tap Set My Name\n2. Type your TikTok username\n3. Enjoy the garden if it matches", inline: false },
+      { name: "Flavor roles", value: "Optional flavor-role reactions live on the main verify panel.", inline: false }
     ]
   });
 }
@@ -6121,9 +6249,7 @@ async function postTikTokVerifyPanel(source = "manual") {
     embeds: [buildTikTokVerifyEmbed()],
     components: buildTikTokVerifyComponents()
   });
-
-  await addMochiRoleReactions(sentMessage);
-  config.verifyMessageId = sentMessage.id;
+  config.bonusVerifyMessageId = sentMessage.id;
   saveConfig();
 
   return {
@@ -6213,7 +6339,8 @@ function buildStatusEmbed() {
       { name: "Unverified Role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Not set", inline: true },
       { name: "Birthday Role", value: getBirthdayRoleId() ? `<@&${getBirthdayRoleId()}>` : "Not set", inline: true },
       { name: "Core Features", value: ENABLE_CORE_BOT ? "Enabled" : "Disabled", inline: true },
-      { name: "Verify Message", value: config.verifyMessageId || "Not cached", inline: false },
+      { name: "Verify Panel", value: config.verifyMessageId || "Not cached", inline: false },
+      { name: "Bonus Panel", value: config.bonusVerifyMessageId || "Not cached", inline: false },
       { name: "Cases Logged", value: `${config.cases.length}`, inline: true },
       { name: "Banned Words", value: `${getBannedWords().length}`, inline: true },
       { name: "Birthdays Saved", value: `${Object.keys(getBirthdayStore()).length}`, inline: true },
@@ -6753,6 +6880,7 @@ function buildAdminPanelButtons(view, targetUserId = null) {
       new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setupverify", targetUserId)).setLabel("Post Verify Panel").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setuptiktokverify", targetUserId)).setLabel("Post TikTok Bonus").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "repaironboarding", targetUserId)).setLabel("Repair Onboarding").setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "setuprules", targetUserId)).setLabel("Post Rules").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "settings-view", targetUserId)).setLabel("View Settings").setStyle(ButtonStyle.Secondary)
       ),
@@ -7095,7 +7223,7 @@ function verifySignedWebValue(signedValue) {
 
 function createWebSession(user, accessLevel, authMode = "discord") {
   const sessionId = crypto.randomBytes(32).toString("hex");
-  const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+  const expiresAt = Date.now() + WEB_SESSION_TTL_MS;
   webSessions.set(sessionId, {
     user,
     accessLevel,
@@ -7623,7 +7751,7 @@ async function handleWebCallback(req, res, requestUrl) {
     avatar: user.avatar || null
   }, accessLevel, "discord");
 
-  setWebCookie(req, res, "mochi_session", createSignedWebValue(sessionId), 7 * 24 * 60 * 60);
+  setWebCookie(req, res, "mochi_session", createSignedWebValue(sessionId), Math.floor(WEB_SESSION_TTL_MS / 1000));
   redirectWeb(res, "/");
 }
 
@@ -7668,7 +7796,7 @@ async function handleWebLocalLogin(req, res) {
     avatar: null
   }, account.accessLevel, "local");
 
-  setWebCookie(req, res, "mochi_session", createSignedWebValue(sessionId), 7 * 24 * 60 * 60);
+  setWebCookie(req, res, "mochi_session", createSignedWebValue(sessionId), Math.floor(WEB_SESSION_TTL_MS / 1000));
   return sendWebJson(res, 200, {
     ok: true,
     user: serializeWebAccount(account)
@@ -9490,13 +9618,22 @@ async function handleWebApi(req, res, pathname) {
       return sendWebJson(res, 200, { ok: true, posted });
     }
 
+    if (req.method === "POST" && pathname === "/api/onboarding-repair") {
+      if (!hasWebAccess(auth, "admin")) {
+        return sendWebJson(res, 403, { error: "Admin web access is required." });
+      }
+      await readWebJsonBody(req).catch(() => null);
+      const posted = await postOnboardingRepair("web");
+      return sendWebJson(res, 200, { ok: true, posted });
+    }
+
     if (req.method === "POST" && pathname === "/api/reaction-role-panel") {
       if (!hasWebAccess(auth, "admin")) {
         return sendWebJson(res, 403, { error: "Admin web access is required." });
       }
       await readWebJsonBody(req).catch(() => null);
       const posted = await postTikTokVerifyPanel("web");
-      recordAuditLog(getWebModeratorTag(auth), "reaction-role-panel-posted", {
+      recordAuditLog(getWebModeratorTag(auth), "bonus-panel-posted", {
         channelId: posted.channelId,
         messageId: posted.messageId,
         tiktokHandle: config.settings.tiktokHandle,
@@ -9954,6 +10091,18 @@ client.on("interactionCreate", async interaction => {
           return interaction.reply({ content: "Verification is disabled on this deployment.", ephemeral: true });
         }
 
+        const lastClicked = verificationButtonCooldowns.get(interaction.user.id) || 0;
+        const cooldownMs = 10 * 1000;
+        const elapsed = Date.now() - lastClicked;
+        if (elapsed < cooldownMs) {
+          const remainingSeconds = Math.ceil((cooldownMs - elapsed) / 1000);
+          return interaction.reply({
+            content: `Please wait ${remainingSeconds}s before using the verify button again.`,
+            ephemeral: true
+          });
+        }
+        verificationButtonCooldowns.set(interaction.user.id, Date.now());
+
         await interaction.deferReply({ ephemeral: true });
 
         const member = interaction.member || await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
@@ -10037,6 +10186,18 @@ client.on("interactionCreate", async interaction => {
           return interaction.reply({ content: "Verification is disabled on this deployment.", ephemeral: true });
         }
 
+        const lastClicked = verificationButtonCooldowns.get(interaction.user.id) || 0;
+        const cooldownMs = 10 * 1000;
+        const elapsed = Date.now() - lastClicked;
+        if (elapsed < cooldownMs) {
+          const remainingSeconds = Math.ceil((cooldownMs - elapsed) / 1000);
+          return interaction.reply({
+            content: `Please wait ${remainingSeconds}s before using the bonus verify button again.`,
+            ephemeral: true
+          });
+        }
+        verificationButtonCooldowns.set(interaction.user.id, Date.now());
+
         if (!isTikTokVerificationEnabled()) {
           const setupError = "TikTok verification is not configured yet. Ask staff to set the handle and roles.";
           const setupEmbed = makeEmbed({
@@ -10083,7 +10244,7 @@ client.on("interactionCreate", async interaction => {
         kind === "selectrole" ||
         kind === "configmodal" ||
         kind === "exemptselect" ||
-        ["reload-config", "setupverify", "setuptiktokverify", "setuprules", "settings-view", "reset-mod-roles", "reset-admin-roles", "lockverified-current", "lockverified-all", "unlockverified-current", "unlockverified-all"].includes(action)
+        ["reload-config", "setupverify", "setuptiktokverify", "repaironboarding", "setuprules", "settings-view", "reset-mod-roles", "reset-admin-roles", "lockverified-current", "lockverified-all", "unlockverified-current", "unlockverified-all"].includes(action)
           ? "admin"
           : "mod";
 
@@ -11078,6 +11239,15 @@ client.on("interactionCreate", async interaction => {
             return interaction.reply({ content: "Verification panel posted.", ephemeral: true });
           } catch (error) {
             return interaction.reply({ content: error.message || "Verification panel could not be posted.", ephemeral: true });
+          }
+        }
+
+        if (action === "repaironboarding") {
+          try {
+            await postOnboardingRepair("adminpanel");
+            return interaction.reply({ content: "Onboarding repaired.", ephemeral: true });
+          } catch (error) {
+            return interaction.reply({ content: error.message || "Onboarding could not be repaired.", ephemeral: true });
           }
         }
 
@@ -13659,6 +13829,19 @@ client.on("guildMemberAdd", async member => {
           raidReason += ` Automatic timeout applied for ${formatDuration(config.automod.timeoutDurationMs)}.`;
         }
 
+        await sendSecurityAlert(
+          makeEmbed({
+            title: "Suspicious join burst",
+            description: `${member.user.tag} joined during a possible raid window.`,
+            color: COLORS.red,
+            fields: [
+              { name: "Recent joins", value: `${joinCount}`, inline: true },
+              { name: "Account age", value: formatDuration(accountAgeMs), inline: true },
+              { name: "Action", value: config.automod.raidAction, inline: true }
+            ]
+          })
+        );
+
         const raidEntry = addCase({
           action: "automod:raid-join",
           targetId: member.user.id,
@@ -13688,8 +13871,8 @@ client.on("guildMemberAdd", async member => {
           `Hi ${member.user.username}.\n\n` +
           `We are happy you joined.\n` +
           (isTikTokVerificationEnabled()
-            ? `If you want a flavor role, pick one by reacting below. Then tap **Set My Name** in ${getVerifyChannelMention()} and type your TikTok username.\n\n`
-            : `Please head to ${getVerifyChannelMention()} to verify and unlock the garden.\n\n`) +
+            ? `Please head to ${getVerifyChannelMention()} and click **I Read the Rules** to verify. If you want a flavor role, react below. TikTok matching is available there as a bonus.\n\n`
+            : `Please head to ${getVerifyChannelMention()} and click **I Read the Rules** to verify and unlock the garden.\n\n`) +
           "Have fun and enjoy your stay.",
         color: COLORS.pink,
         thumbnail: member.user.displayAvatarURL({ dynamic: true })

@@ -584,16 +584,31 @@
               <div class="button-row" style="margin-bottom: 12px;">
                 <button class="save-button" id="markAllUnverified" type="button">Mark All Unverified</button>
               </div>
-              <div class="form-grid" id="verificationSettingsFields"></div>
+              <div class="split">
+                <section class="panel">
+                  <div class="panel-header">
+                    <h3>Core Verification</h3>
+                  </div>
+                  <div class="form-grid" id="verificationCoreFields"></div>
+                </section>
+                <section class="panel">
+                  <div class="panel-header">
+                    <h3>TikTok Bonus</h3>
+                  </div>
+                  <p class="panel-note">Optional bonus path. Most members should use the rules button instead.</p>
+                  <div class="form-grid" id="verificationBonusFields"></div>
+                </section>
+              </div>
             </section>
             <section class="panel">
               <div class="panel-header">
                 <h3>Panel Repair</h3>
               </div>
-              <p class="panel-note">Use these if the verify panel or reaction role panel is missing, stale, or missing reactions.</p>
+              <p class="panel-note">Use these if the verify panel, rules card, or bonus panel is missing, stale, or missing reactions.</p>
               <div class="button-row">
+                <button class="ghost-button" id="repairOnboardingButton" type="button">Repair Onboarding</button>
                 <button class="ghost-button" id="repairVerifyPanel" type="button">Repair Verify Panel</button>
-                <button class="ghost-button" id="repairRolePanel" type="button">Repair Role Panel</button>
+                <button class="ghost-button" id="repairRolePanel" type="button">Repair Bonus Panel</button>
               </div>
             </section>
           </div>

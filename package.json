@@ -4,7 +4,8 @@
   "description": "Discord Mochi Bot",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "check:verification": "node tools/verification-sanity-check.js"
   },
   "dependencies": {
     "@discord/embedded-app-sdk": "^2.5.0",

@@ -348,16 +348,22 @@ const affirmationsSettingLabels = {
   anonymousAffirmationsCooldownMs: "Anonymous affirmations cooldown (ms)"
 };
 
-const verificationSettingLabels = {
-  tiktokHandle: "TikTok handle",
-  tiktokNicknameAliases: "Accepted nicknames",
+const verificationCoreSettingLabels = {
   verifiedRoleId: "Verified role ID",
   unverifiedRoleId: "Unverified role ID"
 };
 
-const verificationSettingTypes = {
+const verificationBonusSettingLabels = {
+  tiktokHandle: "TikTok handle",
+  tiktokNicknameAliases: "Accepted nicknames"
+};
+
+const verificationBonusSettingTypes = {
   tiktokHandle: "input",
-  tiktokNicknameAliases: "textarea",
+  tiktokNicknameAliases: "textarea"
+};
+
+const verificationCoreSettingTypes = {
   verifiedRoleId: "input",
   unverifiedRoleId: "input"
 };
@@ -2273,14 +2279,8 @@ function renderSettings() {
       `;
     }).join("");
 
-  $("#verificationSettingsFields").innerHTML = Object.entries(verificationSettingLabels)
-    .map(([key, label]) => `
-      <label>${label}
-        ${verificationSettingTypes[key] === "textarea"
-          ? `<textarea data-setting="${key}" rows="4" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="${key === "tiktokNicknameAliases" ? "Paste @name, tiktok.com/@name, or multiple names separated by commas or new lines" : ""}">${escapeHtml(Array.isArray(settings[key]) ? settings[key].join(", ") : (settings[key] || ""))}</textarea>`
-          : `<input data-setting="${key}" value="${escapeHtml(Array.isArray(settings[key]) ? settings[key].join(", ") : (settings[key] || ""))}" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="${key === "tiktokHandle" ? "Paste @yourhandle or tiktok.com/@yourhandle" : (key === "welcomeChannelId" || key === "generalChatChannelId" || key === "anonymousAffirmationsChannelId" ? "Channel ID" : "")}">`}
-      </label>
-    `).join("");
+  renderSettingFields("#verificationCoreFields", verificationCoreSettingLabels, verificationCoreSettingTypes);
+  renderSettingFields("#verificationBonusFields", verificationBonusSettingLabels, verificationBonusSettingTypes);
 
   $("#birthdaySettingsFields").innerHTML = Object.entries(birthdaySettingLabels)
     .map(([key, label]) => `
@@ -2419,6 +2419,19 @@ function collectSettingsPayload(allowedKeys = null) {
     }
   });
   return payload;
+}
+
+function renderSettingFields(targetSelector, entries, types = {}) {
+  const target = $(targetSelector);
+  if (!target) return;
+  target.innerHTML = Object.entries(entries)
+    .map(([key, label]) => `
+      <label>${label}
+        ${types[key] === "textarea"
+          ? `<textarea data-setting="${key}" rows="4" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="${key === "tiktokNicknameAliases" ? "Paste @name, tiktok.com/@name, or multiple names separated by commas or new lines" : ""}">${escapeHtml(Array.isArray(state.config?.settings?.[key]) ? state.config.settings[key].join(", ") : (state.config?.settings?.[key] || ""))}</textarea>`
+          : `<input data-setting="${key}" value="${escapeHtml(Array.isArray(state.config?.settings?.[key]) ? state.config.settings[key].join(", ") : (state.config?.settings?.[key] || ""))}" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="${key === "tiktokHandle" ? "Paste @yourhandle or tiktok.com/@yourhandle" : ""}">`}
+      </label>
+    `).join("");
 }
 
 function renderStaff() {
@@ -4183,7 +4196,7 @@ async function repostRolePanel() {
   });
 
   await loadAll();
-  setAlert("Role panel reposted.");
+  setAlert("Bonus panel reposted.");
 }
 
 async function repairVerifyPanel() {
@@ -4201,14 +4214,29 @@ async function repairVerifyPanel() {
   setAlert("Verify panel repaired.");
 }
 
+async function repairOnboarding() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to repair onboarding.", "error");
+    return;
+  }
+
+  await api("/api/onboarding-repair", {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+
+  await loadAll();
+  setAlert("Onboarding repaired.");
+}
+
 async function repairRolePanel() {
   if (!hasPanelAccess("admin")) {
-    setAlert("Admin web access is required to repair the role panel.", "error");
+    setAlert("Admin web access is required to repair the bonus panel.", "error");
     return;
   }
 
   await repostRolePanel();
-  setAlert("Role panel repaired.");
+  setAlert("Bonus panel repaired.");
 }
 
 async function setVerifiedVisibility(locked, scope) {
@@ -4481,6 +4509,7 @@ function bindEvents() {
   $("#postAffirmationsPanel").addEventListener("click", () => postAffirmationsPanel().catch(error => setAlert(error.message, "error")));
   $("#saveVerificationSettings").addEventListener("click", () => saveVerificationSettings().catch(error => setAlert(error.message, "error")));
   $("#saveBirthdaySettings").addEventListener("click", () => saveBirthdaySettings().catch(error => setAlert(error.message, "error")));
+  $("#repairOnboardingButton").addEventListener("click", () => repairOnboarding().catch(error => setAlert(error.message, "error")));
   $("#postBirthdayPanel").addEventListener("click", () => postBirthdayPanel().catch(error => setAlert(error.message, "error")));
   $("#repostRolePanel").addEventListener("click", () => repostRolePanel().catch(error => setAlert(error.message, "error")));
   $("#repairVerifyPanel").addEventListener("click", () => repairVerifyPanel().catch(error => setAlert(error.message, "error")));

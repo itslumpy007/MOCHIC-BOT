@@ -98,6 +98,7 @@ The bot serves a web dashboard from the same Node process.
 ## Notes for hosting
 
 - Do not upload your local `.env` file.
-- The bot now tries to rediscover the verify message in the verify channel after restarts, which makes redeploys safer on hosts with ephemeral filesystems.
+- The bot now tries to rediscover the main verify panel in the verify channel after restarts, which makes redeploys safer on hosts with ephemeral filesystems.
+- Most members should use the rules verification button in the verify channel; TikTok matching is treated as an optional bonus path.
 - If you create a new verify message with `/setupverify`, the latest message id is saved in `data/config.json`.
 - `ENABLE_CORE_BOT` controls moderation, setup, and other core server features.
