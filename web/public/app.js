@@ -69,6 +69,12 @@ const state = {
   warnings: {},
   notes: {},
   webAccounts: [],
+  supportInbox: {
+    tickets: [],
+    summary: null
+  },
+  selectedSupportTicketId: null,
+  selectedSupportTicket: null,
   webAccountEditing: null,
   lastDeletedMemberRecord: null,
   templateEditorDrafts: [],
@@ -2460,6 +2466,191 @@ function renderStaff() {
     .join("");
 }
 
+function getSupportInboxTickets() {
+  return Array.isArray(state.supportInbox?.tickets) ? state.supportInbox.tickets : [];
+}
+
+function getSelectedSupportTicket() {
+  const tickets = getSupportInboxTickets();
+  if (state.selectedSupportTicketId) {
+    return tickets.find(ticket => ticket.id === state.selectedSupportTicketId) || state.selectedSupportTicket || null;
+  }
+  return state.selectedSupportTicket || null;
+}
+
+function renderStaffInboxSummary() {
+  const summary = state.supportInbox?.summary || {};
+  const items = [
+    ["Open", summary.open || 0],
+    ["Closed", summary.closed || 0],
+    ["Anonymous", summary.anonymous || 0],
+    ["Total", summary.total || 0]
+  ];
+
+  $("#staffInboxSummary").innerHTML = items
+    .map(([label, value]) => `<article class="summary-item"><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`)
+    .join("");
+}
+
+function renderStaffInboxList() {
+  const tickets = getSupportInboxTickets();
+  const list = $("#staffInboxList");
+
+  if (!tickets.length) {
+    list.innerHTML = `
+      <article class="empty-state">
+        <strong>No support tickets</strong>
+        <p>Tickets and anonymous chats will appear here when members reach out.</p>
+      </article>
+    `;
+    return;
+  }
+
+  list.innerHTML = tickets.map(ticket => `
+    <article class="event ${ticket.anonymous ? "risk-medium" : ""}" data-support-ticket-id="${ticket.id}">
+      <strong>#${ticket.id} ${escapeHtml(ticket.subject)}</strong>
+      <p>
+        <span class="badge">${escapeHtml(ticket.category)}</span>
+        <span class="badge">${escapeHtml(ticket.status)}</span>
+        ${ticket.anonymous ? '<span class="badge">anonymous</span>' : ""}
+        <br>
+        Updated ${escapeHtml(formatDate(ticket.updatedAt))}
+      </p>
+      <div class="button-row">
+        <button class="ghost-button" type="button" data-open-support-ticket="${ticket.id}">Open</button>
+      </div>
+    </article>
+  `).join("");
+
+  list.querySelectorAll("[data-open-support-ticket]").forEach(button => {
+    button.addEventListener("click", () => selectSupportTicket(Number(button.dataset.openSupportTicket)));
+  });
+}
+
+function renderStaffInboxDetail() {
+  const ticket = getSelectedSupportTicket();
+  if (!ticket) {
+    $("#staffTicketDetailTitle").textContent = "Select a ticket";
+    $("#staffTicketDetailMeta").textContent = "Pick a ticket to read messages, reply, and export a transcript.";
+    $("#staffTicketStatusPill").textContent = "Idle";
+    $("#staffTicketMessageList").innerHTML = "";
+    $("#staffTicketReply").value = "";
+    return;
+  }
+
+  $("#staffTicketDetailTitle").textContent = `#${ticket.id} ${ticket.subject}`;
+  $("#staffTicketDetailMeta").textContent = `${ticket.category} - ${ticket.createdBy?.tag || "Anonymous member"} - Created ${formatDate(ticket.createdAt)}`;
+  $("#staffTicketStatusPill").textContent = ticket.status;
+  $("#staffTicketReply").value = $("#staffTicketReply").value || "";
+
+  $("#staffTicketMessageList").innerHTML = (ticket.messages || []).map(message => `
+    <article class="support-message ${message.authorType === "staff" ? "staff" : "user"}">
+      <div class="support-meta">
+        <strong>${escapeHtml(message.authorTag || message.authorType)}</strong>
+        <span>${escapeHtml(message.authorType)}</span>
+        <span>${escapeHtml(formatDate(message.createdAt))}</span>
+      </div>
+      <p>${escapeHtml(message.content)}</p>
+    </article>
+  `).join("");
+}
+
+function renderStaffInbox() {
+  renderStaffInboxSummary();
+  renderStaffInboxList();
+  renderStaffInboxDetail();
+}
+
+async function selectSupportTicket(ticketId) {
+  try {
+    const result = await api(`/api/support/tickets/${ticketId}`);
+    state.selectedSupportTicketId = ticketId;
+    state.selectedSupportTicket = result.ticket;
+    renderStaffInboxDetail();
+  } catch (error) {
+    setAlert(error.message, "error");
+  }
+}
+
+async function refreshSupportInbox() {
+  const result = await api("/api/support/inbox");
+  state.supportInbox = {
+    tickets: result.tickets || [],
+    summary: result.summary || null
+  };
+  if (state.selectedSupportTicketId) {
+    state.selectedSupportTicket = getSupportInboxTickets().find(ticket => ticket.id === state.selectedSupportTicketId) || null;
+  }
+  renderStaffInbox();
+}
+
+async function sendSupportReply() {
+  const ticket = getSelectedSupportTicket();
+  if (!ticket) {
+    setAlert("Pick a ticket first.", "error");
+    return;
+  }
+
+  const content = $("#staffTicketReply").value.trim();
+  if (!content) {
+    setAlert("Write a reply before sending.", "error");
+    return;
+  }
+
+  const result = await api(`/api/support/tickets/${ticket.id}/reply`, {
+    method: "POST",
+    body: JSON.stringify({ content })
+  });
+
+  $("#staffTicketReply").value = "";
+  state.selectedSupportTicket = result.ticket;
+  state.selectedSupportTicketId = result.ticket.id;
+  state.supportInbox.tickets = getSupportInboxTickets().map(entry => entry.id === result.ticket.id ? result.ticket : entry);
+  renderStaffInbox();
+  setAlert(`Reply sent to ticket #${result.ticket.id}.`);
+}
+
+async function closeSupportTicket() {
+  const ticket = getSelectedSupportTicket();
+  if (!ticket) return;
+
+  const result = await api(`/api/support/tickets/${ticket.id}/close`, {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+
+  state.selectedSupportTicket = result.ticket;
+  state.selectedSupportTicketId = result.ticket.id;
+  state.supportInbox.tickets = getSupportInboxTickets().map(entry => entry.id === result.ticket.id ? result.ticket : entry);
+  renderStaffInbox();
+}
+
+async function reopenSupportTicket() {
+  const ticket = getSelectedSupportTicket();
+  if (!ticket) return;
+
+  const result = await api(`/api/support/tickets/${ticket.id}/reopen`, {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+
+  state.selectedSupportTicket = result.ticket;
+  state.selectedSupportTicketId = result.ticket.id;
+  state.supportInbox.tickets = getSupportInboxTickets().map(entry => entry.id === result.ticket.id ? result.ticket : entry);
+  renderStaffInbox();
+}
+
+function exportSupportTranscript() {
+  const ticket = getSelectedSupportTicket();
+  if (!ticket) {
+    setAlert("Pick a ticket first.", "error");
+    return;
+  }
+
+  const url = `/api/support/tickets/${ticket.id}/transcript`;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
 function renderOps() {
   const ops = state.ops || {};
   const templates = ops.templates || [];
@@ -3616,6 +3807,7 @@ function renderAll() {
   renderAiReview();
   renderSettings();
   renderStaff();
+  renderStaffInbox();
   renderOps();
   renderTemplates();
   renderSavedCaseFilters();
@@ -3675,10 +3867,11 @@ async function loadAll() {
     const wantsAdminData = hasPanelAccess("admin");
     if (wantsAdminData) {
       requests.push(api("/api/web-accounts"));
+      requests.push(api("/api/support/inbox"));
     }
 
     const results = await Promise.all(requests);
-    const [dashboard, config, casesPayload, warningsPayload, notesPayload, opsPayload, webAccountsPayload] = results;
+    const [dashboard, config, casesPayload, warningsPayload, notesPayload, opsPayload, webAccountsPayload, supportInboxPayload] = results;
 
     state.dashboard = dashboard;
     state.config = config;
@@ -3688,6 +3881,10 @@ async function loadAll() {
     state.notes = notesPayload.notes || {};
     state.ops = opsPayload;
     state.webAccounts = webAccountsPayload?.accounts || [];
+    state.supportInbox = supportInboxPayload || state.supportInbox;
+    if (state.selectedSupportTicketId) {
+      state.selectedSupportTicket = getSupportInboxTickets().find(ticket => ticket.id === state.selectedSupportTicketId) || state.selectedSupportTicket;
+    }
     applyAccessRestrictions();
     applyRoleAwareWorkspace();
     renderAll();
@@ -4540,6 +4737,11 @@ function bindEvents() {
   $("#saveOps").addEventListener("click", () => saveOps().catch(error => setAlert(error.message, "error")));
   $("#addTemplateButton").addEventListener("click", () => addTemplateDraft());
   $("#deleteTemplateButton").addEventListener("click", () => deleteTemplateDraft());
+  $("#refreshStaffInbox").addEventListener("click", () => refreshSupportInbox().catch(error => setAlert(error.message, "error")));
+  $("#staffTicketReplyButton").addEventListener("click", () => sendSupportReply().catch(error => setAlert(error.message, "error")));
+  $("#staffTicketCloseButton").addEventListener("click", () => closeSupportTicket().catch(error => setAlert(error.message, "error")));
+  $("#staffTicketReopenButton").addEventListener("click", () => reopenSupportTicket().catch(error => setAlert(error.message, "error")));
+  $("#staffTicketExportButton").addEventListener("click", () => exportSupportTranscript());
   $("#saveCaseFilterButton").addEventListener("click", () => saveCurrentCaseFilter());
   $("#runPreview").addEventListener("click", () => runAutomodPreview().catch(error => setAlert(error.message, "error")));
   $("#downloadBackup").addEventListener("click", () => downloadBackup().catch(error => setAlert(error.message, "error")));

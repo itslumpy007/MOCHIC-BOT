@@ -637,6 +637,38 @@ textarea {
   gap: 10px;
 }
 
+.support-message-list {
+  display: grid;
+  gap: 10px;
+  max-height: 420px;
+  overflow: auto;
+  padding: 16px;
+}
+
+.support-message {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(120, 120, 160, 0.18);
+}
+
+.support-message.staff {
+  background: rgba(82, 119, 230, 0.08);
+}
+
+.support-message.user {
+  background: rgba(63, 167, 143, 0.08);
+}
+
+.support-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .event {
   padding: 12px 13px;
   border: 1px solid rgba(77, 103, 255, 0.1);

@@ -119,7 +119,7 @@ function renderTicketDetail() {
   }
 
   $("#ticketDetailTitle").textContent = `#${ticket.id} ${ticket.subject}`;
-  $("#ticketDetailMeta").textContent = `${ticket.category} • ${ticket.createdBy?.tag || "Anonymous"} • Created ${formatDate(ticket.createdAt)}`;
+  $("#ticketDetailMeta").textContent = `${ticket.category} - ${ticket.createdBy?.tag || "Anonymous"} - Created ${formatDate(ticket.createdAt)}`;
   $("#ticketStatusPill").textContent = ticket.status;
 
   $("#ticketMessageList").innerHTML = (ticket.messages || []).map(message => `
@@ -242,6 +242,15 @@ async function reopenCurrentTicket() {
   renderTicketDetail();
 }
 
+function exportCurrentTicketTranscript() {
+  if (!state.selectedTicket) {
+    setAlert("Pick a ticket first.", "error");
+    return;
+  }
+
+  window.open(`/api/support/tickets/${state.selectedTicket.id}/transcript`, "_blank", "noopener,noreferrer");
+}
+
 function setupAnonymousQuickStart() {
   $("#ticketCategory").value = "anonymous-chat";
   $("#ticketAnonymous").checked = true;
@@ -268,6 +277,7 @@ async function init() {
   $("#sendReplyButton").addEventListener("click", () => sendReply().catch(error => setAlert(error.message, "error")));
   $("#closeTicketButton").addEventListener("click", () => closeCurrentTicket().catch(error => setAlert(error.message, "error")));
   $("#reopenTicketButton").addEventListener("click", () => reopenCurrentTicket().catch(error => setAlert(error.message, "error")));
+  $("#exportTranscriptButton").addEventListener("click", exportCurrentTicketTranscript);
   $("#anonymousQuickStart").addEventListener("click", setupAnonymousQuickStart);
   $("#refreshButton").addEventListener("click", () => loadSupport().catch(error => setAlert(error.message, "error")));
 

@@ -15,14 +15,17 @@ const checks = [
   ["index.js exposes verification captcha", files.index.includes("verify:captcha") && files.index.includes("verificationCaptchaEnabled")],
   ["index.js exposes onboarding repair", files.index.includes("/api/onboarding-repair") && files.index.includes("repaironboarding")],
   ["index.js exposes support portal", files.index.includes("/support/login") && files.index.includes("/api/support/tickets") && files.index.includes("createSupportTicket")],
+  ["index.js exposes support inbox export", files.index.includes("/api/support/inbox") && files.index.includes("action === \"transcript\"") && files.index.includes("formatSupportTranscript")],
   ["index.js keeps raid alerts", files.index.includes("raid-alert") && files.index.includes("Suspicious join burst")],
   ["index.js shortens web sessions", files.index.includes("WEB_SESSION_TTL_MS")],
   ["app.js has onboarding repair UI", files.app.includes("repairOnboardingButton") && files.app.includes("repairOnboarding()")],
   ["app.js redirects members to support", files.app.includes("window.location.replace(\"/support\")")],
   ["app.js splits verification settings", files.app.includes("verificationCoreFields") && files.app.includes("verificationBonusFields")],
+  ["app.js has staff inbox", files.app.includes("staffInboxList") && files.app.includes("exportSupportTranscript()") && files.app.includes("/api/support/inbox")],
   ["html has onboarding repair button", files.html.includes("Repair Onboarding") && files.html.includes("Core Verification")],
+  ["html has staff inbox", files.html.includes("Staff Inbox") && files.html.includes("Export Transcript")],
   ["support page exists", files.supportHtml.includes("Mochi Support") && files.supportHtml.includes("/support/login")],
-  ["support script exists", files.supportJs.includes("createTicket") && files.supportJs.includes("anonymous-chat")],
+  ["support script exists", files.supportJs.includes("createTicket") && files.supportJs.includes("anonymous-chat") && files.supportJs.includes("exportTranscriptButton")],
   ["html mentions captcha", files.html.includes("newer or suspicious accounts") || files.html.includes("CAPTCHA is optional")],
   ["index.js scopes captcha", files.index.includes("new/suspicious accounts only") && files.index.includes("newer or suspicious accounts")]
 ];

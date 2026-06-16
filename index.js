@@ -7791,7 +7791,6 @@ function appendSupportTicketMessage(ticket, { authorType, authorId, authorTag, c
 
 function serializeSupportTicket(ticket, auth = null) {
   if (!ticket) return null;
-  const staff = isSupportStaffAccess(auth);
   const admin = auth?.accessLevel === "admin";
   const owner = auth?.user?.id === ticket.createdByUserId;
   const revealOwner = admin || owner || !ticket.anonymous;
@@ -7828,6 +7827,59 @@ function serializeSupportTicket(ticket, auth = null) {
   };
 }
 
+function canViewSupportTicket(auth, ticket) {
+  if (!auth || !ticket) return false;
+  if (auth.accessLevel === "admin") return true;
+  if (auth.user?.id === ticket.createdByUserId) return true;
+  return isSupportStaffAccess(auth) && ticket.visibleToStaff !== false;
+}
+
+function canReplyToSupportTicket(auth, ticket) {
+  if (!auth || !ticket) return false;
+  if (auth.user?.id === ticket.createdByUserId) return true;
+  return isSupportStaffAccess(auth) && ticket.visibleToStaff !== false;
+}
+
+function canExportSupportTranscript(auth, ticket) {
+  return canViewSupportTicket(auth, ticket);
+}
+
+function formatSupportTranscript(ticket, auth = null) {
+  if (!ticket) return "";
+
+  const data = serializeSupportTicket(ticket, auth);
+  const lines = [];
+  const append = value => lines.push(String(value));
+  const admin = auth?.accessLevel === "admin";
+
+  append(`# Support Transcript #${data.id}`);
+  append(`Category: ${data.category}`);
+  append(`Subject: ${data.subject}`);
+  append(`Status: ${data.status}`);
+  append(`Anonymous: ${data.anonymous ? "yes" : "no"}`);
+  append(`Visible to staff: ${data.visibleToStaff ? "yes" : "no"}`);
+  append(`Created by: ${data.createdBy?.tag || "Anonymous member"}`);
+  append(`Created at: ${data.createdAt}`);
+  append(`Updated at: ${data.updatedAt}`);
+  append(`Last message: ${data.lastMessageAt}`);
+  append("");
+  append("Messages:");
+
+  for (const message of data.messages || []) {
+    const label = message.authorType === "staff" ? "Staff" : "Member";
+    const identity = admin || !message.anonymous
+      ? ` (${message.authorTag || message.authorId || "Unknown"})`
+      : "";
+    append(`- [${message.createdAt}] ${label}${identity}`);
+    for (const paragraph of String(message.content || "").split(/\r?\n/)) {
+      append(`  ${paragraph}`);
+    }
+    append("");
+  }
+
+  return lines.join("\n").trimEnd() + "\n";
+}
+
 function listSupportTickets(auth = null) {
   const store = getSupportStore();
   if (isSupportStaffAccess(auth)) {
@@ -7849,6 +7901,29 @@ async function notifySupportChannel(embed) {
   } catch (error) {
     console.error("Support notification error:", error.message);
   }
+}
+
+function buildSupportInboxPayload(auth = null) {
+  const tickets = listSupportTickets(auth);
+  const openCount = tickets.filter(ticket => ticket.status === "open").length;
+  const anonymousCount = tickets.filter(ticket => ticket.anonymous).length;
+  const recentTicket = tickets[0] || null;
+
+  return {
+    tickets,
+    summary: {
+      total: tickets.length,
+      open: openCount,
+      closed: tickets.length - openCount,
+      anonymous: anonymousCount,
+      recentTicket: recentTicket ? {
+        id: recentTicket.id,
+        subject: recentTicket.subject,
+        status: recentTicket.status,
+        updatedAt: recentTicket.updatedAt
+      } : null
+    }
+  };
 }
 
 function normalizeMochiCosmeticState(raw) {
@@ -9662,6 +9737,14 @@ async function handleWebApi(req, res, pathname) {
     return sendWebJson(res, 200, buildWebUserPayload(auth));
   }
 
+  if (pathname === "/api/support/inbox" && req.method === "GET") {
+    if (!auth || !isSupportStaffAccess(auth)) {
+      return sendWebJson(res, 403, { error: "Staff access is required." });
+    }
+
+    return sendWebJson(res, 200, buildSupportInboxPayload(auth));
+  }
+
   if (pathname === "/api/support/tickets" && req.method === "GET") {
     if (!auth) {
       return sendWebJson(res, 401, { error: "Login required." });
@@ -9740,6 +9823,39 @@ async function handleWebApi(req, res, pathname) {
         ok: true,
         ticket: serializeSupportTicket(ticket, auth)
       });
+    }
+
+    if (req.method === "GET" && action === "transcript") {
+      if (!canExportSupportTranscript(auth, ticket)) {
+        return sendWebJson(res, 403, { error: "You are not allowed to export that transcript." });
+      }
+
+      const requestUrl = new URL(req.url, getWebBaseUrl(req));
+      const format = String(requestUrl.searchParams.get("format") || "txt").trim().toLowerCase();
+      const transcriptJson = {
+        ok: true,
+        ticket: serializeSupportTicket(ticket, auth)
+      };
+      const transcriptText = formatSupportTranscript(ticket, auth);
+      const downloadName = `support-ticket-${ticket.id}-transcript.${format === "json" ? "json" : "txt"}`;
+
+      if (format === "json") {
+        res.writeHead(200, {
+          "Content-Type": "application/json; charset=utf-8",
+          "Content-Disposition": `attachment; filename="${downloadName}"`,
+          "Cache-Control": "no-store"
+        });
+        res.end(`${JSON.stringify(transcriptJson, null, 2)}\n`);
+        return;
+      }
+
+      res.writeHead(200, {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Content-Disposition": `attachment; filename="${downloadName}"`,
+        "Cache-Control": "no-store"
+      });
+      res.end(transcriptText);
+      return;
     }
 
     if (req.method === "POST" && action === "reply") {
