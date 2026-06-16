@@ -17,7 +17,8 @@ const checks = [
   ["app.js has onboarding repair UI", files.app.includes("repairOnboardingButton") && files.app.includes("repairOnboarding()")],
   ["app.js splits verification settings", files.app.includes("verificationCoreFields") && files.app.includes("verificationBonusFields")],
   ["html has onboarding repair button", files.html.includes("Repair Onboarding") && files.html.includes("Core Verification")],
-  ["html mentions captcha", files.html.includes("optional CAPTCHA") || files.html.includes("CAPTCHA is optional")]
+  ["html mentions captcha", files.html.includes("newer or suspicious accounts") || files.html.includes("CAPTCHA is optional")],
+  ["index.js scopes captcha", files.index.includes("new/suspicious accounts only") && files.index.includes("newer or suspicious accounts")]
 ];
 
 const failed = checks.filter(([, ok]) => !ok);

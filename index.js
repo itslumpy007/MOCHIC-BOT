@@ -493,6 +493,24 @@ function clearVerificationCaptchaChallenge(userId) {
   verificationCaptchaChallenges.delete(userId);
 }
 
+function shouldRequireVerificationCaptcha(member) {
+  if (!isVerificationCaptchaEnabled() || !member?.user) {
+    return { required: false, reason: null, accountAgeMs: null };
+  }
+
+  const accountAgeMs = getAccountAgeMs(member.user);
+  const suspiciousAgeLimitMs = Number(config.automod?.raidAccountAgeLimitMs) || 0;
+  if (suspiciousAgeLimitMs > 0 && accountAgeMs <= suspiciousAgeLimitMs) {
+    return {
+      required: true,
+      reason: "new or suspicious account",
+      accountAgeMs
+    };
+  }
+
+  return { required: false, reason: null, accountAgeMs };
+}
+
 function getSelectedMochiRoleId(member) {
   if (!member?.roles?.cache) return null;
   return ALL_ROLES.find(roleId => roleId && member.roles.cache.has(roleId)) || null;
@@ -532,7 +550,7 @@ function buildTikTokVerificationSummary() {
   const aliases = getTikTokNicknameAliases();
   return [
     `Verification mode: Rules + button verify`,
-    `Verification CAPTCHA: ${isVerificationCaptchaEnabled() ? "Enabled" : "Disabled"}`,
+    `Verification CAPTCHA: ${isVerificationCaptchaEnabled() ? "Enabled (new/suspicious accounts only)" : "Disabled"}`,
     `TikTok bonus: ${handle ? `Enabled (@${handle})` : "Disabled"}`,
     `Saved nicknames: ${aliases.length}`,
     `Verified role: ${getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set"}`,
@@ -558,12 +576,12 @@ function buildRuleVerifyEmbed() {
       { name: "1. Read the rules", value: "Make sure you’ve looked over the rules card in this channel.", inline: false },
       { name: "2. Click verify", value: "Press the button below to confirm you’ve read everything and get access.", inline: false },
       ...(captchaEnabled
-        ? [{ name: "3. CAPTCHA", value: "A quick human check will appear before I grant access.", inline: false }]
+        ? [{ name: "3. CAPTCHA", value: "A quick human check appears only for newer or suspicious accounts.", inline: false }]
         : []),
       { name: captchaEnabled ? "4. Optional bonus" : "3. Optional bonus", value: handle ? `TikTok matching can still run as a bonus path for @${handle}.` : "TikTok matching can be enabled later for special cases.", inline: false },
       { name: "🍥 Flavor roles", value: "React below if you want a flavor role. They are optional.", inline: false },
       { name: "How it works", value: captchaEnabled
-        ? "1. Read the rules\n2. Click verify\n3. Solve the CAPTCHA\n4. React for an optional flavor role"
+        ? "1. Read the rules\n2. Click verify\n3. Solve the CAPTCHA if prompted\n4. React for an optional flavor role"
         : "1. Read the rules\n2. Click verify\n3. React for an optional flavor role", inline: false },
       { name: "Verified role", value: verifiedRoleId ? `<@&${verifiedRoleId}>` : "Not set", inline: true },
       { name: "Unverified role", value: unverifiedRoleId ? `<@&${unverifiedRoleId}>` : "Optional", inline: true }
@@ -6413,7 +6431,7 @@ function buildHelpEmbed() {
     },
     {
       name: "Verification",
-      value: "`/verify`, `/setupverify`, `/setuptiktokverify`, `/lockverified`, `/unlockverified`, `/settings`\nMost members should use the rules + button verify flow. CAPTCHA can be enabled as an extra human check.",
+      value: "`/verify`, `/setupverify`, `/setuptiktokverify`, `/lockverified`, `/unlockverified`, `/settings`\nMost members should use the rules + button verify flow. CAPTCHA can be enabled for newer or suspicious accounts.",
       inline: false
     },
     {
@@ -10249,26 +10267,28 @@ client.on("interactionCreate", async interaction => {
           });
         }
         verificationButtonCooldowns.set(interaction.user.id, Date.now());
-        if (isVerificationCaptchaEnabled()) {
-          const code = createVerificationCaptchaChallenge();
-          setVerificationCaptchaChallenge(interaction.user.id, code);
-          return interaction.showModal(buildVerificationCaptchaModal(code));
-        }
-
-        await interaction.deferReply({ ephemeral: true });
         const member = interaction.member || await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
         if (!member) {
-          return interaction.editReply({
+          return interaction.reply({
             embeds: [
               makeEmbed({
                 title: "Try again",
                 description: "I could not find your server membership.",
                 color: COLORS.red
               })
-            ]
+            ],
+            ephemeral: true
           });
         }
 
+        const captchaDecision = shouldRequireVerificationCaptcha(member);
+        if (captchaDecision.required) {
+          const code = createVerificationCaptchaChallenge();
+          setVerificationCaptchaChallenge(interaction.user.id, code);
+          return interaction.showModal(buildVerificationCaptchaModal(code));
+        }
+
+        await interaction.deferReply({ ephemeral: true });
         const result = await completeRulesVerification(member);
         return interaction.editReply({ embeds: [result.embed] });
       }
