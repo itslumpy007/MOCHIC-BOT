@@ -202,6 +202,34 @@ body.is-loading .event {
   background: rgba(255, 255, 255, 0.1);
 }
 
+.portal-links {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.portal-link {
+  display: grid;
+  place-items: center;
+  min-height: 42px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  color: #eef3ff;
+  text-decoration: none;
+  font-weight: 800;
+  text-align: center;
+  transition: transform 140ms ease, background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.portal-link:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: 0 14px 32px rgba(12, 17, 29, 0.18);
+}
+
 .app-shell {
   min-height: 100vh;
   min-height: 100svh;
