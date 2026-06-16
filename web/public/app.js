@@ -349,6 +349,7 @@ const affirmationsSettingLabels = {
 };
 
 const verificationCoreSettingLabels = {
+  verificationCaptchaEnabled: "Verification CAPTCHA enabled",
   verifiedRoleId: "Verified role ID",
   unverifiedRoleId: "Unverified role ID"
 };
@@ -364,6 +365,7 @@ const verificationBonusSettingTypes = {
 };
 
 const verificationCoreSettingTypes = {
+  verificationCaptchaEnabled: "boolean",
   verifiedRoleId: "input",
   unverifiedRoleId: "input"
 };
@@ -2427,7 +2429,12 @@ function renderSettingFields(targetSelector, entries, types = {}) {
   target.innerHTML = Object.entries(entries)
     .map(([key, label]) => `
       <label>${label}
-        ${types[key] === "textarea"
+        ${types[key] === "boolean"
+          ? `<select data-setting="${key}">
+              <option value="true" ${(state.config?.settings?.[key] ?? false) === true || String(state.config?.settings?.[key]) === "true" ? "selected" : ""}>On</option>
+              <option value="false" ${(state.config?.settings?.[key] ?? false) === false || String(state.config?.settings?.[key]) === "false" ? "selected" : ""}>Off</option>
+            </select>`
+          : types[key] === "textarea"
           ? `<textarea data-setting="${key}" rows="4" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="${key === "tiktokNicknameAliases" ? "Paste @name, tiktok.com/@name, or multiple names separated by commas or new lines" : ""}">${escapeHtml(Array.isArray(state.config?.settings?.[key]) ? state.config.settings[key].join(", ") : (state.config?.settings?.[key] || ""))}</textarea>`
           : `<input data-setting="${key}" value="${escapeHtml(Array.isArray(state.config?.settings?.[key]) ? state.config.settings[key].join(", ") : (state.config?.settings?.[key] || ""))}" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="${key === "tiktokHandle" ? "Paste @yourhandle or tiktok.com/@yourhandle" : ""}">`}
       </label>
@@ -4123,6 +4130,7 @@ async function saveVerificationSettings(options = {}) {
   const auto = Boolean(options.auto);
 
   const payload = collectSettingsPayload([
+    "verificationCaptchaEnabled",
     "tiktokHandle",
     "tiktokNicknameAliases",
     "verifiedRoleId",

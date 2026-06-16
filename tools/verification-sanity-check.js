@@ -10,12 +10,14 @@ const files = {
 
 const checks = [
   ["index.js exposes rules verify button", files.index.includes("verify:rules-check")],
+  ["index.js exposes verification captcha", files.index.includes("verify:captcha") && files.index.includes("verificationCaptchaEnabled")],
   ["index.js exposes onboarding repair", files.index.includes("/api/onboarding-repair") && files.index.includes("repaironboarding")],
   ["index.js keeps raid alerts", files.index.includes("raid-alert") && files.index.includes("Suspicious join burst")],
   ["index.js shortens web sessions", files.index.includes("WEB_SESSION_TTL_MS")],
   ["app.js has onboarding repair UI", files.app.includes("repairOnboardingButton") && files.app.includes("repairOnboarding()")],
   ["app.js splits verification settings", files.app.includes("verificationCoreFields") && files.app.includes("verificationBonusFields")],
-  ["html has onboarding repair button", files.html.includes("Repair Onboarding") && files.html.includes("Core Verification")]
+  ["html has onboarding repair button", files.html.includes("Repair Onboarding") && files.html.includes("Core Verification")],
+  ["html mentions captcha", files.html.includes("optional CAPTCHA") || files.html.includes("CAPTCHA is optional")]
 ];
 
 const failed = checks.filter(([, ok]) => !ok);

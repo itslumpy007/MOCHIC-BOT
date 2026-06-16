@@ -153,6 +153,7 @@ const spamTracker = new Map();
 const joinTracker = new Map();
 const anonymousAffirmationCooldowns = new Map();
 const verificationButtonCooldowns = new Map();
+const verificationCaptchaChallenges = new Map();
 const generalChatActivityCache = new Map();
 const googleBlockListSyncState = {
   running: false,
@@ -305,6 +306,7 @@ function createDefaultConfig() {
       anonymousAffirmationsEnabled: true,
       anonymousAffirmationsChannelId: null,
       anonymousAffirmationsCooldownMs: 60 * 1000,
+      verificationCaptchaEnabled: false,
       logChannelId: null,
       automodLogChannelId: null,
       mutedRoleId: null,
@@ -451,6 +453,46 @@ function isTikTokVerificationEnabled() {
   return Boolean(getTikTokHandle() && getVerificationRoleId());
 }
 
+function isVerificationCaptchaEnabled() {
+  return config.settings?.verificationCaptchaEnabled === true;
+}
+
+function normalizeVerificationCaptchaInput(value) {
+  return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+}
+
+function createVerificationCaptchaChallenge() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const length = 5;
+  const bytes = crypto.randomBytes(length);
+  let code = "";
+  for (let index = 0; index < length; index += 1) {
+    code += alphabet[bytes[index] % alphabet.length];
+  }
+  return code;
+}
+
+function setVerificationCaptchaChallenge(userId, code) {
+  verificationCaptchaChallenges.set(userId, {
+    code,
+    expiresAt: Date.now() + 2 * 60 * 1000
+  });
+}
+
+function getVerificationCaptchaChallenge(userId) {
+  const challenge = verificationCaptchaChallenges.get(userId) || null;
+  if (!challenge) return null;
+  if (challenge.expiresAt <= Date.now()) {
+    verificationCaptchaChallenges.delete(userId);
+    return null;
+  }
+  return challenge;
+}
+
+function clearVerificationCaptchaChallenge(userId) {
+  verificationCaptchaChallenges.delete(userId);
+}
+
 function getSelectedMochiRoleId(member) {
   if (!member?.roles?.cache) return null;
   return ALL_ROLES.find(roleId => roleId && member.roles.cache.has(roleId)) || null;
@@ -490,6 +532,7 @@ function buildTikTokVerificationSummary() {
   const aliases = getTikTokNicknameAliases();
   return [
     `Verification mode: Rules + button verify`,
+    `Verification CAPTCHA: ${isVerificationCaptchaEnabled() ? "Enabled" : "Disabled"}`,
     `TikTok bonus: ${handle ? `Enabled (@${handle})` : "Disabled"}`,
     `Saved nicknames: ${aliases.length}`,
     `Verified role: ${getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set"}`,
@@ -503,6 +546,7 @@ function buildRuleVerifyEmbed() {
   const verifiedRoleId = getVerificationRoleId();
   const unverifiedRoleId = getUnverifiedRoleId();
   const handle = getTikTokHandle();
+  const captchaEnabled = isVerificationCaptchaEnabled();
 
   return makeEmbed({
     title: "Rules check + verification",
@@ -513,9 +557,14 @@ function buildRuleVerifyEmbed() {
     fields: [
       { name: "1. Read the rules", value: "Make sure you’ve looked over the rules card in this channel.", inline: false },
       { name: "2. Click verify", value: "Press the button below to confirm you’ve read everything and get access.", inline: false },
-      { name: "3. Optional bonus", value: handle ? `TikTok matching can still run as a bonus path for @${handle}.` : "TikTok matching can be enabled later for special cases.", inline: false },
+      ...(captchaEnabled
+        ? [{ name: "3. CAPTCHA", value: "A quick human check will appear before I grant access.", inline: false }]
+        : []),
+      { name: captchaEnabled ? "4. Optional bonus" : "3. Optional bonus", value: handle ? `TikTok matching can still run as a bonus path for @${handle}.` : "TikTok matching can be enabled later for special cases.", inline: false },
       { name: "🍥 Flavor roles", value: "React below if you want a flavor role. They are optional.", inline: false },
-      { name: "How it works", value: "1. Read the rules\n2. Click verify\n3. React for an optional flavor role", inline: false },
+      { name: "How it works", value: captchaEnabled
+        ? "1. Read the rules\n2. Click verify\n3. Solve the CAPTCHA\n4. React for an optional flavor role"
+        : "1. Read the rules\n2. Click verify\n3. React for an optional flavor role", inline: false },
       { name: "Verified role", value: verifiedRoleId ? `<@&${verifiedRoleId}>` : "Not set", inline: true },
       { name: "Unverified role", value: unverifiedRoleId ? `<@&${unverifiedRoleId}>` : "Optional", inline: true }
     ],
@@ -582,6 +631,85 @@ async function postRuleVerifyPanel(source = "manual") {
     channelId: verifyChannelId,
     messageId: sentMessage.id,
     source
+  };
+}
+
+function buildVerificationCaptchaModal(code) {
+  const modal = new ModalBuilder()
+    .setCustomId("verify:captcha")
+    .setTitle("Verification CAPTCHA");
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId("captchaAnswer")
+        .setLabel(`Type the code: ${code}`)
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(8)
+    )
+  );
+
+  return modal;
+}
+
+async function completeRulesVerification(member) {
+  const verifiedRoleId = getVerificationRoleId();
+  const unverifiedRoleId = getUnverifiedRoleId();
+  if (!verifiedRoleId) {
+    return {
+      ok: false,
+      embed: makeEmbed({
+        title: "Try again",
+        description: "Ask staff to set the verified role first.",
+        color: COLORS.red
+      })
+    };
+  }
+
+  const rolesToAdd = member.roles.cache.has(verifiedRoleId) ? [] : [verifiedRoleId];
+  const rolesToRemove = unverifiedRoleId && member.roles.cache.has(unverifiedRoleId) ? [unverifiedRoleId] : [];
+
+  if (!rolesToAdd.length && !rolesToRemove.length) {
+    return {
+      ok: true,
+      embed: makeEmbed({
+        title: "You’re already verified",
+        description: "You already have access. Thanks for reading the rules.",
+        color: COLORS.mint
+      })
+    };
+  }
+
+  if (!member.manageable) {
+    return {
+      ok: false,
+      embed: makeEmbed({
+        title: "Try again",
+        description: "I cannot manage your roles right now.",
+        color: COLORS.red
+      })
+    };
+  }
+
+  if (rolesToRemove.length) {
+    await member.roles.remove(rolesToRemove, "Rules check verification").catch(() => {});
+  }
+
+  if (rolesToAdd.length) {
+    await member.roles.add(rolesToAdd, "Rules check verification").catch(() => {});
+  }
+
+  const bonusMatched = isTikTokVerificationEnabled() && matchesTikTokVerification(member);
+  return {
+    ok: true,
+    embed: makeEmbed({
+      title: "Verified",
+      description: bonusMatched
+        ? `You’re verified, and your nickname also matches the TikTok bonus setting for @${getTikTokHandle()}.`
+        : "You’re verified. Welcome in.",
+      color: COLORS.mint
+    })
   };
 }
 
@@ -3508,6 +3636,14 @@ const allCommands = [
     )
     .addSubcommand(subcommand =>
       subcommand
+        .setName("captcha")
+        .setDescription("Enable or disable the verification CAPTCHA")
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
         .setName("welcomechannel")
         .setDescription("Set the welcome channel shown to unverified members")
         .addChannelOption(option =>
@@ -3615,6 +3751,7 @@ const allCommands = [
               { name: "birthday role", value: "birthdayrole" },
               { name: "birthday channel", value: "birthdaychannel" },
               { name: "verify channel", value: "verifychannel" },
+              { name: "verification captcha", value: "captcha" },
               { name: "welcome channel", value: "welcomechannel" },
               { name: "affirmations channel", value: "affirmchannel" },
               { name: "affirmations enabled", value: "affirmenabled" },
@@ -5340,6 +5477,7 @@ function buildSettingsSummary() {
   return [
     `Log channel: ${getLogChannelId() ? `<#${getLogChannelId()}>` : "Not set"}`,
     `Verify channel: ${getVerifyChannelId() ? `<#${getVerifyChannelId()}>` : "Not set"}`,
+    `Verification CAPTCHA: ${isVerificationCaptchaEnabled() ? "Enabled" : "Disabled"}`,
     `Rules channel: ${getRulesChannelId() ? `<#${getRulesChannelId()}>` : "Not set"}`,
     `General chat: ${getGeneralChatChannelId() ? `<#${getGeneralChatChannelId()}>` : "Not set"}`,
     `General chat inactivity: ${isGeneralChatInactivityEnabled() ? "Enabled" : "Disabled"}`,
@@ -6275,7 +6413,7 @@ function buildHelpEmbed() {
     },
     {
       name: "Verification",
-      value: "`/verify`, `/setupverify`, `/setuptiktokverify`, `/lockverified`, `/unlockverified`, `/settings`\nMost members should use the rules + button verify flow.",
+      value: "`/verify`, `/setupverify`, `/setuptiktokverify`, `/lockverified`, `/unlockverified`, `/settings`\nMost members should use the rules + button verify flow. CAPTCHA can be enabled as an extra human check.",
       inline: false
     },
     {
@@ -7954,6 +8092,7 @@ function buildWebConfigPayload() {
       anonymousAffirmationsEnabled: isAnonymousAffirmationsEnabled(),
       anonymousAffirmationsChannelId: getAnonymousAffirmationsChannelId() || "",
       anonymousAffirmationsCooldownMs: getAnonymousAffirmationsCooldownMs(),
+      verificationCaptchaEnabled: isVerificationCaptchaEnabled(),
       logChannelId: config.settings.logChannelId || "",
       automodLogChannelId: config.settings.automodLogChannelId || "",
       mutedRoleId: config.settings.mutedRoleId || "",
@@ -8001,6 +8140,7 @@ function updateWebSettings(auth, payload) {
     "anonymousAffirmationsEnabled",
     "anonymousAffirmationsChannelId",
     "anonymousAffirmationsCooldownMs",
+    "verificationCaptchaEnabled",
     "logChannelId",
     "automodLogChannelId",
     "mutedRoleId",
@@ -8040,6 +8180,9 @@ function updateWebSettings(auth, payload) {
   const nextAffirmationsCooldownMs = Object.prototype.hasOwnProperty.call(payload, "anonymousAffirmationsCooldownMs")
     ? Math.max(5000, Math.min(10 * 60 * 1000, Number(payload.anonymousAffirmationsCooldownMs) || 0))
     : getAnonymousAffirmationsCooldownMs();
+  const nextVerificationCaptchaEnabled = Object.prototype.hasOwnProperty.call(payload, "verificationCaptchaEnabled")
+    ? ["true", "1", "yes", "on"].includes(String(payload.verificationCaptchaEnabled).toLowerCase())
+    : isVerificationCaptchaEnabled();
   const nextMessageArchiveEnabled = Object.prototype.hasOwnProperty.call(payload, "messageArchiveEnabled")
     ? ["true", "1", "yes", "on"].includes(String(payload.messageArchiveEnabled).toLowerCase())
     : Boolean(config.settings.messageArchiveEnabled);
@@ -8055,6 +8198,7 @@ function updateWebSettings(auth, payload) {
     anonymousAffirmationsEnabled: config.settings.anonymousAffirmationsEnabled,
     anonymousAffirmationsChannelId: config.settings.anonymousAffirmationsChannelId,
     anonymousAffirmationsCooldownMs: config.settings.anonymousAffirmationsCooldownMs,
+    verificationCaptchaEnabled: config.settings.verificationCaptchaEnabled,
     logChannelId: config.settings.logChannelId,
     automodLogChannelId: config.settings.automodLogChannelId,
     mutedRoleId: config.settings.mutedRoleId,
@@ -8078,6 +8222,8 @@ function updateWebSettings(auth, payload) {
         config.settings[key] = nextAffirmationsEnabled;
       } else if (key === "anonymousAffirmationsCooldownMs") {
         config.settings[key] = nextAffirmationsCooldownMs;
+      } else if (key === "verificationCaptchaEnabled") {
+        config.settings[key] = nextVerificationCaptchaEnabled;
       } else if (key === "generalChatChannelId") {
         config.settings[key] = nextGeneralChatChannelId;
       } else if (key === "generalChatInactivityEnabled") {
@@ -8109,6 +8255,7 @@ function updateWebSettings(auth, payload) {
     anonymousAffirmationsEnabled: config.settings.anonymousAffirmationsEnabled,
     anonymousAffirmationsChannelId: config.settings.anonymousAffirmationsChannelId,
     anonymousAffirmationsCooldownMs: config.settings.anonymousAffirmationsCooldownMs,
+    verificationCaptchaEnabled: config.settings.verificationCaptchaEnabled,
     logChannelId: config.settings.logChannelId,
     automodLogChannelId: config.settings.automodLogChannelId,
     mutedRoleId: config.settings.mutedRoleId,
@@ -10102,9 +10249,13 @@ client.on("interactionCreate", async interaction => {
           });
         }
         verificationButtonCooldowns.set(interaction.user.id, Date.now());
+        if (isVerificationCaptchaEnabled()) {
+          const code = createVerificationCaptchaChallenge();
+          setVerificationCaptchaChallenge(interaction.user.id, code);
+          return interaction.showModal(buildVerificationCaptchaModal(code));
+        }
 
         await interaction.deferReply({ ephemeral: true });
-
         const member = interaction.member || await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
         if (!member) {
           return interaction.editReply({
@@ -10118,67 +10269,8 @@ client.on("interactionCreate", async interaction => {
           });
         }
 
-        const verifiedRoleId = getVerificationRoleId();
-        const unverifiedRoleId = getUnverifiedRoleId();
-        if (!verifiedRoleId) {
-          return interaction.editReply({
-            embeds: [
-              makeEmbed({
-                title: "Try again",
-                description: "Ask staff to set the verified role first.",
-                color: COLORS.red
-              })
-            ]
-          });
-        }
-
-        const rolesToAdd = member.roles.cache.has(verifiedRoleId) ? [] : [verifiedRoleId];
-        const rolesToRemove = unverifiedRoleId && member.roles.cache.has(unverifiedRoleId) ? [unverifiedRoleId] : [];
-
-        if (!rolesToAdd.length && !rolesToRemove.length) {
-          return interaction.editReply({
-            embeds: [
-              makeEmbed({
-                title: "You’re already verified",
-                description: "You already have access. Thanks for reading the rules.",
-                color: COLORS.mint
-              })
-            ]
-          });
-        }
-
-        if (!member.manageable) {
-          return interaction.editReply({
-            embeds: [
-              makeEmbed({
-                title: "Try again",
-                description: "I cannot manage your roles right now.",
-                color: COLORS.red
-              })
-            ]
-          });
-        }
-
-        if (rolesToRemove.length) {
-          await member.roles.remove(rolesToRemove, "Rules check verification").catch(() => {});
-        }
-
-        if (rolesToAdd.length) {
-          await member.roles.add(rolesToAdd, "Rules check verification").catch(() => {});
-        }
-
-        const bonusMatched = isTikTokVerificationEnabled() && matchesTikTokVerification(member);
-        return interaction.editReply({
-          embeds: [
-            makeEmbed({
-              title: "Verified",
-              description: bonusMatched
-                ? `You’re verified, and your nickname also matches the TikTok bonus setting for @${getTikTokHandle()}.`
-                : "You’re verified. Welcome in.",
-              color: COLORS.mint
-            })
-          ]
-        });
+        const result = await completeRulesVerification(member);
+        return interaction.editReply({ embeds: [result.embed] });
       }
 
       if (interaction.customId === "verify:tiktok-check") {
@@ -11417,6 +11509,42 @@ client.on("interactionCreate", async interaction => {
         return interaction.editReply({
           content: `Your affirmation was posted anonymously to <#${result.channelId}>.`
         });
+      }
+
+      if (interaction.customId === "verify:captcha") {
+        if (!ENABLE_CORE_BOT) {
+          return interaction.reply({ content: "Verification is disabled on this deployment.", ephemeral: true });
+        }
+
+        const challenge = getVerificationCaptchaChallenge(interaction.user.id);
+        if (!challenge) {
+          return interaction.reply({ content: "That CAPTCHA expired. Click the rules button again to get a fresh one.", ephemeral: true });
+        }
+
+        const submitted = normalizeVerificationCaptchaInput(interaction.fields.getTextInputValue("captchaAnswer"));
+        if (submitted !== challenge.code) {
+          clearVerificationCaptchaChallenge(interaction.user.id);
+          return interaction.reply({ content: "That CAPTCHA answer was wrong. Click the rules button again to try a new one.", ephemeral: true });
+        }
+
+        clearVerificationCaptchaChallenge(interaction.user.id);
+        await interaction.deferReply({ ephemeral: true });
+
+        const member = interaction.member || await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+        if (!member) {
+          return interaction.editReply({
+            embeds: [
+              makeEmbed({
+                title: "Try again",
+                description: "I could not find your server membership.",
+                color: COLORS.red
+              })
+            ]
+          });
+        }
+
+        const result = await completeRulesVerification(member);
+        return interaction.editReply({ embeds: [result.embed] });
       }
 
       if (interaction.customId === "verify:tiktok-name") {
@@ -13447,6 +13575,10 @@ client.on("interactionCreate", async interaction => {
         config.verifyMessageId = null;
       }
 
+      if (subcommand === "captcha") {
+        config.settings.verificationCaptchaEnabled = interaction.options.getBoolean("enabled");
+      }
+
       if (subcommand === "welcomechannel") {
         const nextWelcomeChannelId = interaction.options.getChannel("channel").id;
         config.settings.welcomeChannelId = nextWelcomeChannelId;
@@ -13511,6 +13643,10 @@ client.on("interactionCreate", async interaction => {
         if (target === "verifychannel") {
           config.settings.verifyChannelId = null;
           config.verifyMessageId = null;
+        }
+
+        if (target === "captcha") {
+          config.settings.verificationCaptchaEnabled = false;
         }
 
         if (target === "welcomechannel") {
