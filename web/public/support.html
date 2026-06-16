@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mochi Support</title>
+    <link rel="stylesheet" href="/styles.css">
+    <style>
+      .support-shell .topbar-copy { max-width: 56rem; }
+      .support-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); }
+      .support-ticket-list { display: grid; gap: 10px; }
+      .support-message-list { display: grid; gap: 10px; max-height: 420px; overflow: auto; }
+      .support-message { padding: 12px 14px; border-radius: 14px; background: rgba(255,255,255,0.8); border: 1px solid rgba(120,120,160,0.18); }
+      .support-message.staff { background: rgba(82, 119, 230, 0.08); }
+      .support-message.user { background: rgba(63, 167, 143, 0.08); }
+      .support-meta { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--muted); font-size: 0.9rem; }
+      .support-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+      .support-login-copy { margin-top: 10px; color: var(--muted); }
+      .support-card-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+      @media (max-width: 980px) {
+        .support-grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <section class="login-screen" id="loginScreen">
+      <div class="login-card">
+        <div class="brand login-brand">
+          <div class="brand-mark" aria-hidden="true">M</div>
+          <div>
+            <h1>Mochi Support</h1>
+            <p>Tickets and anonymous mod chat</p>
+          </div>
+        </div>
+        <div class="login-copy">
+          <p class="eyebrow">Support portal</p>
+          <h2>Sign in to continue</h2>
+          <p class="support-login-copy">Use Discord to open tickets, send anonymous reports, and follow up with moderators.</p>
+        </div>
+        <a class="discord-login" href="/support/login">Login with Discord</a>
+        <div class="login-divider"><span>Signed in status</span></div>
+        <p class="auth-copy" id="loginStatus">Checking session</p>
+      </div>
+    </section>
+
+    <div class="app-shell hidden support-shell" id="appShell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">M</div>
+          <div>
+            <h1>Mochi Support</h1>
+            <p id="clientStatus">Connecting</p>
+          </div>
+        </div>
+
+        <p class="sidebar-note">Open tickets, anonymous chats, and moderator replies live here.</p>
+
+        <nav class="tabs" aria-label="Support sections">
+          <button class="tab is-active" data-view="tickets" type="button">Tickets</button>
+          <button class="tab" data-view="anonymous" type="button">Anonymous Chat</button>
+        </nav>
+
+        <div class="auth-panel" id="authPanel">
+          <p class="auth-copy" id="signedInUser">Not signed in</p>
+          <a class="logout-link hidden" id="logoutLink" href="/support/logout">Sign out</a>
+        </div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Support portal</p>
+            <h2 id="viewTitle">Tickets</h2>
+            <p class="topbar-copy">Submit reports, follow staff replies, and keep anonymous conversations in one place.</p>
+          </div>
+          <div class="topbar-actions">
+            <span class="pill" id="apiState">Locked</span>
+            <button id="refreshButton" class="icon-button" type="button" title="Refresh">Refresh</button>
+          </div>
+        </header>
+
+        <section id="alert" class="alert hidden" role="status"></section>
+
+        <section class="view is-active" id="ticketsView">
+          <div class="support-grid">
+            <section class="panel">
+              <div class="panel-header">
+                <h3>New Ticket</h3>
+              </div>
+              <div class="form-grid">
+                <label>Category
+                  <select id="ticketCategory">
+                    <option value="ticket">General support</option>
+                    <option value="report">Report</option>
+                    <option value="anonymous-chat">Anonymous chat</option>
+                  </select>
+                </label>
+                <label>Subject<input id="ticketSubject" placeholder="Short summary"></label>
+                <label>Message<textarea id="ticketMessage" rows="8" placeholder="Tell staff what’s going on"></textarea></label>
+                <label class="checkbox-row"><input id="ticketAnonymous" type="checkbox"> Submit anonymously to staff</label>
+              </div>
+              <div class="button-row">
+                <button class="save-button" id="createTicketButton" type="button">Create Ticket</button>
+                <button class="ghost-button" id="anonymousQuickStart" type="button">Quick anonymous chat</button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Your Tickets</h3>
+              </div>
+              <div id="ticketList" class="support-ticket-list"></div>
+            </section>
+          </div>
+
+          <section class="panel" style="margin-top: 16px;">
+            <div class="panel-header">
+              <div class="support-card-title">
+                <h3 id="ticketDetailTitle">Select a ticket</h3>
+                <span class="pill" id="ticketStatusPill">Idle</span>
+              </div>
+              <div class="support-actions">
+                <button class="ghost-button" id="closeTicketButton" type="button">Close</button>
+                <button class="ghost-button" id="reopenTicketButton" type="button">Reopen</button>
+              </div>
+            </div>
+            <p class="panel-note" id="ticketDetailMeta">Pick a ticket to read messages and reply.</p>
+            <div id="ticketMessageList" class="support-message-list"></div>
+            <div class="form-grid" style="margin-top: 16px;">
+              <label>Reply<textarea id="replyMessage" rows="5" placeholder="Write a message to the ticket"></textarea></label>
+            </div>
+            <div class="button-row">
+              <button class="save-button" id="sendReplyButton" type="button">Send Reply</button>
+            </div>
+          </section>
+        </section>
+
+        <section class="view hidden" id="anonymousView">
+          <section class="panel">
+            <div class="panel-header">
+              <h3>Anonymous Chat</h3>
+            </div>
+            <p class="panel-note">Use this when you want to talk to mods without attaching your name in the staff inbox.</p>
+            <div id="anonymousChatInfo" class="summary-grid"></div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="/support.js" defer></script>
+  </body>
+</html>

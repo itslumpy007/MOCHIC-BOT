@@ -3655,6 +3655,10 @@ async function loadAll() {
     }
 
     if (state.me.authenticated) {
+      if (state.me.accessLevel === "member") {
+        window.location.replace("/support");
+        return;
+      }
       setLoginVisible(false);
       setLoginBusy(true);
       updateApiState("Loading", "loading");
