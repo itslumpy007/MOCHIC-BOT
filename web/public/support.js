@@ -59,7 +59,7 @@ function renderSupportCopy() {
   const role = getSupportRole();
   const isStaff = role === "staff";
   const accessLabel = state.me?.accessLevel || "member";
-  const heroTitle = isStaff ? "Staff inbox" : "A softer place to ask for help";
+  const heroTitle = isStaff ? "Pastel staff desk" : "A softer place to ask for help";
   const heroBody = isStaff
     ? "Track open cases, answer anonymous reports, and keep the queue moving without losing context."
     : "Open a ticket, start an anonymous chat, and keep your support thread feeling calm and easy.";
@@ -68,22 +68,22 @@ function renderSupportCopy() {
   const reportCount = state.tickets.filter(ticket => ticket.category === "report").length;
   const totalCount = state.tickets.length;
 
-  $("#clientStatus").textContent = isStaff ? "Staff inbox" : "Member helpdesk";
-  $("#viewTitle").textContent = isStaff ? "Staff Inbox" : "Tickets";
-  $("#newTicketTitle").textContent = isStaff ? "Staff Quick Note" : "New Ticket";
+  $("#clientStatus").textContent = isStaff ? "Pastel desk" : "Member helpdesk";
+  $("#viewTitle").textContent = isStaff ? "Staff Desk" : "Tickets";
+  $("#newTicketTitle").textContent = isStaff ? "Quick note" : "New Ticket";
   $("#ticketListTitle").textContent = isStaff ? "Inbox" : "Your Tickets";
-  $("#anonymousTitle").textContent = isStaff ? "Staff tools" : "Anonymous Chat";
+  $("#anonymousTitle").textContent = isStaff ? "Soft tools" : "Anonymous Chat";
   $("#ticketDetailMeta").textContent = isStaff
     ? "Pick a case to review the conversation, reply, and export a transcript."
     : "Pick a ticket to read messages and reply.";
   $("#sidebarNote").textContent = isStaff
-    ? "This workspace is tuned for moderation triage, fast replies, and private transcript review."
+    ? "A pastel desk for quick triage, kind replies, and private transcript review."
     : "A friendly place to ask for help, send anonymous reports, and keep conversations tidy.";
   $("#topbarCopy").textContent = isStaff
     ? "Staff can triage reports, answer anonymous chats, and keep the inbox moving without losing context."
     : "Tell us what you need, open an anonymous chat if you'd like, and keep everything in one cozy place.";
   $("#supportAccent").textContent = isStaff
-    ? "Staff queue"
+    ? "Cozy queue"
     : "Member support";
   $("#signedInUser").textContent = `${state.me?.user?.tag || state.me?.user?.username || "Signed in"} (${accessLabel})`;
   $("#supportRoleTag").textContent = isStaff ? "Staff" : "Member";

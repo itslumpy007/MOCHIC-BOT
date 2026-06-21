@@ -251,6 +251,183 @@
       body.support-is-staff .topbar-actions .pill {
         color: #eef3ff;
       }
+      body.support-is-staff {
+        --bg: #fff4fb;
+        --bg-alt: #f2f7ff;
+        --surface: rgba(255, 255, 255, 0.9);
+        --surface-strong: rgba(255, 255, 255, 0.98);
+        --surface-soft: #fff0f7;
+        --surface-warm: #f7f0ff;
+        --line: rgba(229, 210, 233, 0.92);
+        --line-strong: rgba(123, 110, 166, 0.18);
+        --text: #3a3051;
+        --muted: #6d6281;
+        --muted-soft: #998faf;
+        --accent: #ff73ad;
+        --accent-dark: #e95292;
+        --accent-soft: #ffe4f1;
+        --mint: #65c8b0;
+        --blue: #7f90ff;
+        --yellow: #ddb15f;
+        --red: #de7185;
+      }
+      body.support-is-staff {
+        background:
+          radial-gradient(circle at 12% 16%, rgba(255, 157, 206, 0.24), transparent 24%),
+          radial-gradient(circle at 85% 14%, rgba(124, 144, 255, 0.16), transparent 24%),
+          radial-gradient(circle at 82% 82%, rgba(101, 200, 176, 0.16), transparent 22%),
+          linear-gradient(145deg, #fff5fb 0%, #f8f3ff 38%, #f1f7ff 100%);
+      }
+      body.support-is-staff::before {
+        background: radial-gradient(circle, rgba(255, 115, 173, 0.14), transparent 68%);
+      }
+      body.support-is-staff::after {
+        background: radial-gradient(circle, rgba(101, 200, 176, 0.16), transparent 68%);
+      }
+      body.support-is-staff .sidebar,
+      body.support-is-staff .topbar,
+      body.support-is-staff .panel,
+      body.support-is-staff .support-hero,
+      body.support-is-staff .event,
+      body.support-is-staff .empty-state,
+      body.support-is-staff .support-message {
+        box-shadow: 0 18px 40px rgba(103, 92, 141, 0.09);
+      }
+      body.support-is-staff .sidebar {
+        background:
+          radial-gradient(circle at 18% 12%, rgba(255, 210, 231, 0.32), transparent 28%),
+          radial-gradient(circle at 82% 82%, rgba(124, 144, 255, 0.18), transparent 26%),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(248, 242, 255, 0.94));
+        color: var(--text);
+        border-right: 1px solid rgba(229, 210, 233, 0.96);
+      }
+      body.support-is-staff .sidebar-note,
+      body.support-is-staff .tab,
+      body.support-is-staff .auth-copy {
+        color: var(--muted);
+      }
+      body.support-is-staff .tab {
+        background: rgba(255, 255, 255, 0.74);
+        border: 1px solid rgba(229, 210, 233, 0.92);
+      }
+      body.support-is-staff .tab:hover,
+      body.support-is-staff .tab.is-active {
+        color: #d84f8a;
+        border-color: rgba(255, 115, 173, 0.26);
+        background: rgba(255, 240, 247, 0.98);
+      }
+      body.support-is-staff .auth-panel {
+        background: rgba(255, 255, 255, 0.82);
+        border-color: rgba(229, 210, 233, 0.92);
+      }
+      body.support-is-staff .brand-mark {
+        background: linear-gradient(135deg, #ff8fc0, #8f97ff);
+        box-shadow: 0 16px 34px rgba(164, 108, 188, 0.24);
+      }
+      body.support-is-staff .topbar {
+        background: rgba(255, 255, 255, 0.88);
+        border-color: rgba(229, 210, 233, 0.92);
+      }
+      body.support-is-staff .panel {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(253, 248, 255, 0.96));
+        border-color: rgba(229, 210, 233, 0.88);
+      }
+      body.support-is-staff .panel-header,
+      body.support-is-staff .empty-state,
+      body.support-is-staff .event,
+      body.support-is-staff .support-message {
+        background: rgba(255, 255, 255, 0.86);
+        border-color: rgba(229, 210, 233, 0.8);
+      }
+      body.support-is-staff .support-hero {
+        background: linear-gradient(135deg, rgba(255, 247, 252, 0.96), rgba(243, 247, 255, 0.96));
+        border-color: rgba(229, 210, 233, 0.88);
+      }
+      body.support-is-staff .support-staff-dashboard {
+        align-items: stretch;
+      }
+      body.support-is-staff .support-staff-metric {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 244, 250, 0.96));
+        border: 1px solid rgba(229, 210, 233, 0.88);
+      }
+      body.support-is-staff .support-staff-metric strong {
+        color: #d9498e;
+      }
+      body.support-is-staff .support-staff-metric span {
+        color: #8c749f;
+      }
+      body.support-is-staff .support-staff-metric small {
+        color: #7d7091;
+      }
+      body.support-is-staff .support-staff-lede strong,
+      body.support-is-staff .topbar h2,
+      body.support-is-staff .panel h3,
+      body.support-is-staff .brand h1,
+      body.support-is-staff .empty-state strong,
+      body.support-is-staff .event strong,
+      body.support-is-staff .form-grid label,
+      body.support-is-staff .support-card-title {
+        color: #463855;
+      }
+      body.support-is-staff .support-hero p,
+      body.support-is-staff .panel-note,
+      body.support-is-staff .topbar-copy,
+      body.support-is-staff .support-meta,
+      body.support-is-staff .empty-state,
+      body.support-is-staff .event p {
+        color: var(--muted);
+      }
+      body.support-is-staff .pill {
+        background: rgba(255, 255, 255, 0.9);
+        color: #b14c7f;
+        border: 1px solid rgba(229, 210, 233, 0.9);
+      }
+      body.support-is-staff .pill.ok {
+        background: rgba(229, 251, 243, 0.96);
+        color: #2d8b73;
+      }
+      body.support-is-staff .pill.error {
+        background: rgba(255, 229, 236, 0.96);
+        color: #d14d75;
+      }
+      body.support-is-staff .pill.loading {
+        background: rgba(234, 237, 255, 0.96);
+        color: #5465d1;
+      }
+      body.support-is-staff .badge {
+        background: #fff6fb;
+        color: #7f6a91;
+        border: 1px solid rgba(229, 210, 233, 0.92);
+      }
+      body.support-is-staff .icon-button,
+      body.support-is-staff .ghost-button {
+        background: rgba(255, 255, 255, 0.9);
+        color: #4b3e61;
+        border: 1px solid rgba(229, 210, 233, 0.92);
+      }
+      body.support-is-staff .save-button {
+        background: linear-gradient(135deg, #ff80b7, #8b9cff);
+        box-shadow: 0 16px 28px rgba(255, 128, 183, 0.2);
+      }
+      body.support-is-staff .ghost-button:hover,
+      body.support-is-staff .icon-button:hover {
+        background: #fff9fd;
+      }
+      body.support-is-staff .save-button:hover {
+        background: linear-gradient(135deg, #ff6dae, #7488ff);
+      }
+      body.support-is-staff .support-grid {
+        grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.35fr);
+      }
+      body.support-is-staff .support-grid > .panel:first-child {
+        order: 2;
+      }
+      body.support-is-staff .support-grid > .panel:nth-child(2) {
+        order: 1;
+      }
+      body.support-is-staff .support-card-title .pill {
+        color: #d14f85;
+      }
       body.support-is-staff .support-hero {
         padding: 16px;
       }
