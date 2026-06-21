@@ -8102,13 +8102,11 @@ function redirectWeb(res, location) {
 }
 
 function getWebOAuthRedirectUri(req, purpose = "staff") {
-  const override = purpose === "support"
-    ? WEB_SUPPORT_OAUTH_REDIRECT_URI || WEB_OAUTH_REDIRECT_URI
-    : WEB_STAFF_OAUTH_REDIRECT_URI || WEB_OAUTH_REDIRECT_URI;
+  const override = WEB_OAUTH_REDIRECT_URI
+    || (purpose === "support" ? WEB_SUPPORT_OAUTH_REDIRECT_URI : WEB_STAFF_OAUTH_REDIRECT_URI);
   if (override) return override;
 
-  const redirectPath = purpose === "support" ? "/support/callback" : "/auth/callback";
-  return `${getWebBaseUrl(req)}${redirectPath}`;
+  return `${getWebBaseUrl(req)}/auth/callback`;
 }
 
 function startWebDiscordLogin(req, res, purpose = "staff") {
