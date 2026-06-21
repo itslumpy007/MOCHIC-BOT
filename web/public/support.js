@@ -63,9 +63,16 @@ function renderSupportCopy() {
   const heroBody = isStaff
     ? "Track open cases, answer anonymous reports, and keep the queue moving without losing context."
     : "Open a ticket, start an anonymous chat, and keep your support thread feeling calm and easy.";
+  const openCount = state.tickets.filter(ticket => ticket.status === "open").length;
+  const anonymousCount = state.tickets.filter(ticket => ticket.anonymous).length;
+  const reportCount = state.tickets.filter(ticket => ticket.category === "report").length;
+  const totalCount = state.tickets.length;
 
   $("#clientStatus").textContent = isStaff ? "Staff inbox" : "Member helpdesk";
   $("#viewTitle").textContent = isStaff ? "Staff Inbox" : "Tickets";
+  $("#newTicketTitle").textContent = isStaff ? "Staff Quick Note" : "New Ticket";
+  $("#ticketListTitle").textContent = isStaff ? "Inbox" : "Your Tickets";
+  $("#anonymousTitle").textContent = isStaff ? "Staff tools" : "Anonymous Chat";
   $("#ticketDetailMeta").textContent = isStaff
     ? "Pick a case to review the conversation, reply, and export a transcript."
     : "Pick a ticket to read messages and reply.";
@@ -82,11 +89,44 @@ function renderSupportCopy() {
   $("#supportRoleTag").textContent = isStaff ? "Staff" : "Member";
   $("#supportRoleTag").className = isStaff ? "pill support-role-pill support-role-pill-staff" : "pill support-role-pill support-role-pill-member";
   $("#supportHero").innerHTML = `
-    <div class="support-hero-copy">
-      <strong>${heroTitle}</strong>
-      <p>${heroBody}</p>
-    </div>
-    <span class="pill ${isStaff ? "support-role-pill support-role-pill-staff" : "support-role-pill support-role-pill-member"}">${isStaff ? "Private queue" : "Friendly help"}</span>
+    ${
+      isStaff
+        ? `
+          <div class="support-staff-dashboard">
+            <div class="support-hero-copy support-staff-lede">
+              <strong>${heroTitle}</strong>
+              <p>${heroBody}</p>
+            </div>
+            <article class="support-staff-metric">
+              <span>Open</span>
+              <strong>${openCount}</strong>
+              <small>Cases awaiting replies</small>
+            </article>
+            <article class="support-staff-metric">
+              <span>Anonymous</span>
+              <strong>${anonymousCount}</strong>
+              <small>Hidden identity threads</small>
+            </article>
+            <article class="support-staff-metric">
+              <span>Reports</span>
+              <strong>${reportCount}</strong>
+              <small>Escalation-ready tickets</small>
+            </article>
+            <article class="support-staff-metric">
+              <span>Total</span>
+              <strong>${totalCount}</strong>
+              <small>Conversation history loaded</small>
+            </article>
+          </div>
+        `
+        : `
+          <div class="support-hero-copy">
+            <strong>${heroTitle}</strong>
+            <p>${heroBody}</p>
+          </div>
+          <span class="pill support-role-pill support-role-pill-member">Friendly help</span>
+        `
+    }
   `;
 }
 
@@ -202,6 +242,7 @@ async function loadSupport() {
     if (state.selectedTicketId) {
       state.selectedTicket = state.tickets.find(ticket => ticket.id === state.selectedTicketId) || null;
     }
+    renderSupportCopy();
     renderTickets();
     renderTicketDetail();
     renderAnonymousInfo();
@@ -315,16 +356,17 @@ function setupAnonymousQuickStart() {
 function renderAnonymousInfo() {
   const me = state.me || {};
   const role = getSupportRole();
+  const isStaff = role === "staff";
   $("#anonymousChatInfo").innerHTML = `
     <article class="event">
-      <strong>${role === "staff" ? "How anonymous cases appear" : "How anonymity works"}</strong>
-      <p>${role === "staff"
+      <strong>${isStaff ? "How anonymous cases appear" : "How anonymity works"}</strong>
+      <p>${isStaff
         ? "Anonymous chats arrive in the staff inbox without exposing the member name unless a moderator has permission to reveal it."
         : "Staff can see the ticket, but the portal can hide your identity from most mod replies if the ticket is marked anonymous."}</p>
     </article>
     <article class="event">
-      <strong>${role === "staff" ? "Staff workflow" : "Your access"}</strong>
-      <p>${role === "staff"
+      <strong>${isStaff ? "Staff workflow" : "Your access"}</strong>
+      <p>${isStaff
         ? "Use the queue to reply fast, keep the tone calm, and export transcripts when a case needs a record."
         : `${escapeHtml(me.accessLevel || "member")} access can open anonymous chats and reports.`}</p>
     </article>

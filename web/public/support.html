@@ -43,6 +43,42 @@
         display: grid;
         gap: 2px;
       }
+      .support-staff-dashboard {
+        width: 100%;
+        display: grid;
+        grid-template-columns: minmax(0, 1.2fr) repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        align-items: stretch;
+      }
+      .support-staff-lede {
+        padding-right: 8px;
+      }
+      .support-staff-metric {
+        display: grid;
+        gap: 4px;
+        align-content: start;
+        min-height: 100%;
+        padding: 12px 14px;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+      .support-staff-metric span {
+        font-size: 12px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: rgba(238, 243, 255, 0.68);
+      }
+      .support-staff-metric strong {
+        font-size: 30px;
+        line-height: 1;
+        color: #eef3ff;
+      }
+      .support-staff-metric small {
+        color: rgba(238, 243, 255, 0.68);
+        font-weight: 600;
+      }
       .support-role-pill {
         min-width: 76px;
         justify-content: center;
@@ -122,6 +158,9 @@
         background: rgba(255, 255, 255, 0.04);
         border-color: rgba(118, 132, 195, 0.14);
       }
+      body.support-is-staff .support-staff-dashboard {
+        color: #eef3ff;
+      }
       body.support-is-staff .panel-note,
       body.support-is-staff .topbar-copy,
       body.support-is-staff .support-meta,
@@ -140,8 +179,38 @@
       body.support-is-staff .empty-state {
         border-color: rgba(118, 132, 195, 0.14);
       }
+      body.support-is-staff .support-hero {
+        padding: 16px;
+      }
+      body.support-is-staff .support-hero-copy {
+        min-height: 100%;
+      }
+      body.support-is-staff .support-staff-dashboard {
+        grid-column: 1 / -1;
+      }
+      body.support-is-staff .support-staff-lede {
+        background: rgba(255, 255, 255, 0.02);
+        border-radius: 18px;
+        padding: 12px 14px;
+      }
+      body.support-is-staff .support-staff-metric {
+        background: rgba(255, 255, 255, 0.06);
+      }
+      @media (max-width: 1200px) {
+        .support-staff-dashboard {
+          grid-template-columns: minmax(0, 1fr) repeat(2, minmax(0, 1fr));
+        }
+      }
       @media (max-width: 980px) {
         .support-grid { grid-template-columns: 1fr; }
+        .support-staff-dashboard {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      @media (max-width: 620px) {
+        .support-staff-dashboard {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
@@ -211,7 +280,7 @@
           <div class="support-grid">
             <section class="panel">
               <div class="panel-header">
-                <h3>New Ticket</h3>
+                <h3 id="newTicketTitle">New Ticket</h3>
               </div>
               <div class="form-grid">
                 <label>Category
@@ -233,7 +302,7 @@
 
             <section class="panel">
               <div class="panel-header">
-                <h3>Your Tickets</h3>
+                <h3 id="ticketListTitle">Your Tickets</h3>
               </div>
               <div id="ticketList" class="support-ticket-list"></div>
             </section>
@@ -265,7 +334,7 @@
         <section class="view hidden" id="anonymousView">
           <section class="panel">
             <div class="panel-header">
-              <h3>Anonymous Chat</h3>
+              <h3 id="anonymousTitle">Anonymous Chat</h3>
             </div>
             <p class="panel-note">Use this when you want to talk to mods without attaching your name in the staff inbox.</p>
             <div id="anonymousChatInfo" class="summary-grid"></div>
