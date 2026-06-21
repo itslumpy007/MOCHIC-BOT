@@ -43,6 +43,53 @@ const state = {
   selectedTicket: null
 };
 
+function getSupportRole() {
+  return ["admin", "mod"].includes(state.me?.accessLevel) ? "staff" : "member";
+}
+
+function applySupportMode() {
+  const isStaff = getSupportRole() === "staff";
+  document.body.classList.toggle("support-is-staff", isStaff);
+  document.body.classList.toggle("support-is-member", !isStaff);
+  $("#appShell")?.classList.toggle("support-staff-shell", isStaff);
+  $("#appShell")?.classList.toggle("support-member-shell", !isStaff);
+}
+
+function renderSupportCopy() {
+  const role = getSupportRole();
+  const isStaff = role === "staff";
+  const accessLabel = state.me?.accessLevel || "member";
+  const heroTitle = isStaff ? "Staff inbox" : "A softer place to ask for help";
+  const heroBody = isStaff
+    ? "Track open cases, answer anonymous reports, and keep the queue moving without losing context."
+    : "Open a ticket, start an anonymous chat, and keep your support thread feeling calm and easy.";
+
+  $("#clientStatus").textContent = isStaff ? "Staff inbox" : "Member helpdesk";
+  $("#viewTitle").textContent = isStaff ? "Staff Inbox" : "Tickets";
+  $("#ticketDetailMeta").textContent = isStaff
+    ? "Pick a case to review the conversation, reply, and export a transcript."
+    : "Pick a ticket to read messages and reply.";
+  $("#sidebarNote").textContent = isStaff
+    ? "This workspace is tuned for moderation triage, fast replies, and private transcript review."
+    : "A friendly place to ask for help, send anonymous reports, and keep conversations tidy.";
+  $("#topbarCopy").textContent = isStaff
+    ? "Staff can triage reports, answer anonymous chats, and keep the inbox moving without losing context."
+    : "Tell us what you need, open an anonymous chat if you'd like, and keep everything in one cozy place.";
+  $("#supportAccent").textContent = isStaff
+    ? "Staff queue"
+    : "Member support";
+  $("#signedInUser").textContent = `${state.me?.user?.tag || state.me?.user?.username || "Signed in"} (${accessLabel})`;
+  $("#supportRoleTag").textContent = isStaff ? "Staff" : "Member";
+  $("#supportRoleTag").className = isStaff ? "pill support-role-pill support-role-pill-staff" : "pill support-role-pill support-role-pill-member";
+  $("#supportHero").innerHTML = `
+    <div class="support-hero-copy">
+      <strong>${heroTitle}</strong>
+      <p>${heroBody}</p>
+    </div>
+    <span class="pill ${isStaff ? "support-role-pill support-role-pill-staff" : "support-role-pill support-role-pill-member"}">${isStaff ? "Private queue" : "Friendly help"}</span>
+  `;
+}
+
 function setAlert(message = "", kind = "info") {
   const el = $("#alert");
   if (!message) {
@@ -66,22 +113,26 @@ function renderAuth() {
     setLoginVisible(true, "Login with Discord to access support.");
     $("#signedInUser").textContent = "Not signed in";
     $("#logoutLink").classList.add("hidden");
+    document.body.classList.remove("support-is-staff", "support-is-member");
     return;
   }
 
   setLoginVisible(false);
-  const user = state.me.user || {};
-  $("#signedInUser").textContent = `${user.tag || user.username || "Signed in"} (${state.me.accessLevel || "member"})`;
   $("#logoutLink").classList.remove("hidden");
+  applySupportMode();
+  renderSupportCopy();
 }
 
 function renderTickets() {
   const list = $("#ticketList");
   if (!state.tickets.length) {
+    const role = getSupportRole();
     list.innerHTML = `
       <article class="empty-state">
-        <strong>No tickets yet</strong>
-        <p>Open a ticket or start an anonymous chat to get help.</p>
+        <strong>${role === "staff" ? "No active cases" : "No tickets yet"}</strong>
+        <p>${role === "staff"
+          ? "When new reports arrive, they show up here with the latest conversation at the top."
+          : "Open a ticket or start an anonymous chat to get help."}</p>
       </article>
     `;
     return;
@@ -111,8 +162,10 @@ function renderTickets() {
 function renderTicketDetail() {
   const ticket = state.selectedTicket;
   if (!ticket) {
-    $("#ticketDetailTitle").textContent = "Select a ticket";
-    $("#ticketDetailMeta").textContent = "Pick a ticket to read messages and reply.";
+    $("#ticketDetailTitle").textContent = getSupportRole() === "staff" ? "Select a case" : "Select a ticket";
+    $("#ticketDetailMeta").textContent = getSupportRole() === "staff"
+      ? "Pick a case to review the conversation, reply, and export a transcript."
+      : "Pick a ticket to read messages and reply.";
     $("#ticketStatusPill").textContent = "Idle";
     $("#ticketMessageList").innerHTML = "";
     return;
@@ -151,6 +204,7 @@ async function loadSupport() {
     }
     renderTickets();
     renderTicketDetail();
+    renderAnonymousInfo();
     $("#apiState").textContent = "Live";
     $("#apiState").className = "pill";
   } catch (error) {
@@ -260,14 +314,19 @@ function setupAnonymousQuickStart() {
 
 function renderAnonymousInfo() {
   const me = state.me || {};
+  const role = getSupportRole();
   $("#anonymousChatInfo").innerHTML = `
     <article class="event">
-      <strong>How anonymity works</strong>
-      <p>Staff can see the ticket, but the portal can hide your identity from most mod replies if the ticket is marked anonymous.</p>
+      <strong>${role === "staff" ? "How anonymous cases appear" : "How anonymity works"}</strong>
+      <p>${role === "staff"
+        ? "Anonymous chats arrive in the staff inbox without exposing the member name unless a moderator has permission to reveal it."
+        : "Staff can see the ticket, but the portal can hide your identity from most mod replies if the ticket is marked anonymous."}</p>
     </article>
     <article class="event">
-      <strong>Your access</strong>
-      <p>${escapeHtml(me.accessLevel || "member")} access can open anonymous chats and reports.</p>
+      <strong>${role === "staff" ? "Staff workflow" : "Your access"}</strong>
+      <p>${role === "staff"
+        ? "Use the queue to reply fast, keep the tone calm, and export transcripts when a case needs a record."
+        : `${escapeHtml(me.accessLevel || "member")} access can open anonymous chats and reports.`}</p>
     </article>
   `;
 }
@@ -282,9 +341,6 @@ async function init() {
   $("#refreshButton").addEventListener("click", () => loadSupport().catch(error => setAlert(error.message, "error")));
 
   await loadSupport();
-  if (state.me?.authenticated) {
-    renderAnonymousInfo();
-  }
 }
 
 init().catch(error => setAlert(error.message, "error"));
