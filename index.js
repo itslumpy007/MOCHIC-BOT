@@ -60,6 +60,7 @@ const ENABLE_CORE_BOT = envFlag(process.env.ENABLE_CORE_BOT, true);
 const WEB_PORT = Number(process.env.PORT || process.env.WEB_PORT || 3000);
 const WEB_ADMIN_TOKEN = process.env.WEB_ADMIN_TOKEN || "";
 const WEB_BASE_URL = (process.env.WEB_BASE_URL || "").replace(/\/$/, "");
+const SUPPORT_PUBLIC_URL = (process.env.SUPPORT_PUBLIC_URL || "").replace(/\/$/, "");
 const WEB_OAUTH_REDIRECT_URI = (process.env.WEB_OAUTH_REDIRECT_URI || "").trim();
 const WEB_STAFF_OAUTH_REDIRECT_URI = (process.env.WEB_STAFF_OAUTH_REDIRECT_URI || "").trim();
 const WEB_SUPPORT_OAUTH_REDIRECT_URI = (process.env.WEB_SUPPORT_OAUTH_REDIRECT_URI || "").trim();
@@ -9586,6 +9587,17 @@ function serveWebStatic(req, res, pathname) {
       const html = data.toString("utf8")
         .replace("<body>", htmlBodyClass)
         .replace("</head>", `${bootstrapScript}</head>`);
+      res.writeHead(200, {
+        "Content-Type": getWebMimeType(filePath),
+        "Cache-Control": "no-store"
+      });
+      res.end(html);
+      return;
+    }
+
+    if (SUPPORT_PUBLIC_URL && filePath === path.join(webPublicDir, "index.html")) {
+      const supportBootstrapScript = `<script>window.__SUPPORT_PUBLIC_URL=${JSON.stringify(SUPPORT_PUBLIC_URL)};</script>`;
+      const html = data.toString("utf8").replace("</head>", `${supportBootstrapScript}</head>`);
       res.writeHead(200, {
         "Content-Type": getWebMimeType(filePath),
         "Cache-Control": "no-store"

@@ -5,6 +5,8 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "start:moderation": "node index.js",
+    "start:support": "node services/support/index.js",
     "check:verification": "node tools/verification-sanity-check.js"
   },
   "dependencies": {

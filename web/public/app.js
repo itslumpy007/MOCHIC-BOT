@@ -83,6 +83,22 @@ const state = {
   refreshIntervalId: null
 };
 
+function getSupportPortalUrl(pathname = "/") {
+  const base = window.__SUPPORT_PUBLIC_URL || "/support";
+  try {
+    return new URL(pathname, base).toString();
+  } catch {
+    return base;
+  }
+}
+
+function syncSupportPortalLinks() {
+  const supportUrl = getSupportPortalUrl("/");
+  document.querySelectorAll('a[href="/support"], a[href="/support/"]').forEach(link => {
+    link.href = supportUrl;
+  });
+}
+
 const titles = {
   overview: "Overview",
   members: "Members",
@@ -1420,6 +1436,7 @@ function updateApiState(label, kind = "") {
 }
 
 function setLoginVisible(visible, message = "") {
+  syncSupportPortalLinks();
   $("#loginScreen").classList.toggle("hidden", !visible);
   $("#appShell").classList.toggle("hidden", visible);
   if (message) $("#loginStatus").textContent = message;
@@ -3848,7 +3865,7 @@ async function loadAll() {
 
     if (state.me.authenticated) {
       if (state.me.accessLevel === "member") {
-        window.location.replace("/support");
+        window.location.replace(getSupportPortalUrl("/"));
         return;
       }
       setLoginVisible(false);

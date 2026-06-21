@@ -7,7 +7,9 @@ const files = {
   app: fs.readFileSync(path.join(root, "web", "public", "app.js"), "utf8"),
   html: fs.readFileSync(path.join(root, "web", "public", "index.html"), "utf8"),
   supportHtml: fs.readFileSync(path.join(root, "web", "public", "support.html"), "utf8"),
-  supportJs: fs.readFileSync(path.join(root, "web", "public", "support.js"), "utf8")
+  supportJs: fs.readFileSync(path.join(root, "web", "public", "support.js"), "utf8"),
+  supportService: fs.readFileSync(path.join(root, "services", "support", "index.js"), "utf8"),
+  packageJson: fs.readFileSync(path.join(root, "package.json"), "utf8")
 };
 
 const checks = [
@@ -18,8 +20,10 @@ const checks = [
   ["index.js exposes support inbox export", files.index.includes("/api/support/inbox") && files.index.includes("action === \"transcript\"") && files.index.includes("formatSupportTranscript")],
   ["index.js keeps raid alerts", files.index.includes("raid-alert") && files.index.includes("Suspicious join burst")],
   ["index.js shortens web sessions", files.index.includes("WEB_SESSION_TTL_MS")],
+  ["support service exists", files.supportService.includes("Support service available on port") && files.supportService.includes("mochi_support_session")],
+  ["package scripts include support service", files.packageJson.includes("\"start:support\"") && files.packageJson.includes("\"start:moderation\"")],
   ["app.js has onboarding repair UI", files.app.includes("repairOnboardingButton") && files.app.includes("repairOnboarding()")],
-  ["app.js redirects members to support", files.app.includes("window.location.replace(\"/support\")")],
+  ["app.js redirects members to support", files.app.includes("getSupportPortalUrl(\"/\")") && files.app.includes("syncSupportPortalLinks")],
   ["app.js splits verification settings", files.app.includes("verificationCoreFields") && files.app.includes("verificationBonusFields")],
   ["app.js has staff inbox", files.app.includes("staffInboxList") && files.app.includes("exportSupportTranscript()") && files.app.includes("/api/support/inbox")],
   ["html has onboarding repair button", files.html.includes("Repair Onboarding") && files.html.includes("Core Verification")],
