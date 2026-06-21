@@ -593,16 +593,144 @@
           grid-template-columns: minmax(0, 1fr) repeat(2, minmax(0, 1fr));
         }
       }
-      @media (max-width: 980px) {
-        .support-grid { grid-template-columns: 1fr; }
-        .support-staff-dashboard {
-          grid-template-columns: 1fr 1fr;
+      @media (max-width: 1100px) {
+        .support-shell .content {
+          padding: 20px;
         }
+        .support-shell .topbar {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+        .support-shell .topbar-actions {
+          width: 100%;
+          justify-content: flex-start;
+        }
+        .support-grid,
         .support-request-layout {
           grid-template-columns: 1fr;
         }
+        .support-staff-dashboard {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .support-staff-lede {
+          grid-column: 1 / -1;
+        }
+        .support-side-card {
+          order: 2;
+        }
+        .support-request-panel {
+          min-height: auto;
+        }
+      }
+      @media (max-width: 980px) {
+        .support-toolbar,
+        .staff-meta-grid {
+          grid-template-columns: 1fr;
+        }
+        .support-message-list {
+          max-height: 360px;
+        }
+        .support-thread {
+          min-height: 300px;
+        }
       }
       @media (max-width: 620px) {
+        .support-shell .content {
+          padding: 14px;
+        }
+        .support-hero {
+          padding: 14px;
+          align-items: flex-start;
+        }
+        .support-staff-dashboard {
+          grid-template-columns: 1fr;
+        }
+        .support-staff-metric strong {
+          font-size: 26px;
+        }
+        .support-message-list {
+          max-height: 320px;
+        }
+        .support-bubble {
+          max-width: 100%;
+        }
+        .support-request-panel,
+        .support-side-card {
+          border-radius: 22px;
+        }
+        .support-thread {
+          padding: 14px;
+          min-height: 250px;
+        }
+        .support-compose textarea {
+          min-height: 180px;
+        }
+        .support-actions {
+          width: 100%;
+        }
+        .support-actions .ghost-button {
+          flex: 1 1 100%;
+        }
+        .support-card-title {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+        .queue-summary {
+          align-self: flex-start;
+        }
+        .support-toolbar input {
+          min-width: 0;
+        }
+        .support-filter-row {
+          width: 100%;
+        }
+        .filter-chip {
+          flex: 1 1 calc(50% - 8px);
+          justify-content: center;
+        }
+        .staff-meta-grid {
+          grid-template-columns: 1fr;
+        }
+        .staff-meta-grid textarea {
+          min-height: 120px;
+        }
+        .support-quick-replies .filter-chip {
+          flex: 1 1 100%;
+        }
+        .support-request-layout {
+          gap: 12px;
+        }
+      }
+      @media (max-width: 520px) {
+        .support-shell .topbar {
+          padding: 12px;
+        }
+        .support-shell .topbar h2 {
+          font-size: 24px;
+        }
+        .support-shell .topbar-actions {
+          width: 100%;
+        }
+        .support-shell .topbar-actions .pill,
+        .support-shell .topbar-actions .icon-button {
+          flex: 1 1 calc(50% - 8px);
+          min-width: 0;
+        }
+        .support-grid {
+          gap: 12px;
+        }
+        .support-card-title,
+        .support-card-title .pill {
+          width: 100%;
+        }
+        .support-toolbar,
+        .staff-meta-actions,
+        .button-row {
+          width: 100%;
+        }
+        .support-toolbar input {
+          width: 100%;
+        }
         .support-staff-dashboard {
           grid-template-columns: 1fr;
         }
@@ -665,9 +793,12 @@
             <span class="pill" id="supportAccent">Member support</span>
             <span class="pill support-role-pill support-role-pill-member" id="supportRoleTag">Member</span>
             <span class="pill" id="apiState">Locked</span>
+            <button id="sidebarToggle" class="icon-button mobile-only" type="button" title="Toggle sidebar">Menu</button>
             <button id="refreshButton" class="icon-button" type="button" title="Refresh">Refresh</button>
           </div>
         </header>
+
+        <div id="sidebarBackdrop" class="sidebar-backdrop hidden" aria-hidden="true"></div>
 
         <section id="alert" class="alert hidden" role="status"></section>
         <section class="support-hero" id="supportHero" aria-label="Support workspace highlight"></section>

@@ -65,6 +65,19 @@ function applySupportMode() {
   $("#appShell")?.classList.toggle("support-member-shell", !isStaff);
 }
 
+function setSidebarOpen(open) {
+  const next = Boolean(open);
+  document.body.classList.toggle("sidebar-open", next);
+  $("#sidebarBackdrop")?.classList.toggle("hidden", !next);
+  $("#sidebarToggle")?.setAttribute("aria-expanded", next ? "true" : "false");
+}
+
+function closeSidebarIfMobile() {
+  if (window.matchMedia("(max-width: 760px)").matches) {
+    setSidebarOpen(false);
+  }
+}
+
 function setActiveView(viewName) {
   state.activeView = viewName;
   document.querySelectorAll(".tab[data-view]").forEach(tab => {
@@ -77,6 +90,7 @@ function setActiveView(viewName) {
   });
   renderActiveViewCopy();
   renderRequestDraft();
+  closeSidebarIfMobile();
 }
 
 function renderActiveViewCopy() {
@@ -264,12 +278,14 @@ function renderAuth() {
     $("#signedInUser").textContent = "Not signed in";
     $("#logoutLink").classList.add("hidden");
     document.body.classList.remove("support-is-staff", "support-is-member");
+    setSidebarOpen(false);
     return;
   }
 
   setLoginVisible(false);
   $("#logoutLink").classList.remove("hidden");
   applySupportMode();
+  setSidebarOpen(false);
   renderSupportCopy();
   setActiveView(state.activeView);
 }
@@ -579,6 +595,12 @@ async function init() {
   document.querySelectorAll(".tab[data-view]").forEach(tab => {
     tab.addEventListener("click", () => setActiveView(tab.dataset.view));
   });
+  $("#sidebarToggle")?.addEventListener("click", () => {
+    setSidebarOpen(!document.body.classList.contains("sidebar-open"));
+  });
+  $("#sidebarBackdrop")?.addEventListener("click", () => {
+    setSidebarOpen(false);
+  });
   document.querySelectorAll("[data-ticket-filter]").forEach(button => {
     button.addEventListener("click", () => {
       state.staffFilter = button.dataset.ticketFilter || "all";
@@ -605,6 +627,11 @@ async function init() {
       $("#replyMessage").value = button.dataset.replyTemplate || "";
       $("#replyMessage").focus();
     });
+  });
+  window.addEventListener("resize", () => {
+    if (!window.matchMedia("(max-width: 760px)").matches) {
+      setSidebarOpen(false);
+    }
   });
 
   await loadSupport();
