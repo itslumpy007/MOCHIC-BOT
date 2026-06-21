@@ -39,10 +39,8 @@
         </div>
         <div class="portal-links" aria-label="Portal shortcuts">
           <a class="portal-link" href="/">Admin panel</a>
-          <a class="portal-link" href="/support">Support portal</a>
           <a class="portal-link" href="/mochi">Mochi portal</a>
         </div>
-        <p class="auth-copy"><a href="/support">Open the support portal</a> for tickets and anonymous mod chat.</p>
         <p class="auth-copy" id="loginStatus">Checking session</p>
       </div>
     </section>
@@ -666,7 +664,6 @@
         <section id="staffView" class="view">
           <div class="view-tabs" aria-label="Staff tabs">
             <button class="view-tab is-active" type="button" data-subtab-view="staff" data-subtab="access">Access</button>
-            <button class="view-tab" type="button" data-subtab-view="staff" data-subtab="inbox">Inbox</button>
             <button class="view-tab" type="button" data-subtab-view="staff" data-subtab="summary">Summary</button>
           </div>
           <div class="view-stack" data-view-subtab-group="staff" data-subtab="access">
@@ -678,41 +675,6 @@
               <div class="form-grid">
                 <label>Moderator role IDs<textarea id="modRoleIds" rows="5" placeholder="Role IDs or @role mentions"></textarea></label>
                 <label>Admin role IDs<textarea id="adminRoleIds" rows="5" placeholder="Role IDs or @role mentions"></textarea></label>
-              </div>
-            </section>
-          </div>
-          <div class="view-stack hidden" data-view-subtab-group="staff" data-subtab="inbox">
-            <section class="panel">
-              <div class="panel-header">
-                <h3>Staff Inbox</h3>
-                <div class="button-row">
-                  <button class="ghost-button" id="refreshStaffInbox" type="button">Refresh</button>
-                </div>
-              </div>
-              <p class="panel-note">Tickets, reports, and anonymous chats are collected here for the staff team.</p>
-              <div id="staffInboxSummary" class="summary-grid"></div>
-              <div class="split" style="margin-top: 14px;">
-                <section class="panel">
-                  <div class="panel-header">
-                    <h3>Tickets</h3>
-                  </div>
-                  <div id="staffInboxList" class="event-list"></div>
-                </section>
-                <section class="panel">
-                  <div class="panel-header">
-                    <h3 id="staffTicketDetailTitle">Select a ticket</h3>
-                    <span class="pill" id="staffTicketStatusPill">Idle</span>
-                  </div>
-                  <p class="panel-note" id="staffTicketDetailMeta">Pick a ticket to read messages, reply, or export the transcript.</p>
-                  <div id="staffTicketMessageList" class="support-message-list"></div>
-                  <label>Reply<textarea id="staffTicketReply" rows="5" placeholder="Write a reply to the ticket"></textarea></label>
-                  <div class="button-row" style="margin-top: 12px;">
-                    <button class="save-button" id="staffTicketReplyButton" type="button">Send Reply</button>
-                    <button class="ghost-button" id="staffTicketCloseButton" type="button">Close</button>
-                    <button class="ghost-button" id="staffTicketReopenButton" type="button">Reopen</button>
-                    <button class="ghost-button" id="staffTicketExportButton" type="button">Export Transcript</button>
-                  </div>
-                </section>
               </div>
             </section>
           </div>

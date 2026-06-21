@@ -60,10 +60,7 @@ const ENABLE_CORE_BOT = envFlag(process.env.ENABLE_CORE_BOT, true);
 const WEB_PORT = Number(process.env.PORT || process.env.WEB_PORT || 3000);
 const WEB_ADMIN_TOKEN = process.env.WEB_ADMIN_TOKEN || "";
 const WEB_BASE_URL = (process.env.WEB_BASE_URL || "").replace(/\/$/, "");
-const SUPPORT_PUBLIC_URL = (process.env.SUPPORT_PUBLIC_URL || "").replace(/\/$/, "");
 const WEB_OAUTH_REDIRECT_URI = (process.env.WEB_OAUTH_REDIRECT_URI || "").trim();
-const WEB_STAFF_OAUTH_REDIRECT_URI = (process.env.WEB_STAFF_OAUTH_REDIRECT_URI || "").trim();
-const WEB_SUPPORT_OAUTH_REDIRECT_URI = (process.env.WEB_SUPPORT_OAUTH_REDIRECT_URI || "").trim();
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || "";
 const SESSION_SECRET = process.env.SESSION_SECRET || WEB_ADMIN_TOKEN || "";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
@@ -188,11 +185,9 @@ const dataDir = resolveDataDir(
 const mochiLeaderboardPath = path.join(dataDir, "mochi-leaderboard.json");
 const mochiRunsPath = path.join(dataDir, "mochi-runs.json");
 const mochiProfilesPath = path.join(dataDir, "mochi-profiles.json");
-const supportPath = path.join(dataDir, "support.json");
 const configPath = path.join(dataDir, "config.json");
 const messageArchivePath = path.join(dataDir, "message-archive.jsonl");
 let messageArchiveLastPruneAt = 0;
-let supportStoreCache = null;
 
 function createDefaultConfig() {
   return {
@@ -329,13 +324,6 @@ function createDefaultConfig() {
       modRoleIds: [],
       adminRoleIds: []
     }
-  };
-}
-
-function createDefaultSupportStore() {
-  return {
-    nextTicketId: 1,
-    tickets: []
   };
 }
 
@@ -7683,253 +7671,6 @@ function persistMochiProfiles() {
   fs.writeFileSync(mochiProfilesPath, JSON.stringify(payload, null, 2), "utf8");
 }
 
-function loadSupportStore() {
-  if (supportStoreCache) return supportStoreCache;
-
-  const defaults = createDefaultSupportStore();
-  try {
-    if (!fs.existsSync(supportPath)) {
-      supportStoreCache = defaults;
-      return supportStoreCache;
-    }
-
-    const raw = fs.readFileSync(supportPath, "utf8");
-    const parsed = JSON.parse(raw);
-    supportStoreCache = {
-      nextTicketId: Number.isInteger(parsed?.nextTicketId) && parsed.nextTicketId > 0 ? parsed.nextTicketId : defaults.nextTicketId,
-      tickets: Array.isArray(parsed?.tickets) ? parsed.tickets : defaults.tickets
-    };
-  } catch {
-    supportStoreCache = defaults;
-  }
-
-  return supportStoreCache;
-}
-
-function saveSupportStore() {
-  fs.mkdirSync(dataDir, { recursive: true });
-  fs.writeFileSync(supportPath, JSON.stringify(loadSupportStore(), null, 2), "utf8");
-}
-
-function getSupportStore() {
-  return loadSupportStore();
-}
-
-function getSupportNotificationChannelId() {
-  return config.reportSettings?.channelId || getLogChannelId() || null;
-}
-
-function isSupportStaffAccess(auth) {
-  return auth?.accessLevel === "mod" || auth?.accessLevel === "admin";
-}
-
-function normalizeSupportText(value, maxLength = 2000) {
-  return String(value || "").trim().slice(0, maxLength);
-}
-
-function createSupportMessage({ authorType, authorId, authorTag, content, anonymous = false }) {
-  return {
-    id: crypto.randomUUID(),
-    authorType,
-    authorId,
-    authorTag,
-    content: normalizeSupportText(content, 4000),
-    anonymous: Boolean(anonymous),
-    createdAt: new Date().toISOString()
-  };
-}
-
-function createSupportTicket({ creator, category = "ticket", subject, message, anonymous = false, visibleToStaff = true }) {
-  const store = getSupportStore();
-  const ticket = {
-    id: store.nextTicketId++,
-    category: ["ticket", "report", "anonymous-chat"].includes(category) ? category : "ticket",
-    subject: normalizeSupportText(subject, 140) || "Support request",
-    status: "open",
-    anonymous: Boolean(anonymous),
-    visibleToStaff: Boolean(visibleToStaff),
-    createdByUserId: creator.id,
-    createdByTag: creator.tag || creator.username || creator.id,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    lastMessageAt: new Date().toISOString(),
-    messages: []
-  };
-
-  if (message) {
-    ticket.messages.push(createSupportMessage({
-      authorType: "user",
-      authorId: creator.id,
-      authorTag: creator.tag || creator.username || creator.id,
-      content: message,
-      anonymous
-    }));
-  }
-
-  store.tickets.unshift(ticket);
-  saveSupportStore();
-  return ticket;
-}
-
-function getSupportTicket(ticketId) {
-  const store = getSupportStore();
-  const id = Number(ticketId);
-  if (!Number.isInteger(id)) return null;
-  return store.tickets.find(ticket => ticket.id === id) || null;
-}
-
-function updateSupportTicket(ticket) {
-  ticket.updatedAt = new Date().toISOString();
-  saveSupportStore();
-  return ticket;
-}
-
-function appendSupportTicketMessage(ticket, { authorType, authorId, authorTag, content, anonymous = false }) {
-  const message = createSupportMessage({ authorType, authorId, authorTag, content, anonymous });
-  ticket.messages.push(message);
-  ticket.lastMessageAt = message.createdAt;
-  ticket.updatedAt = message.createdAt;
-  saveSupportStore();
-  return message;
-}
-
-function serializeSupportTicket(ticket, auth = null) {
-  if (!ticket) return null;
-  const admin = auth?.accessLevel === "admin";
-  const owner = auth?.user?.id === ticket.createdByUserId;
-  const revealOwner = admin || owner || !ticket.anonymous;
-
-  return {
-    id: ticket.id,
-    category: ticket.category,
-    subject: ticket.subject,
-    status: ticket.status,
-    anonymous: ticket.anonymous,
-    visibleToStaff: ticket.visibleToStaff,
-    createdBy: revealOwner ? {
-      id: ticket.createdByUserId,
-      tag: ticket.createdByTag
-    } : {
-      id: null,
-      tag: "Anonymous member"
-    },
-    createdAt: ticket.createdAt,
-    updatedAt: ticket.updatedAt,
-    lastMessageAt: ticket.lastMessageAt,
-    messageCount: Array.isArray(ticket.messages) ? ticket.messages.length : 0,
-    messages: Array.isArray(ticket.messages)
-      ? ticket.messages.map(message => ({
-          id: message.id,
-          authorType: message.authorType,
-          authorId: admin || owner || !message.anonymous ? message.authorId : null,
-          authorTag: admin || owner || !message.anonymous ? message.authorTag : "Anonymous",
-          anonymous: message.anonymous,
-          content: message.content,
-          createdAt: message.createdAt
-        }))
-      : []
-  };
-}
-
-function canViewSupportTicket(auth, ticket) {
-  if (!auth || !ticket) return false;
-  if (auth.accessLevel === "admin") return true;
-  if (auth.user?.id === ticket.createdByUserId) return true;
-  return isSupportStaffAccess(auth) && ticket.visibleToStaff !== false;
-}
-
-function canReplyToSupportTicket(auth, ticket) {
-  if (!auth || !ticket) return false;
-  if (auth.user?.id === ticket.createdByUserId) return true;
-  return isSupportStaffAccess(auth) && ticket.visibleToStaff !== false;
-}
-
-function canExportSupportTranscript(auth, ticket) {
-  return canViewSupportTicket(auth, ticket);
-}
-
-function formatSupportTranscript(ticket, auth = null) {
-  if (!ticket) return "";
-
-  const data = serializeSupportTicket(ticket, auth);
-  const lines = [];
-  const append = value => lines.push(String(value));
-  const admin = auth?.accessLevel === "admin";
-
-  append(`# Support Transcript #${data.id}`);
-  append(`Category: ${data.category}`);
-  append(`Subject: ${data.subject}`);
-  append(`Status: ${data.status}`);
-  append(`Anonymous: ${data.anonymous ? "yes" : "no"}`);
-  append(`Visible to staff: ${data.visibleToStaff ? "yes" : "no"}`);
-  append(`Created by: ${data.createdBy?.tag || "Anonymous member"}`);
-  append(`Created at: ${data.createdAt}`);
-  append(`Updated at: ${data.updatedAt}`);
-  append(`Last message: ${data.lastMessageAt}`);
-  append("");
-  append("Messages:");
-
-  for (const message of data.messages || []) {
-    const label = message.authorType === "staff" ? "Staff" : "Member";
-    const identity = admin || !message.anonymous
-      ? ` (${message.authorTag || message.authorId || "Unknown"})`
-      : "";
-    append(`- [${message.createdAt}] ${label}${identity}`);
-    for (const paragraph of String(message.content || "").split(/\r?\n/)) {
-      append(`  ${paragraph}`);
-    }
-    append("");
-  }
-
-  return lines.join("\n").trimEnd() + "\n";
-}
-
-function listSupportTickets(auth = null) {
-  const store = getSupportStore();
-  if (isSupportStaffAccess(auth)) {
-    return store.tickets.map(ticket => serializeSupportTicket(ticket, auth));
-  }
-
-  const userId = auth?.user?.id;
-  return store.tickets.filter(ticket => ticket.createdByUserId === userId).map(ticket => serializeSupportTicket(ticket, auth));
-}
-
-async function notifySupportChannel(embed) {
-  const channelId = getSupportNotificationChannelId();
-  if (!channelId) return;
-  try {
-    const channel = await client.channels.fetch(channelId).catch(() => null);
-    if (channel?.send) {
-      await channel.send({ embeds: [embed] });
-    }
-  } catch (error) {
-    console.error("Support notification error:", error.message);
-  }
-}
-
-function buildSupportInboxPayload(auth = null) {
-  const tickets = listSupportTickets(auth);
-  const openCount = tickets.filter(ticket => ticket.status === "open").length;
-  const anonymousCount = tickets.filter(ticket => ticket.anonymous).length;
-  const recentTicket = tickets[0] || null;
-
-  return {
-    tickets,
-    summary: {
-      total: tickets.length,
-      open: openCount,
-      closed: tickets.length - openCount,
-      anonymous: anonymousCount,
-      recentTicket: recentTicket ? {
-        id: recentTicket.id,
-        subject: recentTicket.subject,
-        status: recentTicket.status,
-        updatedAt: recentTicket.updatedAt
-      } : null
-    }
-  };
-}
-
 function normalizeMochiCosmeticState(raw) {
   const ownedIds = new Set(["avatar-v3"]);
   const ownedSource = Array.isArray(raw?.ownedIds) ? raw.ownedIds : [];
@@ -8081,47 +7822,28 @@ async function getWebDiscordAccessLevel(userId) {
   return null;
 }
 
-async function getWebSupportAccessLevel(userId) {
-  const linkedAccount = getWebAccountByDiscordId(userId);
-  if (linkedAccount?.enabled) {
-    return linkedAccount.accessLevel;
-  }
-
-  const guild = client.guilds.cache.get(GUILD_ID) || await client.guilds.fetch(GUILD_ID).catch(() => null);
-  if (!guild) return null;
-
-  const member = await guild.members.fetch(userId).catch(() => null);
-  if (!member) return null;
-  if (hasStaffAccess(member, "admin")) return "admin";
-  if (hasStaffAccess(member, "mod")) return "mod";
-  return "member";
-}
-
 function redirectWeb(res, location) {
   res.writeHead(302, { Location: location });
   res.end();
 }
 
-function getWebOAuthRedirectUri(req, purpose = "staff") {
-  const override = WEB_OAUTH_REDIRECT_URI
-    || (purpose === "support" ? WEB_SUPPORT_OAUTH_REDIRECT_URI : WEB_STAFF_OAUTH_REDIRECT_URI);
+function getWebOAuthRedirectUri(req) {
+  const override = WEB_OAUTH_REDIRECT_URI;
   if (override) return override;
 
   return `${getWebBaseUrl(req)}/auth/callback`;
 }
 
-function startWebDiscordLogin(req, res, purpose = "staff") {
+function startWebDiscordLogin(req, res) {
   if (!DISCORD_CLIENT_SECRET || !SESSION_SECRET) {
     return sendWebText(res, 503, "Discord OAuth is not configured. Set DISCORD_CLIENT_SECRET and SESSION_SECRET.");
   }
-
   const state = crypto.randomBytes(24).toString("hex");
   webOauthStates.set(state, {
-    purpose,
     expiresAt: Date.now() + 10 * 60 * 1000
   });
 
-  const redirectUri = getWebOAuthRedirectUri(req, purpose);
+  const redirectUri = getWebOAuthRedirectUri(req);
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
     redirect_uri: redirectUri,
@@ -8134,24 +7856,14 @@ function startWebDiscordLogin(req, res, purpose = "staff") {
 }
 
 function handleWebLogin(req, res) {
-  const requestUrl = new URL(req.url, getWebBaseUrl(req));
-  const purpose = requestUrl.searchParams.get("purpose") === "support" ? "support" : "staff";
-  return startWebDiscordLogin(req, res, purpose);
-}
-
-function handleWebSupportLogin(req, res) {
-  return startWebDiscordLogin(req, res, "support");
+  return startWebDiscordLogin(req, res);
 }
 
 async function handleWebCallback(req, res, requestUrl) {
-  return handleWebDiscordCallback(req, res, requestUrl, "staff");
+  return handleWebDiscordCallback(req, res, requestUrl);
 }
 
-async function handleWebSupportCallback(req, res, requestUrl) {
-  return handleWebDiscordCallback(req, res, requestUrl, "support");
-}
-
-async function handleWebDiscordCallback(req, res, requestUrl, fallbackPurpose = "staff") {
+async function handleWebDiscordCallback(req, res, requestUrl) {
   if (!DISCORD_CLIENT_SECRET || !SESSION_SECRET) {
     return sendWebText(res, 503, "Discord OAuth is not configured.");
   }
@@ -8165,10 +7877,9 @@ async function handleWebDiscordCallback(req, res, requestUrl, fallbackPurpose = 
     return sendWebText(res, 400, "OAuth login expired or was cancelled. Try logging in again.");
   }
 
-  const purpose = savedState.purpose || fallbackPurpose;
   webOauthStates.delete(state);
 
-  const redirectUri = getWebOAuthRedirectUri(req, purpose);
+  const redirectUri = getWebOAuthRedirectUri(req);
   const tokenPayload = await fetchDiscordJson("https://discord.com/api/oauth2/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -8185,13 +7896,9 @@ async function handleWebDiscordCallback(req, res, requestUrl, fallbackPurpose = 
     headers: { Authorization: `Bearer ${tokenPayload.access_token}` }
   });
 
-  const accessLevel = purpose === "support"
-    ? await getWebSupportAccessLevel(user.id)
-    : await getWebDiscordAccessLevel(user.id);
+  const accessLevel = await getWebDiscordAccessLevel(user.id);
   if (!accessLevel) {
-    return sendWebText(res, 403, purpose === "support"
-      ? "You are not allowed to access the support portal."
-      : "You are not allowed to access this moderation panel.");
+    return sendWebText(res, 403, "You are not allowed to access this moderation panel.");
   }
 
   const linkedAccount = getWebAccountByDiscordId(user.id);
@@ -8216,7 +7923,7 @@ async function handleWebDiscordCallback(req, res, requestUrl, fallbackPurpose = 
   }, accessLevel, "discord");
 
   setWebCookie(req, res, "mochi_session", createSignedWebValue(sessionId), Math.floor(WEB_SESSION_TTL_MS / 1000));
-  redirectWeb(res, purpose === "support" ? "/support" : "/");
+  redirectWeb(res, "/");
 }
 
 function handleWebLogout(req, res) {
@@ -8226,15 +7933,6 @@ function handleWebLogout(req, res) {
   }
   clearWebCookie(req, res, "mochi_session");
   redirectWeb(res, "/");
-}
-
-function handleWebSupportLogout(req, res) {
-  const session = getWebSession(req);
-  if (session?.sessionId) {
-    webSessions.delete(session.sessionId);
-  }
-  clearWebCookie(req, res, "mochi_session");
-  redirectWeb(res, "/support");
 }
 
 async function handleWebLocalLogin(req, res) {
@@ -9562,8 +9260,6 @@ function serveWebStatic(req, res, pathname) {
   let requested = pathname;
   if (pathname === "/") {
     requested = "/index.html";
-  } else if (pathname === "/support" || pathname === "/support/") {
-    requested = "/support.html";
   } else if (pathname === MOCHI_PATH || pathname === `${MOCHI_PATH}/`) {
     requested = getMochiIndexPath();
   }
@@ -9587,17 +9283,6 @@ function serveWebStatic(req, res, pathname) {
       const html = data.toString("utf8")
         .replace("<body>", htmlBodyClass)
         .replace("</head>", `${bootstrapScript}</head>`);
-      res.writeHead(200, {
-        "Content-Type": getWebMimeType(filePath),
-        "Cache-Control": "no-store"
-      });
-      res.end(html);
-      return;
-    }
-
-    if (SUPPORT_PUBLIC_URL && filePath === path.join(webPublicDir, "index.html")) {
-      const supportBootstrapScript = `<script>window.__SUPPORT_PUBLIC_URL=${JSON.stringify(SUPPORT_PUBLIC_URL)};</script>`;
-      const html = data.toString("utf8").replace("</head>", `${supportBootstrapScript}</head>`);
       res.writeHead(200, {
         "Content-Type": getWebMimeType(filePath),
         "Cache-Control": "no-store"
@@ -9754,199 +9439,6 @@ async function handleWebApi(req, res, pathname) {
       recentRun,
       recentRuns
     });
-  }
-
-  if (pathname === "/api/support/me") {
-    return sendWebJson(res, 200, buildWebUserPayload(auth));
-  }
-
-  if (pathname === "/api/support/inbox" && req.method === "GET") {
-    if (!auth || !isSupportStaffAccess(auth)) {
-      return sendWebJson(res, 403, { error: "Staff access is required." });
-    }
-
-    return sendWebJson(res, 200, buildSupportInboxPayload(auth));
-  }
-
-  if (pathname === "/api/support/tickets" && req.method === "GET") {
-    if (!auth) {
-      return sendWebJson(res, 401, { error: "Login required." });
-    }
-
-    return sendWebJson(res, 200, {
-      tickets: listSupportTickets(auth)
-    });
-  }
-
-  if (pathname === "/api/support/tickets" && req.method === "POST") {
-    if (!auth) {
-      return sendWebJson(res, 401, { error: "Login required." });
-    }
-
-    const body = await readWebJsonBody(req);
-    const creator = {
-      id: auth.user?.id || "unknown",
-      tag: auth.user?.tag || auth.user?.username || auth.user?.globalName || auth.user?.id || "Unknown"
-    };
-    const ticket = createSupportTicket({
-      creator,
-      category: body.category,
-      subject: body.subject,
-      message: body.message,
-      anonymous: body.anonymous,
-      visibleToStaff: true
-    });
-
-    await notifySupportChannel(
-      makeEmbed({
-        title: `Support ticket #${ticket.id}`,
-        description: ticket.anonymous
-          ? "A new anonymous ticket was created."
-          : `${creator.tag} opened a new ticket.`,
-        color: COLORS.blue,
-        fields: [
-          { name: "Category", value: ticket.category, inline: true },
-          { name: "Subject", value: ticket.subject, inline: true },
-          { name: "Messages", value: `${ticket.messages.length}`, inline: true }
-        ]
-      })
-    );
-
-    recordAuditLog(creator.tag, "support-ticket-created", {
-      ticketId: ticket.id,
-      category: ticket.category,
-      anonymous: ticket.anonymous
-    });
-
-    return sendWebJson(res, 200, {
-      ok: true,
-      ticket: serializeSupportTicket(ticket, auth)
-    });
-  }
-
-  if (pathname.startsWith("/api/support/tickets/")) {
-    if (!auth) {
-      return sendWebJson(res, 401, { error: "Login required." });
-    }
-
-    const parts = pathname.split("/").filter(Boolean);
-    const ticketId = parts[3];
-    const action = parts[4] || "";
-    const ticket = getSupportTicket(ticketId);
-    if (!ticket) {
-      return sendWebJson(res, 404, { error: "That ticket was not found." });
-    }
-
-    if (!canViewSupportTicket(auth, ticket)) {
-      return sendWebJson(res, 403, { error: "You are not allowed to view that ticket." });
-    }
-
-    if (req.method === "GET" && !action) {
-      return sendWebJson(res, 200, {
-        ok: true,
-        ticket: serializeSupportTicket(ticket, auth)
-      });
-    }
-
-    if (req.method === "GET" && action === "transcript") {
-      if (!canExportSupportTranscript(auth, ticket)) {
-        return sendWebJson(res, 403, { error: "You are not allowed to export that transcript." });
-      }
-
-      const requestUrl = new URL(req.url, getWebBaseUrl(req));
-      const format = String(requestUrl.searchParams.get("format") || "txt").trim().toLowerCase();
-      const transcriptJson = {
-        ok: true,
-        ticket: serializeSupportTicket(ticket, auth)
-      };
-      const transcriptText = formatSupportTranscript(ticket, auth);
-      const downloadName = `support-ticket-${ticket.id}-transcript.${format === "json" ? "json" : "txt"}`;
-
-      if (format === "json") {
-        res.writeHead(200, {
-          "Content-Type": "application/json; charset=utf-8",
-          "Content-Disposition": `attachment; filename="${downloadName}"`,
-          "Cache-Control": "no-store"
-        });
-        res.end(`${JSON.stringify(transcriptJson, null, 2)}\n`);
-        return;
-      }
-
-      res.writeHead(200, {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${downloadName}"`,
-        "Cache-Control": "no-store"
-      });
-      res.end(transcriptText);
-      return;
-    }
-
-    if (req.method === "POST" && action === "reply") {
-      if (!canReplyToSupportTicket(auth, ticket)) {
-        return sendWebJson(res, 403, { error: "You are not allowed to reply to that ticket." });
-      }
-
-      const body = await readWebJsonBody(req);
-      const content = normalizeSupportText(body.content, 4000);
-      if (!content) {
-        return sendWebJson(res, 400, { error: "Write a message before replying." });
-      }
-
-      const message = appendSupportTicketMessage(ticket, {
-        authorType: isSupportStaffAccess(auth) ? "staff" : "user",
-        authorId: auth.user?.id || "unknown",
-        authorTag: auth.user?.tag || auth.user?.username || auth.user?.id || "Unknown",
-        content,
-        anonymous: Boolean(ticket.anonymous && !isSupportStaffAccess(auth))
-      });
-
-      await notifySupportChannel(
-        makeEmbed({
-          title: `Support ticket #${ticket.id} reply`,
-          description: ticket.anonymous && !isSupportStaffAccess(auth)
-            ? "An anonymous member replied."
-            : `${auth.user?.tag || auth.user?.username || auth.user?.id || "A user"} replied.`,
-          color: COLORS.mint,
-          fields: [
-            { name: "Subject", value: ticket.subject, inline: true },
-            { name: "Status", value: ticket.status, inline: true },
-            { name: "Message", value: content.slice(0, 900), inline: false }
-          ]
-        })
-      );
-
-      recordAuditLog(auth.user?.tag || auth.user?.username || "Support", "support-ticket-replied", {
-        ticketId: ticket.id,
-        anonymous: ticket.anonymous,
-        authorType: isSupportStaffAccess(auth) ? "staff" : "user"
-      });
-
-      return sendWebJson(res, 200, {
-        ok: true,
-        message,
-        ticket: serializeSupportTicket(ticket, auth)
-      });
-    }
-
-    if (req.method === "POST" && (action === "close" || action === "reopen")) {
-      if (!canReplyToSupportTicket(auth, ticket)) {
-        return sendWebJson(res, 403, { error: "You are not allowed to update that ticket." });
-      }
-
-      ticket.status = action === "close" ? "closed" : "open";
-      updateSupportTicket(ticket);
-      recordAuditLog(auth.user?.tag || auth.user?.username || "Support", action === "close" ? "support-ticket-closed" : "support-ticket-reopened", {
-        ticketId: ticket.id,
-        anonymous: ticket.anonymous
-      });
-
-      return sendWebJson(res, 200, {
-        ok: true,
-        ticket: serializeSupportTicket(ticket, auth)
-      });
-    }
-
-    return sendWebJson(res, 405, { error: "Method not allowed." });
   }
 
   if (!auth) {
@@ -10518,11 +10010,6 @@ function startWebServer() {
       return;
     }
 
-    if (pathname === "/support/login") {
-      redirectWeb(res, "/auth/login?purpose=support");
-      return;
-    }
-
     if (pathname === "/auth/local/login") {
       handleWebLocalLogin(req, res).catch(error => {
         sendWebJson(res, 400, { error: error.message || "Local login failed." });
@@ -10537,20 +10024,8 @@ function startWebServer() {
       return;
     }
 
-    if (pathname === "/support/callback") {
-      handleWebSupportCallback(req, res, requestUrl).catch(error => {
-        sendWebText(res, 400, error.message || "Discord OAuth login failed.");
-      });
-      return;
-    }
-
     if (pathname === "/auth/logout") {
       handleWebLogout(req, res);
-      return;
-    }
-
-    if (pathname === "/support/logout") {
-      handleWebSupportLogout(req, res);
       return;
     }
 
