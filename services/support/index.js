@@ -29,7 +29,6 @@ const SUPPORT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const supportPublicDir = path.join(__dirname, "..", "..", "web", "public");
 const supportStorePath = path.join(SUPPORT_DATA_DIR, "support.json");
 
-const supportOauthStates = new Map();
 const supportSessions = new Map();
 let supportStoreCache = null;
 
@@ -458,24 +457,12 @@ function redirect(res, location) {
   res.end();
 }
 
-function cleanupSupportOAuthState() {
-  const now = Date.now();
-  for (const [state, entry] of supportOauthStates.entries()) {
-    if (entry.expiresAt <= now) {
-      supportOauthStates.delete(state);
-    }
-  }
-}
-
 function startOAuthLogin(req, res) {
   if (!SUPPORT_CLIENT_SECRET || !SUPPORT_SESSION_SECRET) {
     return sendText(res, 503, "Discord OAuth is not configured. Set SUPPORT_DISCORD_CLIENT_SECRET and SUPPORT_SESSION_SECRET.");
   }
 
-  const state = crypto.randomBytes(24).toString("hex");
-  supportOauthStates.set(state, {
-    expiresAt: Date.now() + 10 * 60 * 1000
-  });
+  const state = createOAuthState();
 
   const redirectUri = getOAuthRedirectUri(req);
   const params = new URLSearchParams({
@@ -489,21 +476,42 @@ function startOAuthLogin(req, res) {
   redirect(res, `https://discord.com/oauth2/authorize?${params.toString()}`);
 }
 
+function createOAuthState() {
+  const issuedAt = Date.now();
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const payload = `${issuedAt}.${nonce}`;
+  return `${payload}.${signValue(`oauth:${payload}`)}`;
+}
+
+function verifyOAuthState(stateValue) {
+  const parts = String(stateValue || "").split(".");
+  if (parts.length < 3) return false;
+
+  const issuedAt = Number(parts[0]);
+  if (!Number.isFinite(issuedAt)) return false;
+  const ageMs = Date.now() - issuedAt;
+  if (ageMs < -5 * 60 * 1000 || ageMs > 10 * 60 * 1000) return false;
+
+  const payload = `${parts[0]}.${parts[1]}`;
+  const signature = parts.slice(2).join(".");
+  const expected = signValue(`oauth:${payload}`);
+  const expectedBuffer = Buffer.from(expected, "hex");
+  const signatureBuffer = Buffer.from(signature, "hex");
+  if (expectedBuffer.length !== signatureBuffer.length) return false;
+  return crypto.timingSafeEqual(expectedBuffer, signatureBuffer);
+}
+
 async function handleOAuthCallback(req, res, requestUrl) {
   if (!SUPPORT_CLIENT_SECRET || !SUPPORT_SESSION_SECRET) {
     return sendText(res, 503, "Discord OAuth is not configured.");
   }
 
-  cleanupSupportOAuthState();
   const code = requestUrl.searchParams.get("code");
   const state = requestUrl.searchParams.get("state");
-  const savedState = state ? supportOauthStates.get(state) : null;
 
-  if (!code || !savedState) {
+  if (!code || !verifyOAuthState(state)) {
     return sendText(res, 400, "OAuth login expired or was cancelled. Try logging in again.");
   }
-
-  supportOauthStates.delete(state);
 
   const redirectUri = getOAuthRedirectUri(req);
   const tokenPayload = await fetchDiscordJson("https://discord.com/api/oauth2/token", {
