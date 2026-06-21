@@ -109,15 +109,6 @@ function clearCookie(req, res, name) {
   setCookie(req, res, name, "", 0);
 }
 
-function cleanupSupportAuthState() {
-  const now = Date.now();
-  for (const [state, entry] of supportOauthStates.entries()) {
-    if (entry.expiresAt <= now) {
-      supportOauthStates.delete(state);
-    }
-  }
-}
-
 function signValue(value) {
   return crypto.createHmac("sha256", SUPPORT_SESSION_SECRET).update(value).digest("hex");
 }
@@ -160,7 +151,6 @@ function createSession(user, accessLevel, authMode = "discord") {
 }
 
 function getSession(req) {
-  cleanupSupportAuthState();
   const signedSession = parseCookies(req)[SUPPORT_SESSION_COOKIE];
   const encodedSession = verifySignedValue(signedSession);
   if (!encodedSession) return null;
