@@ -824,7 +824,9 @@ function startServer() {
     }
 
     if (pathname === "/support/callback") {
-      redirect(res, "/auth/callback");
+      handleOAuthCallback(req, res, requestUrl).catch(error => {
+        sendText(res, 400, error.message || "Discord OAuth login failed.");
+      });
       return;
     }
 
