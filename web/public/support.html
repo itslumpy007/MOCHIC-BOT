@@ -179,6 +179,50 @@
       body.support-is-staff .empty-state {
         border-color: rgba(118, 132, 195, 0.14);
       }
+      body.support-is-staff input,
+      body.support-is-staff textarea,
+      body.support-is-staff select {
+        background: rgba(255, 255, 255, 0.06);
+        border-color: rgba(144, 155, 228, 0.2);
+        color: #eef3ff;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      }
+      body.support-is-staff input::placeholder,
+      body.support-is-staff textarea::placeholder {
+        color: rgba(238, 243, 255, 0.45);
+      }
+      body.support-is-staff input:focus,
+      body.support-is-staff textarea:focus,
+      body.support-is-staff select:focus {
+        border-color: rgba(148, 160, 255, 0.45);
+        box-shadow: 0 0 0 3px rgba(93, 112, 255, 0.18);
+      }
+      body.support-is-staff .save-button {
+        background: linear-gradient(135deg, #5d70ff, #8d57ff);
+        color: #fff;
+        box-shadow: 0 14px 28px rgba(93, 112, 255, 0.18);
+      }
+      body.support-is-staff .save-button:hover {
+        background: linear-gradient(135deg, #4d61ea, #7643e0);
+      }
+      body.support-is-staff .ghost-button {
+        background: rgba(255, 255, 255, 0.08);
+        color: #eef3ff;
+        border: 1px solid rgba(144, 155, 228, 0.18);
+      }
+      body.support-is-staff .ghost-button:hover {
+        background: rgba(255, 255, 255, 0.12);
+        border-color: rgba(144, 155, 228, 0.28);
+      }
+      body.support-is-staff .badge {
+        background: rgba(255, 255, 255, 0.08);
+        color: #eef3ff;
+        border-color: rgba(255, 255, 255, 0.08);
+      }
+      body.support-is-staff .button-row .ghost-button,
+      body.support-is-staff .topbar-actions .pill {
+        color: #eef3ff;
+      }
       body.support-is-staff .support-hero {
         padding: 16px;
       }
