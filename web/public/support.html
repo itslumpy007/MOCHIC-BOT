@@ -43,6 +43,62 @@
         display: grid;
         gap: 2px;
       }
+      .support-request-layout {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.75fr);
+        align-items: start;
+      }
+      .support-request-panel {
+        min-height: 72vh;
+      }
+      .support-thread {
+        display: grid;
+        gap: 12px;
+        padding: 18px;
+        border-radius: 24px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(249, 244, 255, 0.94));
+        border: 1px solid rgba(229, 210, 233, 0.88);
+        min-height: 340px;
+        margin: 0 0 16px;
+      }
+      .support-bubble {
+        max-width: 78%;
+        padding: 14px 16px;
+        border-radius: 20px;
+      }
+      .support-bubble.team {
+        background: rgba(255, 255, 255, 0.94);
+        border: 1px solid rgba(229, 210, 233, 0.88);
+      }
+      .support-bubble.you {
+        margin-left: auto;
+        background: linear-gradient(135deg, rgba(255, 228, 241, 0.98), rgba(234, 237, 255, 0.98));
+        border: 1px solid rgba(229, 210, 233, 0.88);
+      }
+      .support-bubble strong {
+        display: block;
+        margin-bottom: 4px;
+        color: #5a476d;
+      }
+      .support-bubble p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+      .support-compose {
+        display: grid;
+        gap: 12px;
+      }
+      .support-compose textarea {
+        min-height: 230px;
+      }
+      .support-side-card {
+        min-height: 100%;
+      }
+      .support-side-stack {
+        grid-template-columns: 1fr;
+      }
       .support-staff-dashboard {
         width: 100%;
         display: grid;
@@ -455,6 +511,9 @@
         .support-staff-dashboard {
           grid-template-columns: 1fr 1fr;
         }
+        .support-request-layout {
+          grid-template-columns: 1fr;
+        }
       }
       @media (max-width: 620px) {
         .support-staff-dashboard {
@@ -498,6 +557,7 @@
 
         <nav class="tabs" aria-label="Support sections">
           <button class="tab is-active" data-view="tickets" type="button">Tickets</button>
+          <button class="tab" data-view="support-request" type="button" id="supportRequestTab">Support Request</button>
           <button class="tab" data-view="anonymous" type="button">Anonymous Chat</button>
         </nav>
 
@@ -529,55 +589,102 @@
           <div class="support-grid">
             <section class="panel">
               <div class="panel-header">
-                <h3 id="newTicketTitle">New Ticket</h3>
-              </div>
-              <div class="form-grid">
-                <label>Category
-                  <select id="ticketCategory">
-                    <option value="ticket">General support</option>
-                    <option value="report">Report</option>
-                    <option value="anonymous-chat">Anonymous chat</option>
-                  </select>
-                </label>
-                <label>Subject<input id="ticketSubject" placeholder="Short summary"></label>
-                <label>Message<textarea id="ticketMessage" rows="8" placeholder="Tell staff what’s going on"></textarea></label>
-                <label class="checkbox-row"><input id="ticketAnonymous" type="checkbox"> Submit anonymously to staff</label>
-              </div>
-              <div class="button-row">
-                <button class="save-button" id="createTicketButton" type="button">Create Ticket</button>
-                <button class="ghost-button" id="anonymousQuickStart" type="button">Quick anonymous chat</button>
-              </div>
-            </section>
-
-            <section class="panel">
-              <div class="panel-header">
                 <h3 id="ticketListTitle">Your Tickets</h3>
               </div>
               <div id="ticketList" class="support-ticket-list"></div>
             </section>
-          </div>
 
-          <section class="panel" style="margin-top: 16px;">
-            <div class="panel-header">
-              <div class="support-card-title">
-                <h3 id="ticketDetailTitle">Select a ticket</h3>
-                <span class="pill" id="ticketStatusPill">Idle</span>
+            <section class="panel">
+              <div class="panel-header">
+                <div class="support-card-title">
+                  <h3 id="ticketDetailTitle">Select a ticket</h3>
+                  <span class="pill" id="ticketStatusPill">Idle</span>
+                </div>
+                <div class="support-actions">
+                  <button class="ghost-button" id="closeTicketButton" type="button">Close</button>
+                  <button class="ghost-button" id="reopenTicketButton" type="button">Reopen</button>
+                  <button class="ghost-button" id="exportTranscriptButton" type="button">Export Transcript</button>
+                </div>
               </div>
-              <div class="support-actions">
-                <button class="ghost-button" id="closeTicketButton" type="button">Close</button>
-                <button class="ghost-button" id="reopenTicketButton" type="button">Reopen</button>
-                <button class="ghost-button" id="exportTranscriptButton" type="button">Export Transcript</button>
+              <p class="panel-note" id="ticketDetailMeta">Pick a ticket to read messages and reply.</p>
+              <div id="ticketMessageList" class="support-message-list"></div>
+              <div class="form-grid" style="margin-top: 16px;">
+                <label>Reply<textarea id="replyMessage" rows="5" placeholder="Write a message to the ticket"></textarea></label>
               </div>
-            </div>
-            <p class="panel-note" id="ticketDetailMeta">Pick a ticket to read messages and reply.</p>
-            <div id="ticketMessageList" class="support-message-list"></div>
-            <div class="form-grid" style="margin-top: 16px;">
-              <label>Reply<textarea id="replyMessage" rows="5" placeholder="Write a message to the ticket"></textarea></label>
-            </div>
-            <div class="button-row">
-              <button class="save-button" id="sendReplyButton" type="button">Send Reply</button>
-            </div>
-          </section>
+              <div class="button-row">
+                <button class="save-button" id="sendReplyButton" type="button">Send Reply</button>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view hidden" id="supportRequestView">
+          <div class="support-request-layout">
+            <section class="panel support-request-panel">
+              <div class="panel-header">
+                <div class="support-card-title">
+                  <h3 id="newTicketTitle">Support Request</h3>
+                  <span class="pill">Chat-style</span>
+                </div>
+              </div>
+              <div class="support-thread" id="supportRequestThread" aria-live="polite">
+                <article class="support-bubble team">
+                  <strong>Mochi Support</strong>
+                  <p>Tell us what&apos;s going on. This space is made to feel like a chat, so your request can be as long or as short as you need.</p>
+                </article>
+                <article class="support-bubble team">
+                  <strong>Tip</strong>
+                  <p>You can keep it anonymous if you want. Staff will still be able to reply in the thread.</p>
+                </article>
+                <article class="support-bubble you hidden" id="requestDraftBubble">
+                  <strong>You</strong>
+                  <p id="requestDraftPreview">Start typing your request below.</p>
+                </article>
+              </div>
+              <div class="support-compose">
+                <div class="form-grid">
+                  <label>Category
+                    <select id="ticketCategory">
+                      <option value="ticket">General support</option>
+                      <option value="report">Report</option>
+                      <option value="anonymous-chat">Anonymous chat</option>
+                    </select>
+                  </label>
+                  <label>Subject<input id="ticketSubject" placeholder="Short summary"></label>
+                </div>
+                <label>Message<textarea id="ticketMessage" rows="11" placeholder="Write your request like a chat"></textarea></label>
+                <label class="checkbox-row"><input id="ticketAnonymous" type="checkbox"> Submit anonymously to staff</label>
+                <div class="button-row">
+                  <button class="save-button" id="createTicketButton" type="button">Send Request</button>
+                  <button class="ghost-button" id="anonymousQuickStart" type="button">Quick anonymous chat</button>
+                </div>
+              </div>
+            </section>
+
+            <aside class="panel support-side-card">
+              <div class="panel-header">
+                <h3>How it feels</h3>
+              </div>
+              <div class="summary-grid support-side-stack">
+                <article class="summary-item">
+                  <span>Big thread</span>
+                  <strong>Like a chat</strong>
+                </article>
+                <article class="summary-item">
+                  <span>Anonymous</span>
+                  <strong>Optional</strong>
+                </article>
+                <article class="summary-item">
+                  <span>Reply style</span>
+                  <strong>Friendly</strong>
+                </article>
+                <article class="summary-item">
+                  <span>Next step</span>
+                  <strong>We answer here</strong>
+                </article>
+              </div>
+            </aside>
+          </div>
         </section>
 
         <section class="view hidden" id="anonymousView">

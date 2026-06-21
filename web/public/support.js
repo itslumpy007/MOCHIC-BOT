@@ -40,8 +40,15 @@ const state = {
   me: null,
   tickets: [],
   selectedTicketId: null,
-  selectedTicket: null
+  selectedTicket: null,
+  activeView: "tickets"
 };
+
+function getViewId(viewName) {
+  if (viewName === "support-request") return "supportRequestView";
+  if (viewName === "anonymous") return "anonymousView";
+  return "ticketsView";
+}
 
 function getSupportRole() {
   return ["admin", "mod"].includes(state.me?.accessLevel) ? "staff" : "member";
@@ -53,6 +60,62 @@ function applySupportMode() {
   document.body.classList.toggle("support-is-member", !isStaff);
   $("#appShell")?.classList.toggle("support-staff-shell", isStaff);
   $("#appShell")?.classList.toggle("support-member-shell", !isStaff);
+}
+
+function setActiveView(viewName) {
+  state.activeView = viewName;
+  document.querySelectorAll(".tab[data-view]").forEach(tab => {
+    tab.classList.toggle("is-active", tab.dataset.view === viewName);
+  });
+  document.querySelectorAll(".view").forEach(view => {
+    const isActive = view.id === getViewId(viewName);
+    view.classList.toggle("is-active", isActive);
+    view.classList.toggle("hidden", !isActive);
+  });
+  renderActiveViewCopy();
+  renderRequestDraft();
+}
+
+function renderActiveViewCopy() {
+  const role = getSupportRole();
+  const isStaff = role === "staff";
+
+  if (state.activeView === "support-request") {
+    $("#viewTitle").textContent = isStaff ? "Quick Note" : "Support Request";
+    $("#topbarCopy").textContent = isStaff
+      ? "Leave a short note in a soft, friendly workspace."
+      : "Write your request like a chat and send it when you’re ready.";
+    return;
+  }
+
+  if (state.activeView === "anonymous") {
+    $("#viewTitle").textContent = "Anonymous Chat";
+    $("#topbarCopy").textContent = isStaff
+      ? "Read anonymous conversations and keep the staff inbox moving."
+      : "Use this when you want to talk to mods without attaching your name.";
+    return;
+  }
+
+  $("#viewTitle").textContent = isStaff ? "Staff Desk" : "Tickets";
+  $("#topbarCopy").textContent = isStaff
+    ? "Staff can triage reports, answer anonymous chats, and keep the inbox moving without losing context."
+    : "Tell us what you need, open an anonymous chat if you'd like, and keep everything in one cozy place.";
+}
+
+function renderRequestDraft() {
+  const preview = $("#requestDraftPreview");
+  const bubble = $("#requestDraftBubble");
+  const message = $("#ticketMessage")?.value?.trim() || "";
+  if (!preview || !bubble) return;
+
+  if (!message) {
+    bubble.classList.add("hidden");
+    preview.textContent = "Start typing your request below.";
+    return;
+  }
+
+  bubble.classList.remove("hidden");
+  preview.textContent = message;
 }
 
 function renderSupportCopy() {
@@ -69,8 +132,8 @@ function renderSupportCopy() {
   const totalCount = state.tickets.length;
 
   $("#clientStatus").textContent = isStaff ? "Pastel desk" : "Member helpdesk";
-  $("#viewTitle").textContent = isStaff ? "Staff Desk" : "Tickets";
-  $("#newTicketTitle").textContent = isStaff ? "Quick note" : "New Ticket";
+  $("#supportRequestTab").textContent = isStaff ? "Quick note" : "Support Request";
+  $("#newTicketTitle").textContent = isStaff ? "Quick note" : "Support Request";
   $("#ticketListTitle").textContent = isStaff ? "Inbox" : "Your Tickets";
   $("#anonymousTitle").textContent = isStaff ? "Soft tools" : "Anonymous Chat";
   $("#ticketDetailMeta").textContent = isStaff
@@ -128,6 +191,7 @@ function renderSupportCopy() {
         `
     }
   `;
+  renderActiveViewCopy();
 }
 
 function setAlert(message = "", kind = "info") {
@@ -161,6 +225,7 @@ function renderAuth() {
   $("#logoutLink").classList.remove("hidden");
   applySupportMode();
   renderSupportCopy();
+  setActiveView(state.activeView);
 }
 
 function renderTickets() {
@@ -246,6 +311,7 @@ async function loadSupport() {
     renderTickets();
     renderTicketDetail();
     renderAnonymousInfo();
+    renderRequestDraft();
     $("#apiState").textContent = "Live";
     $("#apiState").className = "pill";
   } catch (error) {
@@ -285,6 +351,7 @@ async function createTicket() {
   state.selectedTicket = result.ticket;
   await loadSupport();
   await selectTicket(result.ticket.id);
+  renderRequestDraft();
   setAlert(`Ticket #${result.ticket.id} created.`);
 }
 
@@ -347,10 +414,12 @@ function exportCurrentTicketTranscript() {
 }
 
 function setupAnonymousQuickStart() {
+  setActiveView("support-request");
   $("#ticketCategory").value = "anonymous-chat";
   $("#ticketAnonymous").checked = true;
   $("#ticketSubject").value = "Anonymous chat with mods";
   $("#ticketMessage").focus();
+  renderRequestDraft();
 }
 
 function renderAnonymousInfo() {
@@ -374,6 +443,9 @@ function renderAnonymousInfo() {
 }
 
 async function init() {
+  document.querySelectorAll(".tab[data-view]").forEach(tab => {
+    tab.addEventListener("click", () => setActiveView(tab.dataset.view));
+  });
   $("#createTicketButton").addEventListener("click", () => createTicket().catch(error => setAlert(error.message, "error")));
   $("#sendReplyButton").addEventListener("click", () => sendReply().catch(error => setAlert(error.message, "error")));
   $("#closeTicketButton").addEventListener("click", () => closeCurrentTicket().catch(error => setAlert(error.message, "error")));
@@ -381,6 +453,7 @@ async function init() {
   $("#exportTranscriptButton").addEventListener("click", exportCurrentTicketTranscript);
   $("#anonymousQuickStart").addEventListener("click", setupAnonymousQuickStart);
   $("#refreshButton").addEventListener("click", () => loadSupport().catch(error => setAlert(error.message, "error")));
+  $("#ticketMessage").addEventListener("input", renderRequestDraft);
 
   await loadSupport();
 }
