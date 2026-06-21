@@ -60,6 +60,9 @@ const ENABLE_CORE_BOT = envFlag(process.env.ENABLE_CORE_BOT, true);
 const WEB_PORT = Number(process.env.PORT || process.env.WEB_PORT || 3000);
 const WEB_ADMIN_TOKEN = process.env.WEB_ADMIN_TOKEN || "";
 const WEB_BASE_URL = (process.env.WEB_BASE_URL || "").replace(/\/$/, "");
+const WEB_OAUTH_REDIRECT_URI = (process.env.WEB_OAUTH_REDIRECT_URI || "").trim();
+const WEB_STAFF_OAUTH_REDIRECT_URI = (process.env.WEB_STAFF_OAUTH_REDIRECT_URI || "").trim();
+const WEB_SUPPORT_OAUTH_REDIRECT_URI = (process.env.WEB_SUPPORT_OAUTH_REDIRECT_URI || "").trim();
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || "";
 const SESSION_SECRET = process.env.SESSION_SECRET || WEB_ADMIN_TOKEN || "";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
@@ -8098,6 +8101,16 @@ function redirectWeb(res, location) {
   res.end();
 }
 
+function getWebOAuthRedirectUri(req, purpose = "staff") {
+  const override = purpose === "support"
+    ? WEB_SUPPORT_OAUTH_REDIRECT_URI || WEB_OAUTH_REDIRECT_URI
+    : WEB_STAFF_OAUTH_REDIRECT_URI || WEB_OAUTH_REDIRECT_URI;
+  if (override) return override;
+
+  const redirectPath = purpose === "support" ? "/support/callback" : "/auth/callback";
+  return `${getWebBaseUrl(req)}${redirectPath}`;
+}
+
 function startWebDiscordLogin(req, res, purpose = "staff") {
   if (!DISCORD_CLIENT_SECRET || !SESSION_SECRET) {
     return sendWebText(res, 503, "Discord OAuth is not configured. Set DISCORD_CLIENT_SECRET and SESSION_SECRET.");
@@ -8109,8 +8122,7 @@ function startWebDiscordLogin(req, res, purpose = "staff") {
     expiresAt: Date.now() + 10 * 60 * 1000
   });
 
-  const redirectPath = purpose === "support" ? "/support/callback" : "/auth/callback";
-  const redirectUri = `${getWebBaseUrl(req)}${redirectPath}`;
+  const redirectUri = getWebOAuthRedirectUri(req, purpose);
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
     redirect_uri: redirectUri,
@@ -8155,8 +8167,7 @@ async function handleWebDiscordCallback(req, res, requestUrl, fallbackPurpose = 
   const purpose = savedState.purpose || fallbackPurpose;
   webOauthStates.delete(state);
 
-  const redirectPath = purpose === "support" ? "/support/callback" : "/auth/callback";
-  const redirectUri = `${getWebBaseUrl(req)}${redirectPath}`;
+  const redirectUri = getWebOAuthRedirectUri(req, purpose);
   const tokenPayload = await fetchDiscordJson("https://discord.com/api/oauth2/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
