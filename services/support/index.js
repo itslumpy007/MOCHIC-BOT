@@ -29,7 +29,6 @@ const SUPPORT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const supportPublicDir = path.join(__dirname, "..", "..", "web", "public");
 const supportStorePath = path.join(SUPPORT_DATA_DIR, "support.json");
 
-const supportSessions = new Map();
 let supportStoreCache = null;
 
 const client = new Client({
@@ -117,11 +116,6 @@ function cleanupSupportAuthState() {
       supportOauthStates.delete(state);
     }
   }
-  for (const [sessionId, session] of supportSessions.entries()) {
-    if (session.expiresAt <= now) {
-      supportSessions.delete(sessionId);
-    }
-  }
 }
 
 function signValue(value) {
@@ -142,27 +136,40 @@ function verifySignedValue(signedValue) {
   return crypto.timingSafeEqual(expectedBuffer, signatureBuffer) ? value : null;
 }
 
+function encodeSessionPayload(payload) {
+  return Buffer.from(JSON.stringify(payload)).toString("base64url");
+}
+
+function decodeSessionPayload(encoded) {
+  try {
+    const raw = Buffer.from(String(encoded || ""), "base64url").toString("utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
 function createSession(user, accessLevel, authMode = "discord") {
-  const sessionId = crypto.randomBytes(32).toString("hex");
-  supportSessions.set(sessionId, {
+  const payload = {
     user,
     accessLevel,
     authMode,
     expiresAt: Date.now() + SUPPORT_SESSION_TTL_MS
-  });
-  return sessionId;
+  };
+  return createSignedValue(encodeSessionPayload(payload));
 }
 
 function getSession(req) {
   cleanupSupportAuthState();
-  const sessionId = verifySignedValue(parseCookies(req)[SUPPORT_SESSION_COOKIE]);
-  if (!sessionId) return null;
-  const session = supportSessions.get(sessionId);
+  const signedSession = parseCookies(req)[SUPPORT_SESSION_COOKIE];
+  const encodedSession = verifySignedValue(signedSession);
+  if (!encodedSession) return null;
+
+  const session = decodeSessionPayload(encodedSession);
   if (!session || session.expiresAt <= Date.now()) {
-    if (sessionId) supportSessions.delete(sessionId);
     return null;
   }
-  return { sessionId, ...session };
+  return session;
 }
 
 function getAuth(req) {
@@ -534,7 +541,7 @@ async function handleOAuthCallback(req, res, requestUrl) {
   });
 
   const accessLevel = await getDiscordAccessLevel(user.id);
-  const sessionId = createSession({
+  const sessionCookie = createSession({
     id: user.id,
     username: user.username,
     globalName: user.global_name || user.globalName || user.username,
@@ -544,15 +551,11 @@ async function handleOAuthCallback(req, res, requestUrl) {
       : (user.global_name || user.username)
   }, accessLevel, "discord");
 
-  setCookie(req, res, SUPPORT_SESSION_COOKIE, createSignedValue(sessionId), SUPPORT_SESSION_TTL_MS / 1000);
+  setCookie(req, res, SUPPORT_SESSION_COOKIE, sessionCookie, SUPPORT_SESSION_TTL_MS / 1000);
   redirect(res, "/");
 }
 
 function handleLogout(req, res) {
-  const session = getSession(req);
-  if (session?.sessionId) {
-    supportSessions.delete(session.sessionId);
-  }
   clearCookie(req, res, SUPPORT_SESSION_COOKIE);
   redirect(res, "/");
 }
