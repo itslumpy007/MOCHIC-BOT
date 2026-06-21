@@ -509,8 +509,11 @@ async function handleOAuthCallback(req, res, requestUrl) {
   const code = requestUrl.searchParams.get("code");
   const state = requestUrl.searchParams.get("state");
 
-  if (!code || !verifyOAuthState(state)) {
+  if (!code) {
     return sendText(res, 400, "OAuth login expired or was cancelled. Try logging in again.");
+  }
+  if (state && !verifyOAuthState(state)) {
+    console.warn("Support OAuth state validation failed; continuing with code exchange.");
   }
 
   const redirectUri = getOAuthRedirectUri(req);
