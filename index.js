@@ -8133,7 +8133,9 @@ function startWebDiscordLogin(req, res, purpose = "staff") {
 }
 
 function handleWebLogin(req, res) {
-  return startWebDiscordLogin(req, res, "staff");
+  const requestUrl = new URL(req.url, getWebBaseUrl(req));
+  const purpose = requestUrl.searchParams.get("purpose") === "support" ? "support" : "staff";
+  return startWebDiscordLogin(req, res, purpose);
 }
 
 function handleWebSupportLogin(req, res) {
@@ -10505,7 +10507,7 @@ function startWebServer() {
     }
 
     if (pathname === "/support/login") {
-      handleWebSupportLogin(req, res);
+      redirectWeb(res, "/auth/login?purpose=support");
       return;
     }
 

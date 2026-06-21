@@ -24,7 +24,7 @@ const checks = [
   ["app.js has staff inbox", files.app.includes("staffInboxList") && files.app.includes("exportSupportTranscript()") && files.app.includes("/api/support/inbox")],
   ["html has onboarding repair button", files.html.includes("Repair Onboarding") && files.html.includes("Core Verification")],
   ["html has staff inbox", files.html.includes("Staff Inbox") && files.html.includes("Export Transcript")],
-  ["support page exists", files.supportHtml.includes("Mochi Support") && files.supportHtml.includes("/support/login")],
+  ["support page exists", files.supportHtml.includes("Mochi Support") && files.supportHtml.includes("/auth/login?purpose=support")],
   ["support script exists", files.supportJs.includes("createTicket") && files.supportJs.includes("anonymous-chat") && files.supportJs.includes("exportTranscriptButton")],
   ["html mentions captcha", files.html.includes("newer or suspicious accounts") || files.html.includes("CAPTCHA is optional")],
   ["index.js scopes captcha", files.index.includes("new/suspicious accounts only") && files.index.includes("newer or suspicious accounts")]
