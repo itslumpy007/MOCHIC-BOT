@@ -215,6 +215,47 @@ function createDefaultSupportStore() {
   };
 }
 
+function normalizeSupportTicketRecord(ticket) {
+  if (!ticket || typeof ticket !== "object") return null;
+
+  const messages = Array.isArray(ticket.messages)
+    ? ticket.messages.map(message => ({
+        id: message?.id || crypto.randomUUID(),
+        authorType: message?.authorType === "staff" ? "staff" : "user",
+        authorId: message?.authorId || "unknown",
+        authorTag: message?.authorTag || "Unknown",
+        content: normalizeSupportText(message?.content, 4000),
+        anonymous: Boolean(message?.anonymous),
+        createdAt: message?.createdAt || new Date().toISOString()
+      }))
+    : [];
+
+  const priority = ["low", "normal", "high", "urgent"].includes(ticket.priority) ? ticket.priority : "normal";
+
+  return {
+    id: Number.isInteger(ticket.id) ? ticket.id : 0,
+    category: ["ticket", "report", "anonymous-chat"].includes(ticket.category) ? ticket.category : "ticket",
+    subject: normalizeSupportText(ticket.subject, 140) || "Support request",
+    status: ticket.status === "closed" ? "closed" : "open",
+    anonymous: Boolean(ticket.anonymous),
+    visibleToStaff: ticket.visibleToStaff !== false,
+    createdByUserId: ticket.createdByUserId || "unknown",
+    createdByTag: ticket.createdByTag || "Unknown",
+    createdAt: ticket.createdAt || new Date().toISOString(),
+    updatedAt: ticket.updatedAt || ticket.createdAt || new Date().toISOString(),
+    lastMessageAt: ticket.lastMessageAt || ticket.updatedAt || ticket.createdAt || new Date().toISOString(),
+    priority,
+    assignedTo: ticket.assignedTo && typeof ticket.assignedTo === "object"
+      ? {
+          id: ticket.assignedTo.id || null,
+          tag: ticket.assignedTo.tag || null
+        }
+      : null,
+    staffNote: normalizeSupportText(ticket.staffNote, 2000),
+    messages
+  };
+}
+
 function loadSupportStore() {
   if (supportStoreCache) return supportStoreCache;
 
@@ -229,7 +270,9 @@ function loadSupportStore() {
     const parsed = JSON.parse(raw);
     supportStoreCache = {
       nextTicketId: Number.isInteger(parsed?.nextTicketId) && parsed.nextTicketId > 0 ? parsed.nextTicketId : defaults.nextTicketId,
-      tickets: Array.isArray(parsed?.tickets) ? parsed.tickets : defaults.tickets
+      tickets: Array.isArray(parsed?.tickets)
+        ? parsed.tickets.map(normalizeSupportTicketRecord).filter(Boolean)
+        : defaults.tickets
     };
   } catch {
     supportStoreCache = defaults;
@@ -277,6 +320,9 @@ function createSupportTicket({ creator, category = "ticket", subject, message, a
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     lastMessageAt: new Date().toISOString(),
+    priority: category === "report" ? "high" : "normal",
+    assignedTo: null,
+    staffNote: "",
     messages: []
   };
 
@@ -320,10 +366,11 @@ function appendSupportTicketMessage(ticket, { authorType, authorId, authorTag, c
 function serializeSupportTicket(ticket, auth = null) {
   if (!ticket) return null;
   const admin = auth?.accessLevel === "admin";
+  const staff = isSupportStaffAccess(auth);
   const owner = auth?.user?.id === ticket.createdByUserId;
   const revealOwner = admin || owner || !ticket.anonymous;
 
-  return {
+  const payload = {
     id: ticket.id,
     category: ticket.category,
     subject: ticket.subject,
@@ -353,6 +400,17 @@ function serializeSupportTicket(ticket, auth = null) {
         }))
       : []
   };
+
+  if (staff) {
+    payload.priority = ticket.priority || "normal";
+    payload.assignedTo = ticket.assignedTo ? {
+      id: ticket.assignedTo.id || null,
+      tag: ticket.assignedTo.tag || null
+    } : null;
+    payload.staffNote = ticket.staffNote || "";
+  }
+
+  return payload;
 }
 
 function canViewSupportTicket(auth, ticket) {
@@ -382,6 +440,15 @@ function formatSupportTranscript(ticket, auth = null) {
   append(`Status: ${data.status}`);
   append(`Anonymous: ${data.anonymous ? "yes" : "no"}`);
   append(`Visible to staff: ${data.visibleToStaff ? "yes" : "no"}`);
+  if (data.priority) {
+    append(`Priority: ${data.priority}`);
+  }
+  if (data.assignedTo?.tag || data.assignedTo?.id) {
+    append(`Assigned to: ${data.assignedTo.tag || data.assignedTo.id}`);
+  }
+  if (data.staffNote) {
+    append(`Staff note: ${data.staffNote}`);
+  }
   append(`Created by: ${data.createdBy?.tag || "Anonymous member"}`);
   append(`Created at: ${data.createdAt}`);
   append(`Updated at: ${data.updatedAt}`);
@@ -430,6 +497,9 @@ function buildSupportInboxPayload(auth = null) {
   const tickets = listSupportTickets(auth);
   const openCount = tickets.filter(ticket => ticket.status === "open").length;
   const anonymousCount = tickets.filter(ticket => ticket.anonymous).length;
+  const urgentCount = tickets.filter(ticket => ticket.priority === "urgent").length;
+  const highCount = tickets.filter(ticket => ticket.priority === "high").length;
+  const assignedCount = tickets.filter(ticket => ticket.assignedTo?.id).length;
   const recentTicket = tickets[0] || null;
 
   return {
@@ -439,6 +509,9 @@ function buildSupportInboxPayload(auth = null) {
       open: openCount,
       closed: tickets.length - openCount,
       anonymous: anonymousCount,
+      urgent: urgentCount,
+      high: highCount,
+      assigned: assignedCount,
       recentTicket: recentTicket ? {
         id: recentTicket.id,
         subject: recentTicket.subject,
@@ -548,6 +621,10 @@ async function handleOAuthCallback(req, res, requestUrl) {
 function handleLogout(req, res) {
   clearCookie(req, res, SUPPORT_SESSION_COOKIE);
   redirect(res, "/");
+}
+
+function canManageSupportTicket(auth) {
+  return Boolean(auth && isSupportStaffAccess(auth));
 }
 
 function getWebMimeType(filePath) {
@@ -769,6 +846,32 @@ async function handleApi(req, res, pathname, requestUrl) {
       }
 
       ticket.status = action === "close" ? "closed" : "open";
+      updateSupportTicket(ticket);
+
+      return sendJson(res, 200, {
+        ok: true,
+        ticket: serializeSupportTicket(ticket, auth)
+      });
+    }
+
+    if (req.method === "POST" && action === "meta") {
+      if (!canManageSupportTicket(auth)) {
+        return sendJson(res, 403, { error: "Staff access is required." });
+      }
+
+      const body = await readJsonBody(req);
+      const priority = ["low", "normal", "high", "urgent"].includes(String(body.priority || "")) ? String(body.priority) : ticket.priority || "normal";
+      const assignedToInput = body.assignedTo;
+      const staffNote = normalizeSupportText(body.staffNote, 2000);
+
+      ticket.priority = priority;
+      ticket.assignedTo = assignedToInput
+        ? {
+            id: normalizeSupportText(assignedToInput.id || "", 80) || null,
+            tag: normalizeSupportText(assignedToInput.tag || "", 140) || null
+          }
+        : null;
+      ticket.staffNote = staffNote;
       updateSupportTicket(ticket);
 
       return sendJson(res, 200, {

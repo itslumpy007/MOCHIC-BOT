@@ -52,6 +52,34 @@
       .support-request-panel {
         min-height: 72vh;
       }
+      .support-toolbar {
+        display: grid;
+        gap: 10px;
+        margin-top: 12px;
+      }
+      .support-toolbar input {
+        width: 100%;
+      }
+      .support-filter-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .filter-chip {
+        border: 1px solid rgba(229, 210, 233, 0.88);
+        background: rgba(255, 255, 255, 0.86);
+        color: var(--text);
+        border-radius: 999px;
+        padding: 8px 14px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .filter-chip.is-active {
+        background: linear-gradient(135deg, #ff8fc0, #8f97ff);
+        color: white;
+        border-color: transparent;
+      }
+      .staff-only { display: none; }
       .support-thread {
         display: grid;
         gap: 12px;
@@ -99,10 +127,45 @@
       .support-side-stack {
         grid-template-columns: 1fr;
       }
+      .staff-meta-grid {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        margin: 16px 0 4px;
+      }
+      .staff-meta-grid label,
+      .staff-meta-grid .summary-item {
+        display: grid;
+        gap: 8px;
+      }
+      .staff-meta-grid textarea {
+        min-height: 130px;
+      }
+      .staff-meta-actions {
+        margin-top: 12px;
+      }
+      .support-quick-replies {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      body.support-is-staff .queue-summary.staff-only {
+        display: inline-flex;
+      }
+      body.support-is-staff .support-toolbar.staff-only {
+        display: grid;
+      }
+      body.support-is-staff .support-quick-replies.staff-only {
+        display: flex;
+      }
+      body.support-is-staff #staffMetaPanel.staff-only {
+        display: block;
+      }
       .support-staff-dashboard {
         width: 100%;
         display: grid;
-        grid-template-columns: minmax(0, 1.2fr) repeat(4, minmax(0, 1fr));
+        grid-template-columns: minmax(0, 1.25fr) repeat(auto-fit, minmax(160px, 1fr));
         gap: 12px;
         align-items: stretch;
       }
@@ -146,6 +209,14 @@
       .support-role-pill-staff {
         background: rgba(77, 103, 255, 0.12);
         color: #3d54d4;
+      }
+      .queue-summary {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .queue-summary strong {
+        font-size: 14px;
       }
       body.support-is-member .login-card {
         background: rgba(255, 255, 255, 0.88);
@@ -498,6 +569,22 @@
         border-radius: 18px;
         padding: 12px 14px;
       }
+      body.support-is-staff .queue-summary {
+        color: #463855;
+      }
+      body.support-is-staff .filter-chip {
+        background: rgba(255, 255, 255, 0.92);
+        color: #534262;
+        border-color: rgba(229, 210, 233, 0.88);
+      }
+      body.support-is-staff .filter-chip.is-active {
+        background: linear-gradient(135deg, #ff80b7, #8b9cff);
+        color: white;
+      }
+      body.support-is-staff .staff-meta-grid label,
+      body.support-is-staff .staff-meta-grid .summary-item {
+        color: #463855;
+      }
       body.support-is-staff .support-staff-metric {
         background: rgba(255, 255, 255, 0.06);
       }
@@ -589,7 +676,21 @@
           <div class="support-grid">
             <section class="panel">
               <div class="panel-header">
-                <h3 id="ticketListTitle">Your Tickets</h3>
+                <div class="support-card-title">
+                  <h3 id="ticketListTitle">Your Tickets</h3>
+                  <span class="pill staff-only hidden queue-summary" id="queueSummaryPill">Queue</span>
+                </div>
+                <div class="staff-only hidden support-toolbar">
+                  <label class="hidden" for="ticketSearchInput">Search support tickets</label>
+                  <input id="ticketSearchInput" placeholder="Search subject, member, or ticket number">
+                  <div class="support-filter-row" aria-label="Staff ticket filters">
+                    <button class="filter-chip is-active" data-ticket-filter="all" type="button">All</button>
+                    <button class="filter-chip" data-ticket-filter="open" type="button">Open</button>
+                    <button class="filter-chip" data-ticket-filter="anonymous" type="button">Anonymous</button>
+                    <button class="filter-chip" data-ticket-filter="report" type="button">Reports</button>
+                    <button class="filter-chip" data-ticket-filter="urgent" type="button">Urgent</button>
+                  </div>
+                </div>
               </div>
               <div id="ticketList" class="support-ticket-list"></div>
             </section>
@@ -607,9 +708,37 @@
                 </div>
               </div>
               <p class="panel-note" id="ticketDetailMeta">Pick a ticket to read messages and reply.</p>
+              <section class="staff-only hidden" id="staffMetaPanel">
+                <div class="staff-meta-grid">
+                  <label>Priority
+                    <select id="staffPrioritySelect">
+                      <option value="low">Low</option>
+                      <option value="normal">Normal</option>
+                      <option value="high">High</option>
+                      <option value="urgent">Urgent</option>
+                    </select>
+                  </label>
+                  <label>Assigned to
+                    <input id="staffAssigneeInput" placeholder="Claimed by or tag">
+                  </label>
+                  <label>Internal note
+                    <textarea id="staffNoteInput" rows="4" placeholder="Private note for staff only"></textarea>
+                  </label>
+                </div>
+                <div class="button-row staff-meta-actions">
+                  <button class="ghost-button" id="claimTicketButton" type="button">Claim ticket</button>
+                  <button class="ghost-button" id="clearAssignmentButton" type="button">Clear assignment</button>
+                  <button class="save-button" id="saveTicketMetaButton" type="button">Save staff note</button>
+                </div>
+              </section>
               <div id="ticketMessageList" class="support-message-list"></div>
               <div class="form-grid" style="margin-top: 16px;">
                 <label>Reply<textarea id="replyMessage" rows="5" placeholder="Write a message to the ticket"></textarea></label>
+              </div>
+              <div class="support-quick-replies staff-only hidden" aria-label="Quick reply shortcuts">
+                <button class="filter-chip" type="button" data-reply-template="Thanks for the report. I&apos;m looking into this now.">Warm update</button>
+                <button class="filter-chip" type="button" data-reply-template="Could you share one more detail so I can help faster?">Need more detail</button>
+                <button class="filter-chip" type="button" data-reply-template="I&apos;ve marked this as resolved for now. Let me know if it comes back.">Close gently</button>
               </div>
               <div class="button-row">
                 <button class="save-button" id="sendReplyButton" type="button">Send Reply</button>
