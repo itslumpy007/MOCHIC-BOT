@@ -49,8 +49,73 @@
         grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.75fr);
         align-items: start;
       }
+      .support-chat-panel {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        overflow: hidden;
+      }
+      .support-chat-panel .support-thread {
+        margin: 0;
+        border-left: 0;
+        border-right: 0;
+        border-top: 0;
+        border-bottom: 0;
+        border-radius: 0;
+      }
       .support-request-panel {
         min-height: 72vh;
+      }
+      .support-chat-header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px;
+        align-items: flex-start;
+        justify-content: space-between;
+        padding: 18px 20px 16px;
+        border-bottom: 1px solid rgba(229, 210, 233, 0.7);
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 245, 255, 0.88));
+      }
+      .support-chat-header-copy {
+        display: flex;
+        gap: 14px;
+        align-items: flex-start;
+        min-width: 0;
+      }
+      .support-chat-avatar {
+        width: 52px;
+        height: 52px;
+        border-radius: 18px;
+        display: grid;
+        place-items: center;
+        flex-shrink: 0;
+        font-size: 18px;
+        font-weight: 800;
+        color: white;
+        background: linear-gradient(135deg, #79a6ff, #61d0ad);
+        box-shadow: 0 14px 30px rgba(95, 128, 255, 0.22);
+      }
+      .support-chat-copy {
+        display: grid;
+        gap: 4px;
+        min-width: 0;
+      }
+      .support-chat-copy strong {
+        font-size: 22px;
+        color: var(--text);
+      }
+      .support-chat-copy p {
+        margin: 0;
+        color: var(--muted);
+      }
+      .support-chat-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+      .support-chat-badges .pill {
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid rgba(229, 210, 233, 0.88);
       }
       .support-toolbar {
         display: grid;
@@ -87,7 +152,7 @@
         border-radius: 24px;
         background: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(249, 244, 255, 0.94));
         border: 1px solid rgba(229, 210, 233, 0.88);
-        min-height: 340px;
+        min-height: 46vh;
         margin: 0 0 16px;
       }
       .support-bubble {
@@ -117,9 +182,56 @@
       .support-compose {
         display: grid;
         gap: 12px;
+        padding: 18px 20px 20px;
+        border-top: 1px solid rgba(229, 210, 233, 0.7);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(250, 247, 255, 0.98));
+      }
+      .support-compose .form-grid {
+        gap: 12px;
+      }
+      .support-compose label {
+        display: grid;
+        gap: 8px;
+      }
+      .support-compose label > span {
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-weight: 800;
+        color: var(--muted);
+      }
+      .support-compose input,
+      .support-compose select,
+      .support-compose textarea {
+        border-radius: 18px;
       }
       .support-compose textarea {
-        min-height: 230px;
+        min-height: 190px;
+      }
+      .support-compose-footer {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: center;
+      }
+      .support-preset-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .support-preset-row .filter-chip {
+        background: rgba(255, 255, 255, 0.92);
+      }
+      .support-chat-hint {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+      .support-chat-hint .pill {
+        background: rgba(255,255,255,0.76);
       }
       .support-side-card {
         min-height: 100%;
@@ -227,6 +339,13 @@
       body.support-is-member .topbar,
       body.support-is-member .panel {
         background: rgba(255, 255, 255, 0.88);
+      }
+      body.support-is-member .support-chat-header {
+        background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(247, 250, 255, 0.95));
+      }
+      body.support-is-member .support-chat-panel {
+        border-color: rgba(229, 210, 233, 0.88);
+        box-shadow: var(--shadow-soft);
       }
       body.support-is-member .sidebar {
         background:
@@ -658,12 +777,26 @@
         .support-side-card {
           border-radius: 22px;
         }
+        .support-chat-header {
+          padding: 14px;
+        }
+        .support-chat-copy strong {
+          font-size: 20px;
+        }
+        .support-chat-avatar {
+          width: 46px;
+          height: 46px;
+          border-radius: 16px;
+        }
         .support-thread {
           padding: 14px;
           min-height: 250px;
         }
+        .support-compose {
+          padding: 14px;
+        }
         .support-compose textarea {
-          min-height: 180px;
+          min-height: 170px;
         }
         .support-actions {
           width: 100%;
@@ -700,6 +833,9 @@
         .support-request-layout {
           gap: 12px;
         }
+        .support-compose-footer {
+          align-items: flex-start;
+        }
       }
       @media (max-width: 520px) {
         .support-shell .topbar {
@@ -718,6 +854,11 @@
         }
         .support-grid {
           gap: 12px;
+        }
+        .support-chat-header-copy,
+        .support-chat-badges,
+        .support-compose-footer {
+          width: 100%;
         }
         .support-card-title,
         .support-card-title .pill {
@@ -880,11 +1021,20 @@
 
         <section class="view hidden" id="supportRequestView">
           <div class="support-request-layout">
-            <section class="panel support-request-panel">
-              <div class="panel-header">
-                <div class="support-card-title">
-                  <h3 id="newTicketTitle">Support Request</h3>
-                  <span class="pill">Chat-style</span>
+            <section class="panel support-request-panel support-chat-panel">
+              <div class="support-chat-header">
+                <div class="support-chat-header-copy">
+                  <div class="support-chat-avatar">M</div>
+                  <div class="support-chat-copy">
+                    <span class="pill">Member side</span>
+                    <strong id="newTicketTitle">Chat with Mochi Support</strong>
+                    <p>Send a message like you would in chat. The whole thread stays here, so it feels natural and easy.</p>
+                  </div>
+                </div>
+                <div class="support-chat-badges">
+                  <span class="pill">Usually replies here</span>
+                  <span class="pill">Anonymous optional</span>
+                  <span class="pill">Shift+Enter for new lines</span>
                 </div>
               </div>
               <div class="support-thread" id="supportRequestThread" aria-live="polite">
@@ -902,45 +1052,56 @@
                 </article>
               </div>
               <div class="support-compose">
+                <div class="support-chat-hint">
+                  <span class="pill">Tips</span>
+                  <span>Use the quick prompts if you want to start fast.</span>
+                </div>
+                <div class="support-preset-row" aria-label="Quick prompts">
+                  <button class="filter-chip" type="button" data-request-preset="help">Need help</button>
+                  <button class="filter-chip" type="button" data-request-preset="report">Report something</button>
+                  <button class="filter-chip" type="button" data-request-preset="anonymous">Anonymous chat</button>
+                </div>
                 <div class="form-grid">
-                  <label>Category
+                  <label><span>Category</span>
                     <select id="ticketCategory">
                       <option value="ticket">General support</option>
                       <option value="report">Report</option>
                       <option value="anonymous-chat">Anonymous chat</option>
                     </select>
                   </label>
-                  <label>Subject<input id="ticketSubject" placeholder="Short summary"></label>
+                  <label><span>Subject</span><input id="ticketSubject" placeholder="Short summary"></label>
                 </div>
-                <label>Message<textarea id="ticketMessage" rows="11" placeholder="Write your request like a chat"></textarea></label>
-                <label class="checkbox-row"><input id="ticketAnonymous" type="checkbox"> Submit anonymously to staff</label>
-                <div class="button-row">
+                <label><span>Message</span><textarea id="ticketMessage" rows="11" placeholder="Write your message like a chat. Shift+Enter makes a new line."></textarea></label>
+                <div class="support-compose-footer">
+                  <label class="checkbox-row"><input id="ticketAnonymous" type="checkbox"> Submit anonymously to staff</label>
+                  <div class="button-row">
                   <button class="save-button" id="createTicketButton" type="button">Send Request</button>
                   <button class="ghost-button" id="anonymousQuickStart" type="button">Quick anonymous chat</button>
+                  </div>
                 </div>
               </div>
             </section>
 
             <aside class="panel support-side-card">
               <div class="panel-header">
-                <h3>How it feels</h3>
+                <h3>What happens next</h3>
               </div>
               <div class="summary-grid support-side-stack">
                 <article class="summary-item">
-                  <span>Big thread</span>
-                  <strong>Like a chat</strong>
+                  <span>Step 1</span>
+                  <strong>Send a message</strong>
                 </article>
                 <article class="summary-item">
-                  <span>Anonymous</span>
-                  <strong>Optional</strong>
+                  <span>Step 2</span>
+                  <strong>Staff reads it here</strong>
                 </article>
                 <article class="summary-item">
-                  <span>Reply style</span>
-                  <strong>Friendly</strong>
+                  <span>Step 3</span>
+                  <strong>We reply in-thread</strong>
                 </article>
                 <article class="summary-item">
-                  <span>Next step</span>
-                  <strong>We answer here</strong>
+                  <span>Bonus</span>
+                  <strong>Anonymous is optional</strong>
                 </article>
               </div>
             </aside>

@@ -78,6 +78,12 @@ function closeSidebarIfMobile() {
   }
 }
 
+function scrollRequestThreadToBottom() {
+  const thread = $("#supportRequestThread");
+  if (!thread) return;
+  thread.scrollTo({ top: thread.scrollHeight, behavior: "smooth" });
+}
+
 function setActiveView(viewName) {
   state.activeView = viewName;
   document.querySelectorAll(".tab[data-view]").forEach(tab => {
@@ -98,10 +104,10 @@ function renderActiveViewCopy() {
   const isStaff = role === "staff";
 
   if (state.activeView === "support-request") {
-    $("#viewTitle").textContent = isStaff ? "Quick Note" : "Support Request";
+    $("#viewTitle").textContent = isStaff ? "Quick Note" : "Support Chat";
     $("#topbarCopy").textContent = isStaff
       ? "Leave a short note in a soft, friendly workspace."
-      : "Write your request like a chat and send it when you’re ready.";
+      : "Write your request like a chat and send it when you're ready.";
     return;
   }
 
@@ -133,6 +139,7 @@ function renderRequestDraft() {
 
   bubble.classList.remove("hidden");
   preview.textContent = message;
+  requestAnimationFrame(scrollRequestThreadToBottom);
 }
 
 function getVisibleTickets() {
@@ -188,8 +195,8 @@ function renderSupportCopy() {
   const assignedCount = Number.isFinite(summary.assigned) ? summary.assigned : state.tickets.filter(ticket => ticket.assignedTo?.id).length;
 
   $("#clientStatus").textContent = isStaff ? "Pastel desk" : "Member helpdesk";
-  $("#supportRequestTab").textContent = isStaff ? "Quick note" : "Support Request";
-  $("#newTicketTitle").textContent = isStaff ? "Quick note" : "Support Request";
+  $("#supportRequestTab").textContent = isStaff ? "Quick note" : "Support Chat";
+  $("#newTicketTitle").textContent = isStaff ? "Quick note" : "Chat with Mochi Support";
   $("#ticketListTitle").textContent = isStaff ? "Inbox" : "Your Tickets";
   $("#anonymousTitle").textContent = isStaff ? "Soft tools" : "Anonymous Chat";
   $("#ticketDetailMeta").textContent = isStaff
@@ -200,7 +207,7 @@ function renderSupportCopy() {
     : "A friendly place to ask for help, send anonymous reports, and keep conversations tidy.";
   $("#topbarCopy").textContent = isStaff
     ? "Staff can triage reports, answer anonymous chats, and keep the inbox moving without losing context."
-    : "Tell us what you need, open an anonymous chat if you'd like, and keep everything in one cozy place.";
+    : "Tell us what you need, open an anonymous chat if you'd like, and keep everything in one cozy chat.";
   $("#supportAccent").textContent = isStaff ? "Cozy queue" : "Member support";
   $("#signedInUser").textContent = `${state.me?.user?.tag || state.me?.user?.username || "Signed in"} (${accessLabel})`;
   $("#supportRoleTag").textContent = isStaff ? "Staff" : "Member";
@@ -571,6 +578,36 @@ function setupAnonymousQuickStart() {
   renderRequestDraft();
 }
 
+function applyRequestPreset(presetName) {
+  const presets = {
+    help: {
+      category: "ticket",
+      subject: "Need help with my account",
+      message: "Hi Mochi Support, I could use a little help with my account. Here is what happened..."
+    },
+    report: {
+      category: "report",
+      subject: "I want to report something",
+      message: "Hi Mochi Support, I need to report an issue and wanted to share the details here..."
+    },
+    anonymous: {
+      category: "anonymous-chat",
+      subject: "Anonymous chat with mods",
+      message: "Hi Mochi Support, I'd like to talk privately about something that's on my mind."
+    }
+  };
+  const preset = presets[presetName];
+  if (!preset) return;
+
+  $("#ticketCategory").value = preset.category;
+  $("#ticketSubject").value = preset.subject;
+  $("#ticketMessage").value = preset.message;
+  $("#ticketAnonymous").checked = preset.category === "anonymous-chat" || preset.category === "report";
+  renderRequestDraft();
+  $("#ticketMessage").focus();
+  $("#ticketMessage").setSelectionRange($("#ticketMessage").value.length, $("#ticketMessage").value.length);
+}
+
 function renderAnonymousInfo() {
   const me = state.me || {};
   const role = getSupportRole();
@@ -615,9 +652,18 @@ async function init() {
   $("#anonymousQuickStart").addEventListener("click", setupAnonymousQuickStart);
   $("#refreshButton").addEventListener("click", () => loadSupport().catch(error => setAlert(error.message, "error")));
   $("#ticketMessage").addEventListener("input", renderRequestDraft);
+  $("#ticketMessage").addEventListener("keydown", event => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      createTicket().catch(error => setAlert(error.message, "error"));
+    }
+  });
   $("#ticketSearchInput")?.addEventListener("input", event => {
     state.ticketSearch = event.target.value;
     renderTickets();
+  });
+  document.querySelectorAll("[data-request-preset]").forEach(button => {
+    button.addEventListener("click", () => applyRequestPreset(button.dataset.requestPreset || ""));
   });
   $("#saveTicketMetaButton")?.addEventListener("click", () => saveTicketMeta().catch(error => setAlert(error.message, "error")));
   $("#claimTicketButton")?.addEventListener("click", () => saveTicketMeta({ claim: true }).catch(error => setAlert(error.message, "error")));
