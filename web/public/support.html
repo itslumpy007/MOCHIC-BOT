@@ -54,6 +54,11 @@
         grid-template-rows: auto minmax(0, 1fr) auto;
         overflow: hidden;
         height: clamp(680px, 78vh, 920px);
+        background: rgba(255, 255, 255, 0.96);
+        border: 1px solid rgba(229, 210, 233, 0.84);
+      }
+      .support-chat-panel > * {
+        min-height: 0;
       }
       .support-chat-panel .support-thread {
         margin: 0;
@@ -74,7 +79,7 @@
         justify-content: space-between;
         padding: 18px 20px 16px;
         border-bottom: 1px solid rgba(229, 210, 233, 0.7);
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 245, 255, 0.88));
+        background: rgba(255, 255, 255, 0.94);
       }
       .support-chat-status {
         display: flex;
@@ -109,7 +114,6 @@
         font-weight: 800;
         color: white;
         background: linear-gradient(135deg, #79a6ff, #61d0ad);
-        box-shadow: 0 14px 30px rgba(95, 128, 255, 0.22);
       }
       .support-chat-copy {
         display: grid;
@@ -167,30 +171,29 @@
         gap: 12px;
         padding: 18px;
         border-radius: 24px;
-        background:
-          radial-gradient(circle at top left, rgba(255, 255, 255, 0.92), transparent 34%),
-          radial-gradient(circle at 92% 0%, rgba(124, 142, 255, 0.12), transparent 24%),
-          linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(249, 244, 255, 0.96));
-        border: 1px solid rgba(229, 210, 233, 0.88);
+        background: rgba(255, 255, 255, 0.92);
+        border-top: 1px solid rgba(229, 210, 233, 0.7);
+        border-bottom: 1px solid rgba(229, 210, 233, 0.7);
         min-height: 46vh;
         overflow: auto;
-        margin: 0 0 16px;
+        margin: 0;
       }
       .support-bubble {
         max-width: 78%;
         padding: 14px 16px;
         border-radius: 20px;
         position: relative;
+        box-shadow: 0 8px 24px rgba(37, 40, 74, 0.06);
       }
       .support-bubble.team {
-        background: rgba(255, 255, 255, 0.96);
-        border: 1px solid rgba(229, 210, 233, 0.88);
+        background: #ffffff;
+        border: 1px solid rgba(229, 210, 233, 0.84);
         padding-left: 58px;
       }
       .support-bubble.you {
         margin-left: auto;
-        background: linear-gradient(135deg, rgba(255, 228, 241, 0.98), rgba(234, 237, 255, 0.98));
-        border: 1px solid rgba(229, 210, 233, 0.88);
+        background: linear-gradient(135deg, rgba(245, 236, 255, 0.98), rgba(232, 244, 255, 0.98));
+        border: 1px solid rgba(229, 210, 233, 0.84);
         padding-right: 58px;
       }
       .support-bubble strong {
@@ -242,7 +245,7 @@
         gap: 12px;
         padding: 18px 20px 20px;
         border-top: 1px solid rgba(229, 210, 233, 0.7);
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(250, 247, 255, 0.98));
+        background: rgba(255, 255, 255, 0.97);
       }
       .support-compose .form-grid {
         gap: 12px;
@@ -407,17 +410,14 @@
         background: rgba(255, 255, 255, 0.88);
       }
       body.support-is-member .support-chat-header {
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(247, 250, 255, 0.95));
+        background: rgba(255, 255, 255, 0.96);
       }
       body.support-is-member .support-chat-panel {
         border-color: rgba(229, 210, 233, 0.88);
         box-shadow: var(--shadow-soft);
       }
       body.support-is-member .support-thread {
-        background:
-          radial-gradient(circle at top left, rgba(255, 255, 255, 0.92), transparent 34%),
-          radial-gradient(circle at 92% 0%, rgba(97, 208, 173, 0.12), transparent 24%),
-          linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(247, 250, 255, 0.98));
+        background: rgba(255, 255, 255, 0.95);
       }
       body.support-is-member .sidebar {
         background:
