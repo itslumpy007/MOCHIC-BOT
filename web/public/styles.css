@@ -505,6 +505,8 @@ textarea {
   min-height: 44px;
   padding: 0 14px;
   border-radius: 14px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .sidebar-backdrop {
@@ -1669,12 +1671,15 @@ tbody tr:hover td {
     align-items: center;
     justify-content: center;
     box-shadow: 0 16px 30px rgba(23, 30, 44, 0.18);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .sidebar-close-button {
     display: inline-flex;
     width: 100%;
     justify-content: center;
+    touch-action: manipulation;
   }
 
   .sidebar-backdrop {

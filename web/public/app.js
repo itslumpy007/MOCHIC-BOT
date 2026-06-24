@@ -1122,6 +1122,9 @@ function setSidebarOpen(open) {
   const toggle = $("#sidebarToggle");
   if (toggle) {
     toggle.setAttribute("aria-expanded", next ? "true" : "false");
+    toggle.setAttribute("title", next ? "Close sidebar" : "Toggle sidebar");
+    toggle.setAttribute("aria-label", next ? "Close sidebar" : "Toggle sidebar");
+    toggle.textContent = next ? "✕" : "☰";
   }
 }
 
