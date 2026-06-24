@@ -23,7 +23,17 @@ const SUPPORT_SUPPORT_CHANNEL_ID = process.env.SUPPORT_SUPPORT_CHANNEL_ID || pro
 const SUPPORT_DATA_DIR = process.env.SUPPORT_DATA_DIR || path.join(__dirname, "..", "..", "data");
 const SUPPORT_SUPPORT_MOD_ROLE_IDS = parseIdList(process.env.SUPPORT_MOD_ROLE_IDS || process.env.MOD_ROLE_IDS || "");
 const SUPPORT_SUPPORT_ADMIN_ROLE_IDS = parseIdList(process.env.SUPPORT_ADMIN_ROLE_IDS || process.env.ADMIN_ROLE_IDS || "");
-const SUPPORT_FLAG_ROLE_ID = process.env.SUPPORT_FLAG_ROLE_ID || process.env.WARN_ROLE_ID || "";
+const SUPPORT_FLAG_ROLE_IDS = [
+  process.env.SUPPORT_FLAG_ROLE_LEVEL_1_ID || process.env.SUPPORT_FLAG_ROLE_ID || process.env.WARN_ROLE_ID || "",
+  process.env.SUPPORT_FLAG_ROLE_LEVEL_2_ID || "",
+  process.env.SUPPORT_FLAG_ROLE_LEVEL_3_ID || ""
+];
+if (!SUPPORT_FLAG_ROLE_IDS.some(Boolean)) {
+  const fallbackFlagRoleIds = parseIdList(process.env.SUPPORT_FLAG_ROLE_IDS || "");
+  SUPPORT_FLAG_ROLE_IDS[0] = fallbackFlagRoleIds[0] || "";
+  SUPPORT_FLAG_ROLE_IDS[1] = fallbackFlagRoleIds[1] || "";
+  SUPPORT_FLAG_ROLE_IDS[2] = fallbackFlagRoleIds[2] || "";
+}
 const SUPPORT_SESSION_COOKIE = "mochi_support_session";
 const SUPPORT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -100,6 +110,16 @@ function getCookieOptions(req, maxAgeSeconds) {
     `Max-Age=${maxAgeSeconds}`,
     ...(isHttps ? ["Secure"] : [])
   ].join("; ");
+}
+
+function getSupportWarningRoleId(level) {
+  const normalizedLevel = [1, 2, 3].includes(Number(level)) ? Number(level) : 0;
+  if (!normalizedLevel) return "";
+  return SUPPORT_FLAG_ROLE_IDS[normalizedLevel - 1] || "";
+}
+
+function getSupportWarningRoleIds() {
+  return SUPPORT_FLAG_ROLE_IDS.filter(Boolean);
 }
 
 function setCookie(req, res, name, value, maxAgeSeconds) {
@@ -209,8 +229,8 @@ async function getDiscordAccessLevel(userId) {
   return "member";
 }
 
-async function syncSupportFlagRole(userId, flagged, reason = "") {
-  if (!SUPPORT_FLAG_ROLE_ID || !SUPPORT_GUILD_ID || !client.isReady() || !userId) {
+async function syncSupportFlagRole(userId, flagLevel, reason = "") {
+  if (!SUPPORT_GUILD_ID || !client.isReady() || !userId) {
     return { applied: false, reason: "warning role not configured" };
   }
 
@@ -224,17 +244,33 @@ async function syncSupportFlagRole(userId, flagged, reason = "") {
     return { applied: false, reason: "member not found" };
   }
 
-  const auditReason = `Support flag ${flagged ? "applied" : "cleared"}${reason ? `: ${reason}` : ""}`;
+  const normalizedLevel = [1, 2, 3].includes(Number(flagLevel)) ? Number(flagLevel) : 0;
+  const warningRoleIds = getSupportWarningRoleIds();
+  const desiredRoleId = getSupportWarningRoleId(normalizedLevel);
+  const auditReason = `Support warning ${normalizedLevel ? `level ${normalizedLevel}` : "cleared"}${reason ? `: ${reason}` : ""}`;
 
   try {
-    const hasRole = member.roles.cache.has(SUPPORT_FLAG_ROLE_ID);
-    if (flagged && hasRole) return { applied: true, alreadySet: true };
-    if (!flagged && !hasRole) return { applied: true, alreadyCleared: true };
+    const activeWarningRoles = warningRoleIds.filter(roleId => member.roles.cache.has(roleId));
+    if (!normalizedLevel) {
+      if (!activeWarningRoles.length) return { applied: true, alreadyCleared: true };
+      await member.roles.remove(activeWarningRoles, auditReason);
+      return { applied: true, cleared: activeWarningRoles.length };
+    }
 
-    if (flagged) {
-      await member.roles.add(SUPPORT_FLAG_ROLE_ID, auditReason);
-    } else {
-      await member.roles.remove(SUPPORT_FLAG_ROLE_ID, auditReason);
+    if (!desiredRoleId) {
+      return { applied: false, reason: "warning role not configured" };
+    }
+
+    const rolesToRemove = activeWarningRoles.filter(roleId => roleId !== desiredRoleId);
+    const alreadyCorrect = activeWarningRoles.length === 1 && activeWarningRoles[0] === desiredRoleId;
+    if (alreadyCorrect && !rolesToRemove.length) return { applied: true, alreadySet: true };
+
+    if (rolesToRemove.length) {
+      await member.roles.remove(rolesToRemove, auditReason);
+    }
+
+    if (!member.roles.cache.has(desiredRoleId)) {
+      await member.roles.add(desiredRoleId, auditReason);
     }
     return { applied: true };
   } catch (error) {
@@ -266,6 +302,11 @@ function normalizeSupportTicketRecord(ticket) {
     : [];
 
   const priority = ["low", "normal", "high", "urgent"].includes(ticket.priority) ? ticket.priority : "normal";
+  const flagLevel = [1, 2, 3].includes(Number(ticket.flagLevel))
+    ? Number(ticket.flagLevel)
+    : Boolean(ticket.flagged)
+      ? 1
+      : 0;
 
   return {
     id: Number.isInteger(ticket.id) ? ticket.id : 0,
@@ -286,7 +327,8 @@ function normalizeSupportTicketRecord(ticket) {
           tag: ticket.assignedTo.tag || null
         }
       : null,
-    flagged: Boolean(ticket.flagged),
+    flagged: flagLevel > 0,
+    flagLevel,
     flagReason: normalizeSupportText(ticket.flagReason, 1000),
     staffNote: normalizeSupportText(ticket.staffNote, 2000),
     messages
@@ -360,6 +402,7 @@ function createSupportTicket({ creator, category = "ticket", subject, message, a
     priority: category === "report" ? "high" : "normal",
     assignedTo: null,
     flagged: false,
+    flagLevel: 0,
     flagReason: "",
     staffNote: "",
     messages: []
@@ -447,6 +490,7 @@ function serializeSupportTicket(ticket, auth = null) {
       tag: ticket.assignedTo.tag || null
     } : null;
     payload.flagged = Boolean(ticket.flagged);
+    payload.flagLevel = [1, 2, 3].includes(Number(ticket.flagLevel)) ? Number(ticket.flagLevel) : (ticket.flagged ? 1 : 0);
     payload.flagReason = ticket.flagReason || "";
     payload.staffNote = ticket.staffNote || "";
   }
@@ -491,7 +535,7 @@ function formatSupportTranscript(ticket, auth = null) {
     append(`Staff note: ${data.staffNote}`);
   }
   if (data.flagged) {
-    append(`Warning role: applied`);
+    append(`Warning level: ${[1, 2, 3].includes(Number(data.flagLevel)) ? Number(data.flagLevel) : 1}`);
   }
   if (data.flagReason) {
     append(`Warning reason: ${data.flagReason}`);
@@ -545,6 +589,7 @@ function buildSupportInboxPayload(auth = null) {
   const openCount = tickets.filter(ticket => ticket.status === "open").length;
   const anonymousCount = tickets.filter(ticket => ticket.anonymous).length;
   const flaggedCount = tickets.filter(ticket => ticket.flagged).length;
+  const warningLevelCounts = [1, 2, 3].map(level => tickets.filter(ticket => Number(ticket.flagLevel) === level).length);
   const urgentCount = tickets.filter(ticket => ticket.priority === "urgent").length;
   const highCount = tickets.filter(ticket => ticket.priority === "high").length;
   const assignedCount = tickets.filter(ticket => ticket.assignedTo?.id).length;
@@ -558,6 +603,9 @@ function buildSupportInboxPayload(auth = null) {
       closed: tickets.length - openCount,
       anonymous: anonymousCount,
       flagged: flaggedCount,
+      warningLevel1: warningLevelCounts[0],
+      warningLevel2: warningLevelCounts[1],
+      warningLevel3: warningLevelCounts[2],
       urgent: urgentCount,
       high: highCount,
       assigned: assignedCount,
@@ -911,7 +959,9 @@ async function handleApi(req, res, pathname, requestUrl) {
       const body = await readJsonBody(req);
       const priority = ["low", "normal", "high", "urgent"].includes(String(body.priority || "")) ? String(body.priority) : ticket.priority || "normal";
       const assignedToInput = body.assignedTo;
+      const requestedFlagLevel = Number.parseInt(body.flagLevel, 10);
       const flagged = Boolean(body.flagged);
+      const flagLevel = [1, 2, 3].includes(requestedFlagLevel) ? requestedFlagLevel : (flagged ? 1 : 0);
       const flagReason = normalizeSupportText(body.flagReason, 1000);
       const staffNote = normalizeSupportText(body.staffNote, 2000);
 
@@ -922,11 +972,12 @@ async function handleApi(req, res, pathname, requestUrl) {
             tag: normalizeSupportText(assignedToInput.tag || "", 140) || null
           }
         : null;
-      ticket.flagged = flagged;
-      ticket.flagReason = flagged ? flagReason : "";
+      ticket.flagLevel = flagLevel;
+      ticket.flagged = flagLevel > 0;
+      ticket.flagReason = flagLevel > 0 ? flagReason : "";
       ticket.staffNote = staffNote;
       updateSupportTicket(ticket);
-      await syncSupportFlagRole(ticket.createdByUserId, ticket.flagged, ticket.flagReason || ticket.subject);
+      await syncSupportFlagRole(ticket.createdByUserId, ticket.flagLevel, ticket.flagReason || ticket.subject);
 
       return sendJson(res, 200, {
         ok: true,

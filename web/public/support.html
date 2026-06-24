@@ -1137,12 +1137,14 @@
                   <label>Assigned to
                     <input id="staffAssigneeInput" placeholder="Claimed by or tag">
                   </label>
-                  <label class="staff-flag-toggle">
-                    <span class="toggle-row">
-                      <span>Flag &amp; apply warning role</span>
-                      <input id="staffFlaggedInput" type="checkbox">
-                    </span>
-                    <small>Applies the configured community warning role to this member.</small>
+                  <label class="staff-flag-toggle">Warning level
+                    <select id="staffFlagLevelSelect">
+                      <option value="0">No warning</option>
+                      <option value="1">Level 1 - Light warning</option>
+                      <option value="2">Level 2 - Community warning</option>
+                      <option value="3">Level 3 - Serious warning</option>
+                    </select>
+                    <small>Each level applies a different configured Discord role.</small>
                   </label>
                   <label class="staff-flag-reason">Flag reason
                     <textarea id="staffFlagReasonInput" rows="3" placeholder="Why should the mod team review this?"></textarea>

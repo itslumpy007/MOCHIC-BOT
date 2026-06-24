@@ -159,6 +159,7 @@ function getVisibleTickets() {
         ticket.assignedTo?.tag,
         ticket.assignedTo?.id,
         ticket.flagged ? "flagged" : "",
+        ticket.flagLevel,
         ticket.flagReason,
         ticket.staffNote
       ].map(value => String(value || "").toLowerCase()).join(" ");
@@ -196,6 +197,9 @@ function renderSupportCopy() {
   const urgentCount = Number.isFinite(summary.urgent) ? summary.urgent : state.tickets.filter(ticket => ticket.priority === "urgent").length;
   const assignedCount = Number.isFinite(summary.assigned) ? summary.assigned : state.tickets.filter(ticket => ticket.assignedTo?.id).length;
   const flaggedCount = Number.isFinite(summary.flagged) ? summary.flagged : state.tickets.filter(ticket => ticket.flagged).length;
+  const warningLevel1Count = Number.isFinite(summary.warningLevel1) ? summary.warningLevel1 : state.tickets.filter(ticket => Number(ticket.flagLevel) === 1).length;
+  const warningLevel2Count = Number.isFinite(summary.warningLevel2) ? summary.warningLevel2 : state.tickets.filter(ticket => Number(ticket.flagLevel) === 2).length;
+  const warningLevel3Count = Number.isFinite(summary.warningLevel3) ? summary.warningLevel3 : state.tickets.filter(ticket => Number(ticket.flagLevel) === 3).length;
 
   $("#clientStatus").textContent = isStaff ? "Pastel desk" : "Member helpdesk";
   $("#supportRequestTab").textContent = isStaff ? "Quick note" : "Support Chat";
@@ -250,7 +254,22 @@ function renderSupportCopy() {
         <article class="support-staff-metric">
           <span>Flagged</span>
           <strong>${flaggedCount}</strong>
-          <small>Warning role queued</small>
+          <small>Any warning role queued</small>
+        </article>
+        <article class="support-staff-metric">
+          <span>Level 1</span>
+          <strong>${warningLevel1Count}</strong>
+          <small>Light warnings</small>
+        </article>
+        <article class="support-staff-metric">
+          <span>Level 2</span>
+          <strong>${warningLevel2Count}</strong>
+          <small>Community warnings</small>
+        </article>
+        <article class="support-staff-metric">
+          <span>Level 3</span>
+          <strong>${warningLevel3Count}</strong>
+          <small>Serious warnings</small>
         </article>
         <article class="support-staff-metric">
           <span>Total</span>
@@ -347,7 +366,7 @@ function renderTickets() {
         ${ticket.anonymous ? '<span class="badge">anonymous</span>' : ""}
         ${isStaff ? `<span class="badge">${escapeHtml(ticket.priority || "normal")}</span>` : ""}
         ${isStaff && ticket.assignedTo?.tag ? `<span class="badge">assigned: ${escapeHtml(ticket.assignedTo.tag)}</span>` : ""}
-        ${isStaff && ticket.flagged ? `<span class="badge">warning role</span>` : ""}
+        ${isStaff && ticket.flagged ? `<span class="badge">warning L${Number(ticket.flagLevel) || 1}</span>` : ""}
         <br>
         Updated ${escapeHtml(formatDate(ticket.updatedAt))}
       </p>
@@ -390,7 +409,8 @@ function renderTicketDetail() {
     metaBits.unshift(`Priority ${ticket.priority}`);
   }
   if (isStaff && ticket.flagged) {
-    metaBits.unshift(ticket.flagReason ? `Warning role: ${ticket.flagReason}` : "Warning role applied");
+    const level = [1, 2, 3].includes(Number(ticket.flagLevel)) ? Number(ticket.flagLevel) : 1;
+    metaBits.unshift(ticket.flagReason ? `Warning level ${level}: ${ticket.flagReason}` : `Warning level ${level}`);
   }
   $("#ticketDetailMeta").textContent = metaBits.join(" - ");
   $("#ticketStatusPill").textContent = ticket.status;
@@ -399,7 +419,7 @@ function renderTicketDetail() {
     if (isStaff) {
       $("#staffPrioritySelect").value = ticket.priority || "normal";
       $("#staffAssigneeInput").value = ticket.assignedTo?.tag || ticket.assignedTo?.id || "";
-      $("#staffFlaggedInput").checked = Boolean(ticket.flagged);
+      $("#staffFlagLevelSelect").value = [1, 2, 3].includes(Number(ticket.flagLevel)) ? String(ticket.flagLevel) : (ticket.flagged ? "1" : "0");
       $("#staffFlagReasonInput").value = ticket.flagReason || "";
       $("#staffNoteInput").value = ticket.staffNote || "";
     }
@@ -546,7 +566,8 @@ async function saveTicketMeta({ claim = false, clearAssignment = false } = {}) {
   const assignedText = $("#staffAssigneeInput").value.trim();
   const payload = {
     priority: $("#staffPrioritySelect").value,
-    flagged: $("#staffFlaggedInput").checked,
+    flagLevel: $("#staffFlagLevelSelect").value,
+    flagged: $("#staffFlagLevelSelect").value !== "0",
     flagReason: $("#staffFlagReasonInput").value,
     staffNote: $("#staffNoteInput").value
   };
