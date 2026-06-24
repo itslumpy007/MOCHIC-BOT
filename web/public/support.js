@@ -138,7 +138,7 @@ function renderRequestDraft() {
   }
 
   bubble.classList.remove("hidden");
-  preview.textContent = message;
+  preview.innerHTML = escapeHtml(message).replace(/\n/g, "<br>");
   requestAnimationFrame(scrollRequestThreadToBottom);
 }
 
@@ -457,6 +457,7 @@ async function createTicket() {
 
   $("#ticketSubject").value = "";
   $("#ticketMessage").value = "";
+  autosizeRequestMessage();
   state.selectedTicketId = result.ticket.id;
   state.selectedTicket = result.ticket;
   await loadSupport();
@@ -574,7 +575,9 @@ function setupAnonymousQuickStart() {
   $("#ticketCategory").value = "anonymous-chat";
   $("#ticketAnonymous").checked = true;
   $("#ticketSubject").value = "Anonymous chat with mods";
-  $("#ticketMessage").focus();
+  const message = $("#ticketMessage");
+  message.focus();
+  message.classList.add("is-expanded");
   renderRequestDraft();
 }
 
@@ -603,9 +606,19 @@ function applyRequestPreset(presetName) {
   $("#ticketSubject").value = preset.subject;
   $("#ticketMessage").value = preset.message;
   $("#ticketAnonymous").checked = preset.category === "anonymous-chat" || preset.category === "report";
+  autosizeRequestMessage();
   renderRequestDraft();
   $("#ticketMessage").focus();
   $("#ticketMessage").setSelectionRange($("#ticketMessage").value.length, $("#ticketMessage").value.length);
+}
+
+function autosizeRequestMessage() {
+  const textarea = $("#ticketMessage");
+  if (!textarea) return;
+  textarea.style.height = "auto";
+  const nextHeight = Math.max(140, Math.min(textarea.scrollHeight, 340));
+  textarea.style.height = `${nextHeight}px`;
+  textarea.classList.toggle("is-expanded", nextHeight > 190);
 }
 
 function renderAnonymousInfo() {
@@ -651,9 +664,12 @@ async function init() {
   $("#exportTranscriptButton").addEventListener("click", exportCurrentTicketTranscript);
   $("#anonymousQuickStart").addEventListener("click", setupAnonymousQuickStart);
   $("#refreshButton").addEventListener("click", () => loadSupport().catch(error => setAlert(error.message, "error")));
-  $("#ticketMessage").addEventListener("input", renderRequestDraft);
+  $("#ticketMessage").addEventListener("input", () => {
+    autosizeRequestMessage();
+    renderRequestDraft();
+  });
   $("#ticketMessage").addEventListener("keydown", event => {
-    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+    if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       createTicket().catch(error => setAlert(error.message, "error"));
     }
@@ -681,6 +697,7 @@ async function init() {
   });
 
   await loadSupport();
+  autosizeRequestMessage();
 }
 
 init().catch(error => setAlert(error.message, "error"));

@@ -53,6 +53,7 @@
         display: grid;
         grid-template-rows: auto minmax(0, 1fr) auto;
         overflow: hidden;
+        height: clamp(680px, 78vh, 920px);
       }
       .support-chat-panel .support-thread {
         margin: 0;
@@ -74,6 +75,22 @@
         padding: 18px 20px 16px;
         border-bottom: 1px solid rgba(229, 210, 233, 0.7);
         background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 245, 255, 0.88));
+      }
+      .support-chat-status {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+      .support-chat-status .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: #63d39a;
+        box-shadow: 0 0 0 5px rgba(99, 211, 154, 0.16);
       }
       .support-chat-header-copy {
         display: flex;
@@ -150,34 +167,75 @@
         gap: 12px;
         padding: 18px;
         border-radius: 24px;
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(249, 244, 255, 0.94));
+        background:
+          radial-gradient(circle at top left, rgba(255, 255, 255, 0.92), transparent 34%),
+          radial-gradient(circle at 92% 0%, rgba(124, 142, 255, 0.12), transparent 24%),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(249, 244, 255, 0.96));
         border: 1px solid rgba(229, 210, 233, 0.88);
         min-height: 46vh;
+        overflow: auto;
         margin: 0 0 16px;
       }
       .support-bubble {
         max-width: 78%;
         padding: 14px 16px;
         border-radius: 20px;
+        position: relative;
       }
       .support-bubble.team {
-        background: rgba(255, 255, 255, 0.94);
+        background: rgba(255, 255, 255, 0.96);
         border: 1px solid rgba(229, 210, 233, 0.88);
+        padding-left: 58px;
       }
       .support-bubble.you {
         margin-left: auto;
         background: linear-gradient(135deg, rgba(255, 228, 241, 0.98), rgba(234, 237, 255, 0.98));
         border: 1px solid rgba(229, 210, 233, 0.88);
+        padding-right: 58px;
       }
       .support-bubble strong {
         display: block;
         margin-bottom: 4px;
         color: #5a476d;
       }
+      .support-bubble::before {
+        content: "";
+        position: absolute;
+        top: 14px;
+        width: 34px;
+        height: 34px;
+        border-radius: 12px;
+        display: grid;
+        place-items: center;
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+      }
+      .support-bubble.team::before {
+        left: 14px;
+        content: "MS";
+        color: #4f63e8;
+        background: rgba(92, 116, 255, 0.12);
+        border: 1px solid rgba(92, 116, 255, 0.14);
+      }
+      .support-bubble.you::before {
+        right: 14px;
+        content: "You";
+        color: #a44e88;
+        background: rgba(255, 207, 236, 0.55);
+        border: 1px solid rgba(255, 190, 226, 0.8);
+      }
       .support-bubble p {
         margin: 0;
         color: var(--muted);
         line-height: 1.5;
+        white-space: pre-wrap;
+      }
+      .support-message-time {
+        display: inline-flex;
+        margin-top: 8px;
+        font-size: 0.78rem;
+        color: rgba(90, 71, 109, 0.68);
       }
       .support-compose {
         display: grid;
@@ -206,7 +264,12 @@
         border-radius: 18px;
       }
       .support-compose textarea {
-        min-height: 190px;
+        min-height: 140px;
+        resize: none;
+        overflow: hidden;
+      }
+      .support-compose textarea.is-expanded {
+        min-height: 180px;
       }
       .support-compose-footer {
         display: flex;
@@ -232,6 +295,9 @@
       }
       .support-chat-hint .pill {
         background: rgba(255,255,255,0.76);
+      }
+      .support-compose .save-button {
+        box-shadow: 0 14px 26px rgba(98, 111, 255, 0.24);
       }
       .support-side-card {
         min-height: 100%;
@@ -346,6 +412,12 @@
       body.support-is-member .support-chat-panel {
         border-color: rgba(229, 210, 233, 0.88);
         box-shadow: var(--shadow-soft);
+      }
+      body.support-is-member .support-thread {
+        background:
+          radial-gradient(circle at top left, rgba(255, 255, 255, 0.92), transparent 34%),
+          radial-gradient(circle at 92% 0%, rgba(97, 208, 173, 0.12), transparent 24%),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(247, 250, 255, 0.98));
       }
       body.support-is-member .sidebar {
         background:
@@ -788,6 +860,9 @@
           height: 46px;
           border-radius: 16px;
         }
+        .support-chat-panel {
+          height: auto;
+        }
         .support-thread {
           padding: 14px;
           min-height: 250px;
@@ -854,6 +929,12 @@
         }
         .support-grid {
           gap: 12px;
+        }
+        .support-bubble.team {
+          padding-left: 52px;
+        }
+        .support-bubble.you {
+          padding-right: 52px;
         }
         .support-chat-header-copy,
         .support-chat-badges,
@@ -1029,6 +1110,10 @@
                     <span class="pill">Member side</span>
                     <strong id="newTicketTitle">Chat with Mochi Support</strong>
                     <p>Send a message like you would in chat. The whole thread stays here, so it feels natural and easy.</p>
+                    <div class="support-chat-status">
+                      <span class="status-dot" aria-hidden="true"></span>
+                      <span>Mochi Support is usually online and replies in this thread.</span>
+                    </div>
                   </div>
                 </div>
                 <div class="support-chat-badges">
@@ -1040,15 +1125,23 @@
               <div class="support-thread" id="supportRequestThread" aria-live="polite">
                 <article class="support-bubble team">
                   <strong>Mochi Support</strong>
-                  <p>Tell us what&apos;s going on. This space is made to feel like a chat, so your request can be as long or as short as you need.</p>
+                  <p>Hey! This is your private support chat. Send one message or keep the conversation going, just like a messenger thread.</p>
+                  <span class="support-message-time">Just now</span>
                 </article>
                 <article class="support-bubble team">
                   <strong>Tip</strong>
-                  <p>You can keep it anonymous if you want. Staff will still be able to reply in the thread.</p>
+                  <p>Use the quick prompts below if you want a head start, or type your own message and press Enter to send.</p>
+                  <span class="support-message-time">Always here</span>
+                </article>
+                <article class="support-bubble team">
+                  <strong>Heads up</strong>
+                  <p>Anonymous mode is optional. If you turn it on, staff will still reply right here in the thread.</p>
+                  <span class="support-message-time">Secure</span>
                 </article>
                 <article class="support-bubble you hidden" id="requestDraftBubble">
                   <strong>You</strong>
                   <p id="requestDraftPreview">Start typing your request below.</p>
+                  <span class="support-message-time">Draft</span>
                 </article>
               </div>
               <div class="support-compose">
@@ -1071,12 +1164,12 @@
                   </label>
                   <label><span>Subject</span><input id="ticketSubject" placeholder="Short summary"></label>
                 </div>
-                <label><span>Message</span><textarea id="ticketMessage" rows="11" placeholder="Write your message like a chat. Shift+Enter makes a new line."></textarea></label>
+                <label><span>Message</span><textarea id="ticketMessage" rows="11" placeholder="Write your message like a chat. Press Enter to send, Shift+Enter for a new line."></textarea></label>
                 <div class="support-compose-footer">
                   <label class="checkbox-row"><input id="ticketAnonymous" type="checkbox"> Submit anonymously to staff</label>
                   <div class="button-row">
-                  <button class="save-button" id="createTicketButton" type="button">Send Request</button>
-                  <button class="ghost-button" id="anonymousQuickStart" type="button">Quick anonymous chat</button>
+                    <button class="save-button" id="createTicketButton" type="button">Send Message</button>
+                    <button class="ghost-button" id="anonymousQuickStart" type="button">Quick anonymous chat</button>
                   </div>
                 </div>
               </div>
