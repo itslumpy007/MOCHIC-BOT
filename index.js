@@ -358,6 +358,24 @@ function normalizeVerificationText(value) {
     .replace(/[^a-z0-9]/g, "");
 }
 
+function normalizeRulesCardText(value, maxLength = 500) {
+  return String(value || "")
+    .replace(/\r\n?/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function normalizeRulesCardBlock(value, maxLength = 4000) {
+  return String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map(line => line.trim())
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, maxLength);
+}
+
 function normalizeTikTokVerificationInputToken(value) {
   return String(value || "")
     .trim()
@@ -1353,18 +1371,20 @@ function getRulesChannelId() {
 }
 
 function getRulesCardTitle() {
-  return normalizeVerificationText(config.settings.rulesCardTitle || "Server rules ✿", 120) || "Server rules ✿";
+  return normalizeRulesCardText(config.settings.rulesCardTitle || "Server rules ✿", 120) || "Server rules ✿";
 }
 
 function getRulesCardDescription() {
-  return normalizeVerificationText(
+  return normalizeRulesCardText(
     config.settings.rulesCardDescription || "A cozy little guide to keep the server kind, comfy, and fun for everyone. Thanks for helping keep Mochi sweet and safe.",
     500
-  );
+  ) || "A cozy little guide to keep the server kind, comfy, and fun for everyone. Thanks for helping keep Mochi sweet and safe.";
 }
 
 function getRulesCardLines() {
-  const raw = String(config.settings.rulesCardRules || "");
+  const raw = Array.isArray(config.settings.rulesCardRules)
+    ? config.settings.rulesCardRules.join("\n")
+    : String(config.settings.rulesCardRules || "");
   const lines = raw
     .split(/\r?\n+/)
     .map(line => line.trim())
@@ -8459,7 +8479,9 @@ function buildWebConfigPayload() {
       rulesChannelId: config.settings.rulesChannelId || "",
       rulesCardTitle: config.settings.rulesCardTitle || "",
       rulesCardDescription: config.settings.rulesCardDescription || "",
-      rulesCardRules: config.settings.rulesCardRules || "",
+      rulesCardRules: Array.isArray(config.settings.rulesCardRules)
+        ? config.settings.rulesCardRules.join("\n")
+        : config.settings.rulesCardRules || "",
       welcomeChannelId: getWelcomeChannelId() || "",
       generalChatChannelId: getGeneralChatChannelId() || "",
       generalChatInactivityEnabled: isGeneralChatInactivityEnabled(),
@@ -8543,13 +8565,13 @@ function updateWebSettings(auth, payload) {
     ? String(payload.verifyChannelId || "").trim() || null
     : config.settings.verifyChannelId || null;
   const nextRulesCardTitle = Object.prototype.hasOwnProperty.call(payload, "rulesCardTitle")
-    ? normalizeVerificationText(payload.rulesCardTitle, 120) || "Server rules ✿"
+    ? normalizeRulesCardText(payload.rulesCardTitle, 120) || "Server rules ✿"
     : config.settings.rulesCardTitle || "Server rules ✿";
   const nextRulesCardDescription = Object.prototype.hasOwnProperty.call(payload, "rulesCardDescription")
-    ? normalizeVerificationText(payload.rulesCardDescription, 500) || ""
+    ? normalizeRulesCardText(payload.rulesCardDescription, 500) || ""
     : config.settings.rulesCardDescription || "";
   const nextRulesCardRules = Object.prototype.hasOwnProperty.call(payload, "rulesCardRules")
-    ? normalizeVerificationText(payload.rulesCardRules, 4000) || ""
+    ? normalizeRulesCardBlock(payload.rulesCardRules, 4000) || ""
     : config.settings.rulesCardRules || "";
   const nextWelcomeChannelId = Object.prototype.hasOwnProperty.call(payload, "welcomeChannelId")
     ? String(payload.welcomeChannelId || "").trim() || null
