@@ -158,6 +158,8 @@ function getVisibleTickets() {
         ticket.priority,
         ticket.assignedTo?.tag,
         ticket.assignedTo?.id,
+        ticket.flagged ? "flagged" : "",
+        ticket.flagReason,
         ticket.staffNote
       ].map(value => String(value || "").toLowerCase()).join(" ");
       if (!haystack.includes(search)) return false;
@@ -193,6 +195,7 @@ function renderSupportCopy() {
   const totalCount = Number.isFinite(summary.total) ? summary.total : state.tickets.length;
   const urgentCount = Number.isFinite(summary.urgent) ? summary.urgent : state.tickets.filter(ticket => ticket.priority === "urgent").length;
   const assignedCount = Number.isFinite(summary.assigned) ? summary.assigned : state.tickets.filter(ticket => ticket.assignedTo?.id).length;
+  const flaggedCount = Number.isFinite(summary.flagged) ? summary.flagged : state.tickets.filter(ticket => ticket.flagged).length;
 
   $("#clientStatus").textContent = isStaff ? "Pastel desk" : "Member helpdesk";
   $("#supportRequestTab").textContent = isStaff ? "Quick note" : "Support Chat";
@@ -243,6 +246,11 @@ function renderSupportCopy() {
           <span>Assigned</span>
           <strong>${assignedCount}</strong>
           <small>Claimed cases</small>
+        </article>
+        <article class="support-staff-metric">
+          <span>Flagged</span>
+          <strong>${flaggedCount}</strong>
+          <small>Queued for mod review</small>
         </article>
         <article class="support-staff-metric">
           <span>Total</span>
@@ -339,6 +347,7 @@ function renderTickets() {
         ${ticket.anonymous ? '<span class="badge">anonymous</span>' : ""}
         ${isStaff ? `<span class="badge">${escapeHtml(ticket.priority || "normal")}</span>` : ""}
         ${isStaff && ticket.assignedTo?.tag ? `<span class="badge">assigned: ${escapeHtml(ticket.assignedTo.tag)}</span>` : ""}
+        ${isStaff && ticket.flagged ? `<span class="badge">mod review</span>` : ""}
         <br>
         Updated ${escapeHtml(formatDate(ticket.updatedAt))}
       </p>
@@ -380,6 +389,9 @@ function renderTicketDetail() {
   if (isStaff && ticket.priority) {
     metaBits.unshift(`Priority ${ticket.priority}`);
   }
+  if (isStaff && ticket.flagged) {
+    metaBits.unshift(ticket.flagReason ? `Flagged for mod review: ${ticket.flagReason}` : "Flagged for mod review");
+  }
   $("#ticketDetailMeta").textContent = metaBits.join(" - ");
   $("#ticketStatusPill").textContent = ticket.status;
   if (staffPanel) {
@@ -387,6 +399,8 @@ function renderTicketDetail() {
     if (isStaff) {
       $("#staffPrioritySelect").value = ticket.priority || "normal";
       $("#staffAssigneeInput").value = ticket.assignedTo?.tag || ticket.assignedTo?.id || "";
+      $("#staffFlaggedInput").checked = Boolean(ticket.flagged);
+      $("#staffFlagReasonInput").value = ticket.flagReason || "";
       $("#staffNoteInput").value = ticket.staffNote || "";
     }
   }
@@ -532,6 +546,8 @@ async function saveTicketMeta({ claim = false, clearAssignment = false } = {}) {
   const assignedText = $("#staffAssigneeInput").value.trim();
   const payload = {
     priority: $("#staffPrioritySelect").value,
+    flagged: $("#staffFlaggedInput").checked,
+    flagReason: $("#staffFlagReasonInput").value,
     staffNote: $("#staffNoteInput").value
   };
 

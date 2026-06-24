@@ -354,6 +354,21 @@
         display: grid;
         gap: 8px;
       }
+      .staff-flag-toggle {
+        align-content: start;
+      }
+      .staff-flag-toggle .toggle-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        justify-content: space-between;
+      }
+      .staff-flag-toggle small {
+        color: var(--muted);
+      }
+      .staff-flag-reason {
+        grid-column: 1 / -1;
+      }
       .staff-meta-grid textarea {
         min-height: 130px;
       }
@@ -1121,6 +1136,16 @@
                   </label>
                   <label>Assigned to
                     <input id="staffAssigneeInput" placeholder="Claimed by or tag">
+                  </label>
+                  <label class="staff-flag-toggle">
+                    <span class="toggle-row">
+                      <span>Flag for mod review</span>
+                      <input id="staffFlaggedInput" type="checkbox">
+                    </span>
+                    <small>Send this ticket to the mod review queue.</small>
+                  </label>
+                  <label class="staff-flag-reason">Flag reason
+                    <textarea id="staffFlagReasonInput" rows="3" placeholder="Why should the mod team review this?"></textarea>
                   </label>
                   <label>Internal note
                     <textarea id="staffNoteInput" rows="4" placeholder="Private note for staff only"></textarea>

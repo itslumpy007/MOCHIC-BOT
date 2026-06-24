@@ -251,6 +251,8 @@ function normalizeSupportTicketRecord(ticket) {
           tag: ticket.assignedTo.tag || null
         }
       : null,
+    flagged: Boolean(ticket.flagged),
+    flagReason: normalizeSupportText(ticket.flagReason, 1000),
     staffNote: normalizeSupportText(ticket.staffNote, 2000),
     messages
   };
@@ -322,6 +324,8 @@ function createSupportTicket({ creator, category = "ticket", subject, message, a
     lastMessageAt: new Date().toISOString(),
     priority: category === "report" ? "high" : "normal",
     assignedTo: null,
+    flagged: false,
+    flagReason: "",
     staffNote: "",
     messages: []
   };
@@ -407,6 +411,8 @@ function serializeSupportTicket(ticket, auth = null) {
       id: ticket.assignedTo.id || null,
       tag: ticket.assignedTo.tag || null
     } : null;
+    payload.flagged = Boolean(ticket.flagged);
+    payload.flagReason = ticket.flagReason || "";
     payload.staffNote = ticket.staffNote || "";
   }
 
@@ -448,6 +454,12 @@ function formatSupportTranscript(ticket, auth = null) {
   }
   if (data.staffNote) {
     append(`Staff note: ${data.staffNote}`);
+  }
+  if (data.flagged) {
+    append(`Flagged for mod review: yes`);
+  }
+  if (data.flagReason) {
+    append(`Flag reason: ${data.flagReason}`);
   }
   append(`Created by: ${data.createdBy?.tag || "Anonymous member"}`);
   append(`Created at: ${data.createdAt}`);
@@ -497,6 +509,7 @@ function buildSupportInboxPayload(auth = null) {
   const tickets = listSupportTickets(auth);
   const openCount = tickets.filter(ticket => ticket.status === "open").length;
   const anonymousCount = tickets.filter(ticket => ticket.anonymous).length;
+  const flaggedCount = tickets.filter(ticket => ticket.flagged).length;
   const urgentCount = tickets.filter(ticket => ticket.priority === "urgent").length;
   const highCount = tickets.filter(ticket => ticket.priority === "high").length;
   const assignedCount = tickets.filter(ticket => ticket.assignedTo?.id).length;
@@ -509,6 +522,7 @@ function buildSupportInboxPayload(auth = null) {
       open: openCount,
       closed: tickets.length - openCount,
       anonymous: anonymousCount,
+      flagged: flaggedCount,
       urgent: urgentCount,
       high: highCount,
       assigned: assignedCount,
@@ -862,6 +876,8 @@ async function handleApi(req, res, pathname, requestUrl) {
       const body = await readJsonBody(req);
       const priority = ["low", "normal", "high", "urgent"].includes(String(body.priority || "")) ? String(body.priority) : ticket.priority || "normal";
       const assignedToInput = body.assignedTo;
+      const flagged = Boolean(body.flagged);
+      const flagReason = normalizeSupportText(body.flagReason, 1000);
       const staffNote = normalizeSupportText(body.staffNote, 2000);
 
       ticket.priority = priority;
@@ -871,6 +887,8 @@ async function handleApi(req, res, pathname, requestUrl) {
             tag: normalizeSupportText(assignedToInput.tag || "", 140) || null
           }
         : null;
+      ticket.flagged = flagged;
+      ticket.flagReason = flagged ? flagReason : "";
       ticket.staffNote = staffNote;
       updateSupportTicket(ticket);
 
