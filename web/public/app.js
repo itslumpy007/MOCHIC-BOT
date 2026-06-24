@@ -4690,6 +4690,9 @@ function bindEvents() {
   $("#sidebarToggle").addEventListener("click", () => {
     setSidebarOpen(!document.body.classList.contains("sidebar-open"));
   });
+  $("#sidebarClose").addEventListener("click", () => {
+    setSidebarOpen(false);
+  });
   $("#sidebarBackdrop").addEventListener("click", () => {
     setSidebarOpen(false);
     state.memberDrawerOpen = false;

@@ -499,6 +499,14 @@ textarea {
   display: none;
 }
 
+.sidebar-close-button {
+  align-self: flex-end;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 14px;
+}
+
 .sidebar-backdrop {
   position: fixed;
   inset: 0;
@@ -1663,6 +1671,12 @@ tbody tr:hover td {
     box-shadow: 0 16px 30px rgba(23, 30, 44, 0.18);
   }
 
+  .sidebar-close-button {
+    display: inline-flex;
+    width: 100%;
+    justify-content: center;
+  }
+
   .sidebar-backdrop {
     display: none;
   }
@@ -1922,6 +1936,10 @@ tbody tr:hover td {
     max-width: 100vw;
     padding-top: max(14px, env(safe-area-inset-top));
     padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  }
+
+  .sidebar-close-button {
+    width: 100%;
   }
 
   .topbar {
