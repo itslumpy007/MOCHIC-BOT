@@ -300,6 +300,16 @@ function createDefaultConfig() {
     settings: {
       verifyChannelId: null,
       rulesChannelId: null,
+      rulesCardTitle: "Server rules ✿",
+      rulesCardDescription: "A cozy little guide to keep the server kind, comfy, and fun for everyone. Thanks for helping keep Mochi sweet and safe.",
+      rulesCardRules: [
+        "Be kind, thoughtful, and respectful to everyone.",
+        "Please keep spam, harassment, and drama out of the chat.",
+        "Follow Discord's Terms of Service and community rules.",
+        "Use each channel for its intended purpose.",
+        "Stay active in general chat within two months, or you may be kicked from the server.",
+        "Please use the verify button in {verify} so you can fully access the server."
+      ].join("\n"),
       welcomeChannelId: null,
       generalChatChannelId: null,
       generalChatInactivityEnabled: true,
@@ -1328,6 +1338,34 @@ function getVerifyChannelMention() {
 
 function getRulesChannelId() {
   return config.settings.rulesChannelId || RULES_CHANNEL_ID;
+}
+
+function getRulesCardTitle() {
+  return normalizeVerificationText(config.settings.rulesCardTitle || "Server rules ✿", 120) || "Server rules ✿";
+}
+
+function getRulesCardDescription() {
+  return normalizeVerificationText(
+    config.settings.rulesCardDescription || "A cozy little guide to keep the server kind, comfy, and fun for everyone. Thanks for helping keep Mochi sweet and safe.",
+    500
+  );
+}
+
+function getRulesCardLines() {
+  const raw = String(config.settings.rulesCardRules || "");
+  const lines = raw
+    .split(/\r?\n+/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .slice(0, 25);
+  return lines.length ? lines : [
+    "Be kind, thoughtful, and respectful to everyone.",
+    "Please keep spam, harassment, and drama out of the chat.",
+    "Follow Discord's Terms of Service and community rules.",
+    "Use each channel for its intended purpose.",
+    "Stay active in general chat within two months, or you may be kicked from the server.",
+    "Please use the verify button in the verify channel so you can fully access the server."
+  ];
 }
 
 function getLogChannelId() {
@@ -3982,18 +4020,16 @@ function buildCuteRulesCardAttachment() {
 
 function buildCuteRulesMessage() {
   const attachment = buildCuteRulesCardAttachment();
+  const rules = getRulesCardLines();
   const embed = makeEmbed({
-    title: "Server rules ✿",
-    description: "A cozy little guide to keep the server kind, comfy, and fun for everyone. Thanks for helping keep Mochi sweet and safe.",
+    title: getRulesCardTitle(),
+    description: getRulesCardDescription(),
     color: COLORS.purple,
-    fields: [
-      { name: "1", value: "Be kind, thoughtful, and respectful to everyone.", inline: false },
-      { name: "2", value: "Please keep spam, harassment, and drama out of the chat.", inline: false },
-      { name: "3", value: "Follow Discord's Terms of Service and community rules.", inline: false },
-      { name: "4", value: "Use each channel for its intended purpose.", inline: false },
-      { name: "5", value: "Stay active in general chat within two months, or you may be kicked from the server.", inline: false },
-      { name: "6", value: `Please use the verify button in <#${getVerifyChannelId()}> so you can fully access the server.`, inline: false }
-    ],
+    fields: rules.map((rule, index) => ({
+      name: String(index + 1),
+      value: rule.replace(/\{verify\}/gi, getVerifyChannelMention()),
+      inline: false
+    })),
     image: { url: `attachment://${attachment.name}` }
   });
 
@@ -8119,6 +8155,9 @@ function buildWebConfigPayload() {
     settings: {
       verifyChannelId: config.settings.verifyChannelId || "",
       rulesChannelId: config.settings.rulesChannelId || "",
+      rulesCardTitle: config.settings.rulesCardTitle || "",
+      rulesCardDescription: config.settings.rulesCardDescription || "",
+      rulesCardRules: config.settings.rulesCardRules || "",
       welcomeChannelId: getWelcomeChannelId() || "",
       generalChatChannelId: getGeneralChatChannelId() || "",
       generalChatInactivityEnabled: isGeneralChatInactivityEnabled(),
@@ -8167,6 +8206,9 @@ function updateWebSettings(auth, payload) {
   const allowed = [
     "verifyChannelId",
     "rulesChannelId",
+    "rulesCardTitle",
+    "rulesCardDescription",
+    "rulesCardRules",
     "welcomeChannelId",
     "generalChatChannelId",
     "generalChatInactivityEnabled",
@@ -8198,6 +8240,15 @@ function updateWebSettings(auth, payload) {
   const nextVerifyChannelId = Object.prototype.hasOwnProperty.call(payload, "verifyChannelId")
     ? String(payload.verifyChannelId || "").trim() || null
     : config.settings.verifyChannelId || null;
+  const nextRulesCardTitle = Object.prototype.hasOwnProperty.call(payload, "rulesCardTitle")
+    ? normalizeVerificationText(payload.rulesCardTitle, 120) || "Server rules ✿"
+    : config.settings.rulesCardTitle || "Server rules ✿";
+  const nextRulesCardDescription = Object.prototype.hasOwnProperty.call(payload, "rulesCardDescription")
+    ? normalizeVerificationText(payload.rulesCardDescription, 500) || ""
+    : config.settings.rulesCardDescription || "";
+  const nextRulesCardRules = Object.prototype.hasOwnProperty.call(payload, "rulesCardRules")
+    ? normalizeVerificationText(payload.rulesCardRules, 4000) || ""
+    : config.settings.rulesCardRules || "";
   const nextWelcomeChannelId = Object.prototype.hasOwnProperty.call(payload, "welcomeChannelId")
     ? String(payload.welcomeChannelId || "").trim() || null
     : config.settings.welcomeChannelId || null;
@@ -8225,6 +8276,9 @@ function updateWebSettings(auth, payload) {
   const before = {
     verifyChannelId: config.settings.verifyChannelId,
     rulesChannelId: config.settings.rulesChannelId,
+    rulesCardTitle: config.settings.rulesCardTitle,
+    rulesCardDescription: config.settings.rulesCardDescription,
+    rulesCardRules: config.settings.rulesCardRules,
     welcomeChannelId: config.settings.welcomeChannelId,
     generalChatChannelId: config.settings.generalChatChannelId,
     generalChatInactivityEnabled: config.settings.generalChatInactivityEnabled,
@@ -8265,6 +8319,12 @@ function updateWebSettings(auth, payload) {
         config.settings[key] = nextMessageArchiveEnabled;
       } else if (key === "messageArchiveRetentionDays") {
         config.settings[key] = nextMessageArchiveRetentionDays;
+      } else if (key === "rulesCardTitle") {
+        config.settings[key] = nextRulesCardTitle;
+      } else if (key === "rulesCardDescription") {
+        config.settings[key] = nextRulesCardDescription;
+      } else if (key === "rulesCardRules") {
+        config.settings[key] = nextRulesCardRules;
       } else {
         config.settings[key] = String(payload[key] || "").trim() || null;
       }
@@ -8282,6 +8342,9 @@ function updateWebSettings(auth, payload) {
   const after = {
     verifyChannelId: config.settings.verifyChannelId,
     rulesChannelId: config.settings.rulesChannelId,
+    rulesCardTitle: config.settings.rulesCardTitle,
+    rulesCardDescription: config.settings.rulesCardDescription,
+    rulesCardRules: config.settings.rulesCardRules,
     welcomeChannelId: config.settings.welcomeChannelId,
     generalChatChannelId: config.settings.generalChatChannelId,
     generalChatInactivityEnabled: config.settings.generalChatInactivityEnabled,
@@ -9794,6 +9857,19 @@ async function handleWebApi(req, res, pathname) {
         messageId: posted.messageId,
         verifiedRoleId: config.settings.verifiedRoleId,
         unverifiedRoleId: config.settings.unverifiedRoleId
+      });
+      return sendWebJson(res, 200, { ok: true, posted });
+    }
+
+    if (req.method === "POST" && pathname === "/api/rules-panel") {
+      if (!hasWebAccess(auth, "admin")) {
+        return sendWebJson(res, 403, { error: "Admin web access is required." });
+      }
+      await readWebJsonBody(req).catch(() => null);
+      const posted = await postRulesMessage("web");
+      recordAuditLog(getWebModeratorTag(auth), "rules-panel-posted", {
+        channelId: posted.channelId,
+        messageId: posted.messageId
       });
       return sendWebJson(res, 200, { ok: true, posted });
     }

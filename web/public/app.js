@@ -354,6 +354,17 @@ const verificationCoreSettingLabels = {
   unverifiedRoleId: "Unverified role ID"
 };
 
+const rulesCardSettingLabels = {
+  rulesCardTitle: "Rules card title",
+  rulesCardDescription: "Rules card description",
+  rulesCardRules: "Rules list"
+};
+
+const rulesCardSettingTypes = {
+  rulesCardDescription: "textarea",
+  rulesCardRules: "textarea"
+};
+
 const verificationBonusSettingLabels = {
   tiktokHandle: "TikTok handle",
   tiktokNicknameAliases: "Accepted nicknames"
@@ -2282,6 +2293,7 @@ function renderSettings() {
     }).join("");
 
   renderSettingFields("#verificationCoreFields", verificationCoreSettingLabels, verificationCoreSettingTypes);
+  renderSettingFields("#rulesCardFields", rulesCardSettingLabels, rulesCardSettingTypes);
   renderSettingFields("#verificationBonusFields", verificationBonusSettingLabels, verificationBonusSettingTypes);
 
   $("#birthdaySettingsFields").innerHTML = Object.entries(birthdaySettingLabels)
@@ -4122,6 +4134,21 @@ async function postAffirmationsPanel() {
   setAlert("Anonymous affirmations panel posted.");
 }
 
+async function repostRulesPanel() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to post the rules panel.", "error");
+    return;
+  }
+
+  await saveVerificationSettings({ auto: true });
+  const response = await api("/api/rules-panel", {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+  await loadAll();
+  setAlert(`Rules panel reposted in ${response.posted?.channelId ? `<#${response.posted.channelId}>` : "the configured channel"}.`);
+}
+
 async function saveVerificationSettings(options = {}) {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change server settings.", "error");
@@ -4130,6 +4157,9 @@ async function saveVerificationSettings(options = {}) {
   const auto = Boolean(options.auto);
 
   const payload = collectSettingsPayload([
+    "rulesCardTitle",
+    "rulesCardDescription",
+    "rulesCardRules",
     "verificationCaptchaEnabled",
     "tiktokHandle",
     "tiktokNicknameAliases",
@@ -4516,6 +4546,7 @@ function bindEvents() {
   });
   $("#postAffirmationsPanel").addEventListener("click", () => postAffirmationsPanel().catch(error => setAlert(error.message, "error")));
   $("#saveVerificationSettings").addEventListener("click", () => saveVerificationSettings().catch(error => setAlert(error.message, "error")));
+  $("#repostRulesPanel").addEventListener("click", () => repostRulesPanel().catch(error => setAlert(error.message, "error")));
   $("#saveBirthdaySettings").addEventListener("click", () => saveBirthdaySettings().catch(error => setAlert(error.message, "error")));
   $("#repairOnboardingButton").addEventListener("click", () => repairOnboarding().catch(error => setAlert(error.message, "error")));
   $("#postBirthdayPanel").addEventListener("click", () => postBirthdayPanel().catch(error => setAlert(error.message, "error")));
