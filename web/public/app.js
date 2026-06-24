@@ -1423,7 +1423,8 @@ function restorePanelMemory() {
   $("#memberChatChannelFilter").value = localStorage.getItem(storageKeys.memberChatChannelFilter) || "all";
   $("#memberChatDateRange").value = localStorage.getItem(storageKeys.memberChatDateRange) || "7d";
   applyThemePreset(localStorage.getItem(storageKeys.themePreset) || "pastel");
-  setSidebarOpen(localStorage.getItem(storageKeys.sidebarOpen) === "true");
+  const isCompactMobile = window.matchMedia("(max-width: 760px)").matches;
+  setSidebarOpen(isCompactMobile ? false : localStorage.getItem(storageKeys.sidebarOpen) === "true");
   updateAdvancedToolsVisibility();
   const workspacePreset = localStorage.getItem(storageKeys.workspacePreset) || "auto";
   if (workspacePreset && workspacePreset !== "auto") {
@@ -4693,6 +4694,13 @@ function bindEvents() {
     setSidebarOpen(false);
     state.memberDrawerOpen = false;
     renderMemberDrawer();
+  });
+  document.querySelectorAll(".tab, .view-tab").forEach(button => {
+    button.addEventListener("click", () => {
+      if (window.matchMedia("(max-width: 760px)").matches) {
+        setSidebarOpen(false);
+      }
+    });
   });
   $("#globalSearchInput").addEventListener("keydown", event => {
     if (event.key === "Enter") {
