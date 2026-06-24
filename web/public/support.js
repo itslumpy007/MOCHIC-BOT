@@ -250,7 +250,7 @@ function renderSupportCopy() {
         <article class="support-staff-metric">
           <span>Flagged</span>
           <strong>${flaggedCount}</strong>
-          <small>Queued for mod review</small>
+          <small>Warning role queued</small>
         </article>
         <article class="support-staff-metric">
           <span>Total</span>
@@ -347,7 +347,7 @@ function renderTickets() {
         ${ticket.anonymous ? '<span class="badge">anonymous</span>' : ""}
         ${isStaff ? `<span class="badge">${escapeHtml(ticket.priority || "normal")}</span>` : ""}
         ${isStaff && ticket.assignedTo?.tag ? `<span class="badge">assigned: ${escapeHtml(ticket.assignedTo.tag)}</span>` : ""}
-        ${isStaff && ticket.flagged ? `<span class="badge">mod review</span>` : ""}
+        ${isStaff && ticket.flagged ? `<span class="badge">warning role</span>` : ""}
         <br>
         Updated ${escapeHtml(formatDate(ticket.updatedAt))}
       </p>
@@ -390,7 +390,7 @@ function renderTicketDetail() {
     metaBits.unshift(`Priority ${ticket.priority}`);
   }
   if (isStaff && ticket.flagged) {
-    metaBits.unshift(ticket.flagReason ? `Flagged for mod review: ${ticket.flagReason}` : "Flagged for mod review");
+    metaBits.unshift(ticket.flagReason ? `Warning role: ${ticket.flagReason}` : "Warning role applied");
   }
   $("#ticketDetailMeta").textContent = metaBits.join(" - ");
   $("#ticketStatusPill").textContent = ticket.status;

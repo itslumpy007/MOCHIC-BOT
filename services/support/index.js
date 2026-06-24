@@ -23,6 +23,7 @@ const SUPPORT_SUPPORT_CHANNEL_ID = process.env.SUPPORT_SUPPORT_CHANNEL_ID || pro
 const SUPPORT_DATA_DIR = process.env.SUPPORT_DATA_DIR || path.join(__dirname, "..", "..", "data");
 const SUPPORT_SUPPORT_MOD_ROLE_IDS = parseIdList(process.env.SUPPORT_MOD_ROLE_IDS || process.env.MOD_ROLE_IDS || "");
 const SUPPORT_SUPPORT_ADMIN_ROLE_IDS = parseIdList(process.env.SUPPORT_ADMIN_ROLE_IDS || process.env.ADMIN_ROLE_IDS || "");
+const SUPPORT_FLAG_ROLE_ID = process.env.SUPPORT_FLAG_ROLE_ID || process.env.WARN_ROLE_ID || "";
 const SUPPORT_SESSION_COOKIE = "mochi_support_session";
 const SUPPORT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -206,6 +207,40 @@ async function getDiscordAccessLevel(userId) {
   if (SUPPORT_SUPPORT_ADMIN_ROLE_IDS.some(id => roleIds.has(id))) return "admin";
   if (SUPPORT_SUPPORT_MOD_ROLE_IDS.some(id => roleIds.has(id))) return "mod";
   return "member";
+}
+
+async function syncSupportFlagRole(userId, flagged, reason = "") {
+  if (!SUPPORT_FLAG_ROLE_ID || !SUPPORT_GUILD_ID || !client.isReady() || !userId) {
+    return { applied: false, reason: "warning role not configured" };
+  }
+
+  const guild = client.guilds.cache.get(SUPPORT_GUILD_ID) || await client.guilds.fetch(SUPPORT_GUILD_ID).catch(() => null);
+  if (!guild) {
+    return { applied: false, reason: "guild not available" };
+  }
+
+  const member = await guild.members.fetch(userId).catch(() => null);
+  if (!member) {
+    return { applied: false, reason: "member not found" };
+  }
+
+  const auditReason = `Support flag ${flagged ? "applied" : "cleared"}${reason ? `: ${reason}` : ""}`;
+
+  try {
+    const hasRole = member.roles.cache.has(SUPPORT_FLAG_ROLE_ID);
+    if (flagged && hasRole) return { applied: true, alreadySet: true };
+    if (!flagged && !hasRole) return { applied: true, alreadyCleared: true };
+
+    if (flagged) {
+      await member.roles.add(SUPPORT_FLAG_ROLE_ID, auditReason);
+    } else {
+      await member.roles.remove(SUPPORT_FLAG_ROLE_ID, auditReason);
+    }
+    return { applied: true };
+  } catch (error) {
+    console.warn("Support flag role sync failed:", error?.message || error);
+    return { applied: false, reason: error?.message || "role sync failed" };
+  }
 }
 
 function createDefaultSupportStore() {
@@ -456,10 +491,10 @@ function formatSupportTranscript(ticket, auth = null) {
     append(`Staff note: ${data.staffNote}`);
   }
   if (data.flagged) {
-    append(`Flagged for mod review: yes`);
+    append(`Warning role: applied`);
   }
   if (data.flagReason) {
-    append(`Flag reason: ${data.flagReason}`);
+    append(`Warning reason: ${data.flagReason}`);
   }
   append(`Created by: ${data.createdBy?.tag || "Anonymous member"}`);
   append(`Created at: ${data.createdAt}`);
@@ -891,6 +926,7 @@ async function handleApi(req, res, pathname, requestUrl) {
       ticket.flagReason = flagged ? flagReason : "";
       ticket.staffNote = staffNote;
       updateSupportTicket(ticket);
+      await syncSupportFlagRole(ticket.createdByUserId, ticket.flagged, ticket.flagReason || ticket.subject);
 
       return sendJson(res, 200, {
         ok: true,
