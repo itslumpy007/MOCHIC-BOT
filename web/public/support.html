@@ -274,6 +274,10 @@
         padding: 18px 20px 20px;
         border-top: 1px solid rgba(229, 210, 233, 0.7);
         background: rgba(255, 255, 255, 0.97);
+        position: sticky;
+        bottom: 0;
+        z-index: 2;
+        box-shadow: 0 -12px 26px rgba(63, 75, 120, 0.07);
       }
       .support-compose .form-grid {
         gap: 12px;
@@ -315,7 +319,10 @@
         gap: 8px;
       }
       .support-preset-row .filter-chip {
-        background: rgba(255, 255, 255, 0.92);
+        background: rgba(247, 250, 255, 0.98);
+        border-color: rgba(204, 214, 255, 0.9);
+        padding: 7px 12px;
+        font-size: 0.9rem;
       }
       .support-chat-hint {
         display: flex;
@@ -443,6 +450,13 @@
       body.support-is-member .support-chat-panel {
         border-color: rgba(229, 210, 233, 0.88);
         box-shadow: none;
+      }
+      body.support-is-member .support-request-layout {
+        grid-template-columns: minmax(0, 1.62fr) minmax(220px, 0.48fr);
+      }
+      body.support-is-member .support-side-card {
+        position: sticky;
+        top: 16px;
       }
       body.support-is-member .support-thread {
         background: rgba(255, 255, 255, 0.95);
@@ -898,6 +912,9 @@
         .support-compose {
           padding: 14px;
         }
+        .support-preset-row {
+          gap: 6px;
+        }
         .support-compose textarea {
           min-height: 170px;
         }
@@ -935,6 +952,9 @@
         }
         .support-request-layout {
           gap: 12px;
+        }
+        .support-side-card {
+          position: static;
         }
         .support-compose-footer {
           align-items: flex-start;
@@ -1179,8 +1199,8 @@
                 </div>
                 <div class="support-preset-row" aria-label="Quick prompts">
                   <button class="filter-chip" type="button" data-request-preset="help">Need help</button>
-                  <button class="filter-chip" type="button" data-request-preset="report">Report something</button>
-                  <button class="filter-chip" type="button" data-request-preset="anonymous">Anonymous chat</button>
+                  <button class="filter-chip" type="button" data-request-preset="report">Report a problem</button>
+                  <button class="filter-chip" type="button" data-request-preset="anonymous">Start anonymous chat</button>
                 </div>
                 <div class="form-grid">
                   <label><span>Category</span>
