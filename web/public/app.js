@@ -805,6 +805,7 @@ function ensureAutoRefresh() {
 const autosaveTimers = new Map();
 const autosaveInFlight = new Map();
 const debounceTimers = new Map();
+const autosaveNetworkEnabled = false;
 const autosaveScopes = {
   settings: {
     key: storageKeys.settingsDraft,
@@ -973,7 +974,7 @@ function handleAutosaveInput(event) {
     state.previewChannelId = $("#previewChannelId")?.value || "";
     state.previewMessage = $("#previewMessage")?.value || "";
   }
-  if (scope === "preview") return;
+  if (scope === "preview" || !autosaveNetworkEnabled) return;
   queueAutosave(scope);
 }
 
