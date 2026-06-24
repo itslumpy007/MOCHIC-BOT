@@ -252,11 +252,16 @@ function renderSupportCopy() {
       </div>
     `
     : `
-      <div class="support-hero-copy">
-        <strong>${heroTitle}</strong>
-        <p>${heroBody}</p>
+      <div class="support-member-banner">
+        <div class="support-member-banner-copy">
+          <strong>${heroTitle}</strong>
+          <p>${heroBody}</p>
+        </div>
+        <div class="support-member-banner-meta">
+          <span class="pill support-role-pill support-role-pill-member">Friendly help</span>
+          <span class="pill">Chat-style</span>
+        </div>
       </div>
-      <span class="pill support-role-pill support-role-pill-member">Friendly help</span>
     `;
   renderActiveViewCopy();
 }
