@@ -154,6 +154,28 @@ const subtabDefaults = {
 };
 
 const themePresets = {
+  midnight: {
+    bg: "#0f1117",
+    bgAlt: "#151926",
+    surface: "rgba(24, 28, 38, 0.84)",
+    surfaceStrong: "rgba(30, 35, 48, 0.96)",
+    surfaceSoft: "rgba(35, 40, 56, 0.92)",
+    surfaceWarm: "rgba(28, 32, 44, 0.94)",
+    line: "rgba(75, 84, 109, 0.78)",
+    lineStrong: "rgba(113, 126, 170, 0.24)",
+    text: "#eef2ff",
+    muted: "#aeb6ca",
+    mutedSoft: "#8891a7",
+    accent: "#6573ff",
+    accentDark: "#8b96ff",
+    accentSoft: "rgba(101, 115, 255, 0.18)",
+    mint: "#48d1ab",
+    blue: "#7b8bff",
+    yellow: "#f0c453",
+    red: "#ef7f8d",
+    shadow: "0 28px 72px rgba(5, 8, 14, 0.34)",
+    shadowSoft: "0 16px 36px rgba(5, 8, 14, 0.22)"
+  },
   pastel: {
     bg: "#f2eee8",
     bgAlt: "#edf3fb",
@@ -1101,7 +1123,7 @@ function renderActivityFilters() {
 }
 
 function applyThemePreset(theme) {
-  const selected = themePresets[theme] ? theme : "pastel";
+  const selected = themePresets[theme] ? theme : "midnight";
   const preset = themePresets[selected];
   document.body.dataset.theme = selected;
   Object.entries(preset).forEach(([key, value]) => {
@@ -1425,7 +1447,9 @@ function restorePanelMemory() {
   $("#memberChatSearchInput").value = localStorage.getItem(storageKeys.memberChatSearch) || "";
   $("#memberChatChannelFilter").value = localStorage.getItem(storageKeys.memberChatChannelFilter) || "all";
   $("#memberChatDateRange").value = localStorage.getItem(storageKeys.memberChatDateRange) || "7d";
-  applyThemePreset(localStorage.getItem(storageKeys.themePreset) || "pastel");
+  const savedTheme = localStorage.getItem(storageKeys.themePreset);
+  const migratedTheme = savedTheme === "pastel" || !savedTheme ? "midnight" : savedTheme;
+  applyThemePreset(migratedTheme);
   const isCompactMobile = window.matchMedia("(max-width: 760px)").matches;
   setSidebarOpen(isCompactMobile ? false : localStorage.getItem(storageKeys.sidebarOpen) === "true");
   updateAdvancedToolsVisibility();
@@ -1542,9 +1566,31 @@ function renderMetrics() {
     ["Allowed Domains", counts.allowedDomains || 0],
     ["Temp Bans", counts.tempBans || 0]
   ];
+  const metricIcons = {
+    Cases: { icon: "🛡", tone: "blue" },
+    "Warning Users": { icon: "⚠", tone: "yellow" },
+    "Staff Notes": { icon: "📝", tone: "mint" },
+    "AutoMod Hits": { icon: "✦", tone: "blue" },
+    Birthdays: { icon: "🎂", tone: "mint" },
+    "Banned Words": { icon: "▣", tone: "red" },
+    "Blocked Domains": { icon: "⛔", tone: "red" },
+    "Allowed Domains": { icon: "✓", tone: "mint" },
+    "Temp Bans": { icon: "⏳", tone: "yellow" }
+  };
 
   $("#metricGrid").innerHTML = metrics
-    .map(([label, value], index) => `<article class="metric" ${revealStyle(index)}><span>${label}</span><strong>${value}</strong><small>${getMetricHint(label)}</small></article>`)
+    .map(([label, value], index) => {
+      const metricIcon = metricIcons[label] || { icon: "•", tone: "blue" };
+      return `
+        <article class="metric" ${revealStyle(index)}>
+          <div class="metric-head">
+            <span class="metric-icon metric-icon-${metricIcon.tone}" aria-hidden="true">${metricIcon.icon}</span>
+            <span>${label}</span>
+          </div>
+          <strong>${value}</strong>
+          <small>${getMetricHint(label)}</small>
+        </article>`;
+    })
     .join("");
 }
 
