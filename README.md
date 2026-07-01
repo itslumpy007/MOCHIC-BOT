@@ -31,6 +31,8 @@ OPENAI_SUMMARY_MODEL=gpt-4o-mini
 VERIFY_CHANNEL_ID=
 RULES_CHANNEL_ID=
 LOG_CHANNEL_ID=
+LOG_FILE_PATH=
+LOG_MAX_BYTES=5242880
 SAKURA_ROLE_ID=
 STRAWBERRY_ROLE_ID=
 MATCHA_ROLE_ID=
@@ -99,6 +101,7 @@ The bot serves a web dashboard from the same Node process.
 
 - Do not upload your local `.env` file.
 - The bot now tries to rediscover the main verify panel in the verify channel after restarts, which makes redeploys safer on hosts with ephemeral filesystems.
+- If you set `LOG_FILE_PATH`, the bot will also write logs to disk and keep one rolled backup at `LOG_FILE_PATH.1` when the file grows past `LOG_MAX_BYTES`.
 - Most members should use the rules verification button in the verify channel; TikTok matching is treated as an optional bonus path.
 - If you create a new verify message with `/setupverify`, the latest message id is saved in `data/config.json`.
 - `ENABLE_CORE_BOT` controls moderation, setup, and other core server features.

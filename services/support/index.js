@@ -8,6 +8,7 @@ const {
   GatewayIntentBits,
   Partials
 } = require("discord.js");
+const { createLogger } = require("../../lib/logger");
 
 dotenv.config();
 
@@ -28,6 +29,7 @@ const SUPPORT_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
 const supportPublicDir = path.join(__dirname, "..", "..", "web", "public");
 const supportStorePath = path.join(SUPPORT_DATA_DIR, "support.json");
+const log = createLogger("support");
 
 const supportOauthStates = new Map();
 const supportSessions = new Map();
@@ -426,7 +428,7 @@ async function notifySupportChannel(embed) {
       await channel.send({ embeds: [embed] });
     }
   } catch (error) {
-    console.error("Support notification error:", error.message);
+    log.error("Support notification error.", error);
   }
 }
 
@@ -844,18 +846,18 @@ function startServer() {
   });
 
   server.listen(SUPPORT_WEB_PORT, () => {
-    console.log(`Support service available on port ${SUPPORT_WEB_PORT}.`);
+    log.info(`Support service available on port ${SUPPORT_WEB_PORT}.`);
     if (SUPPORT_TOKEN) {
       client.login(SUPPORT_TOKEN).catch(error => {
-        console.error("Support Discord login failed:", error.message);
+        log.error("Support Discord login failed.", error);
       });
     } else {
-      console.warn("Support Discord token is not configured. Staff access will be limited.");
+      log.warn("Support Discord token is not configured. Staff access will be limited.");
     }
   });
 
   server.on("error", error => {
-    console.error("Support service error:", error.message);
+    log.error("Support service error.", error);
   });
 }
 

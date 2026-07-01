@@ -27,6 +27,7 @@ const {
   UserSelectMenuBuilder
 } = require("discord.js");
 const { createCanvas } = require("@napi-rs/canvas");
+const { createLogger } = require("./lib/logger");
 
 const {
   TOKEN,
@@ -69,6 +70,7 @@ const SESSION_SECRET = process.env.SESSION_SECRET || WEB_ADMIN_TOKEN || "";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_SUMMARY_MODEL = process.env.OPENAI_SUMMARY_MODEL || "gpt-4o-mini";
 const webPublicDir = path.join(__dirname, "web", "public");
+const log = createLogger("bot");
 
 const client = new Client({
   intents: [
@@ -1042,7 +1044,7 @@ function loadConfig() {
       pendingVerifications: Array.isArray(parsed.pendingVerifications) ? parsed.pendingVerifications : []
     };
   } catch (error) {
-    console.error("Failed to load config, using defaults:", error.message);
+    log.warn("Failed to load config; using defaults.", error);
     return defaults;
   }
 }
@@ -1452,7 +1454,7 @@ function startGeneralChatSweep() {
   if (generalChatSweepInterval) clearInterval(generalChatSweepInterval);
   generalChatSweepInterval = setInterval(() => {
     enforceGeneralChatActivity().catch(error => {
-      console.error("General chat sweep error:", error.message);
+      log.error("General chat sweep error.", error);
     });
   }, 6 * 60 * 60 * 1000);
 }
@@ -2149,7 +2151,7 @@ function startGoogleBlockListSync() {
   if (googleBlockListInterval) clearInterval(googleBlockListInterval);
   googleBlockListInterval = setInterval(() => {
     syncGoogleBlockList("interval").catch(error => {
-      console.error("Google block list sync error:", error.message);
+      log.error("Google block list sync error.", error);
     });
   }, 5 * 60 * 1000);
 }
@@ -2696,7 +2698,7 @@ async function detectAiModerationIssue(message) {
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
-      console.error("AI moderation request failed:", response.status, errorText.slice(0, 300));
+      log.error(`AI moderation request failed with status ${response.status}.`, errorText.slice(0, 300));
       return null;
     }
 
@@ -2723,7 +2725,7 @@ async function detectAiModerationIssue(message) {
     };
   } catch (error) {
     if (error.name !== "AbortError") {
-      console.error("AI moderation error:", error.message);
+      log.error("AI moderation error.", error);
     }
     return null;
   } finally {
@@ -2795,7 +2797,7 @@ async function detectAiCustomRuleIssue(message) {
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
-      console.error("AI custom rules request failed:", response.status, errorText.slice(0, 300));
+      log.error(`AI custom rules request failed with status ${response.status}.`, errorText.slice(0, 300));
       return null;
     }
 
@@ -2821,7 +2823,7 @@ async function detectAiCustomRuleIssue(message) {
     };
   } catch (error) {
     if (error.name !== "AbortError") {
-      console.error("AI custom rules error:", error.message);
+      log.error("AI custom rules error.", error);
     }
     return null;
   } finally {
@@ -4205,7 +4207,7 @@ async function logEmbed(embed) {
     if (!channel) return;
     await channel.send({ embeds: [embed] });
   } catch (error) {
-    console.error("Log send error:", error.message);
+    log.warn("Failed to send mod log embed.", error);
   }
 }
 
@@ -4225,7 +4227,7 @@ async function logAutoModEmbed(embed) {
     if (!channel) return;
     await channel.send({ embeds: [embed] });
   } catch (error) {
-    console.error("AutoMod log send error:", error.message);
+    log.warn("Failed to send AutoMod log embed.", error);
   }
 }
 
@@ -4236,7 +4238,7 @@ async function safeSend(channelId, payload) {
     if (!channel) return;
     await channel.send(payload);
   } catch (error) {
-    console.error("Failed to send message:", error.message);
+    log.warn("Failed to send channel message.", error);
   }
 }
 
@@ -4364,7 +4366,7 @@ async function resolveVerifyMessageId() {
 
     return null;
   } catch (error) {
-    console.error("Failed to resolve verify message:", error.message);
+    log.error("Failed to resolve verify message.", error);
     return null;
   }
 }
@@ -4902,7 +4904,7 @@ async function sendScheduledModReport() {
 function startScheduledReports() {
   if (scheduledReportInterval) clearInterval(scheduledReportInterval);
   scheduledReportInterval = setInterval(() => {
-    sendScheduledModReport().catch(error => console.error("Scheduled report error:", error.message));
+    sendScheduledModReport().catch(error => log.error("Scheduled report error.", error));
   }, 15 * 60 * 1000);
 }
 
@@ -7674,7 +7676,7 @@ async function launchMochiActivity(interaction) {
     await interaction.launchActivity();
     return true;
   } catch (error) {
-    console.warn("Mochi Activity launch failed:", error?.message || error);
+    log.warn("Mochi Activity launch failed.", error);
     return false;
   }
 }
@@ -8059,7 +8061,7 @@ async function notifySupportChannel(embed) {
       await channel.send({ embeds: [embed] });
     }
   } catch (error) {
-    console.error("Support notification error:", error.message);
+    log.error("Support notification error.", error);
   }
 }
 
@@ -10818,19 +10820,19 @@ function startWebServer() {
 
   server.listen(WEB_PORT, () => {
     if (!DISCORD_CLIENT_SECRET) {
-      console.warn("Discord OAuth is not configured. Set DISCORD_CLIENT_SECRET to enable Discord login.");
+      log.warn("Discord OAuth is not configured. Set DISCORD_CLIENT_SECRET to enable Discord login.");
     }
     if (!SESSION_SECRET) {
-      console.warn("Web sessions are not configured. Set SESSION_SECRET or WEB_ADMIN_TOKEN.");
+      log.warn("Web sessions are not configured. Set SESSION_SECRET or WEB_ADMIN_TOKEN.");
     }
     if (!WEB_ADMIN_TOKEN) {
-      console.warn("Admin token fallback is disabled. Set WEB_ADMIN_TOKEN if you want backup token access.");
+      log.warn("Admin token fallback is disabled. Set WEB_ADMIN_TOKEN if you want backup token access.");
     }
-    console.log(`Web moderation panel available on port ${WEB_PORT}.`);
+    log.info(`Web moderation panel available on port ${WEB_PORT}.`);
   });
 
   server.on("error", error => {
-    console.error("Web moderation panel error:", error.message);
+    log.error("Web moderation panel error.", error);
   });
 
   webServer = server;
@@ -10840,7 +10842,7 @@ async function shutdownProcess(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
 
-  console.log(`Received ${signal}; shutting down cleanly.`);
+  log.info(`Received ${signal}; shutting down cleanly.`);
 
   if (webServer) {
     await new Promise(resolve => {
@@ -10865,28 +10867,28 @@ async function shutdownProcess(signal) {
 
 client.once("clientReady", async () => {
   try {
-    console.log(`Logged in as ${client.user.tag}`);
-    console.log(`Feature flags -> core: ${ENABLE_CORE_BOT ? "on" : "off"}`);
+    log.info(`Logged in as ${client.user.tag}`);
+    log.info(`Feature flags -> core: ${ENABLE_CORE_BOT ? "on" : "off"}`);
     const rest = new REST({ version: "10" }).setToken(TOKEN);
 
     await rest.put(Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID), {
       body: commands
     });
 
-    console.log("Slash commands registered.");
+    log.info("Slash commands registered.");
 
     if (ENABLE_CORE_BOT) {
       await resolveVerifyMessageId();
       await enforceFlavorRoleVisibility(client.guilds.cache.get(GUILD_ID)).catch(() => null);
       await processExpiredTempBans();
       await processBirthdaySweep("startup").catch(error => {
-        console.error("Birthday startup sweep error:", error.message);
+        log.error("Birthday startup sweep error.", error);
       });
       await enforceGeneralChatActivity().catch(error => {
-        console.error("General chat startup sweep error:", error.message);
+        log.error("General chat startup sweep error.", error);
       });
       await syncGoogleBlockList("startup").catch(error => {
-        console.error("Google block list startup sync error:", error.message);
+        log.error("Google block list startup sync error.", error);
       });
 
       if (tempBanInterval) {
@@ -10894,7 +10896,7 @@ client.once("clientReady", async () => {
       }
       tempBanInterval = setInterval(() => {
         processExpiredTempBans().catch(error => {
-          console.error("Temp ban processing error:", error.message);
+          log.error("Temp ban processing error.", error);
         });
       }, 60 * 1000);
       if (birthdaySweepInterval) {
@@ -10902,7 +10904,7 @@ client.once("clientReady", async () => {
       }
       birthdaySweepInterval = setInterval(() => {
         processBirthdaySweep("interval").catch(error => {
-          console.error("Birthday processing error:", error.message);
+          log.error("Birthday processing error.", error);
         });
       }, 60 * 60 * 1000);
       startScheduledReports();
@@ -10910,7 +10912,7 @@ client.once("clientReady", async () => {
       startGeneralChatSweep();
     }
   } catch (error) {
-    console.error("Ready error:", error);
+    log.error("Ready error.", error);
   }
 });
 
@@ -10946,7 +10948,7 @@ client.on("messageReactionAdd", async (reaction, user) => {
       })
     );
   } catch (error) {
-    console.error("Reaction add error:", error);
+    log.error("Reaction add error.", error);
   }
 });
 client.on("messageReactionRemove", async (reaction, user) => {
@@ -10975,7 +10977,7 @@ client.on("messageReactionRemove", async (reaction, user) => {
       })
     );
   } catch (error) {
-    console.error("Reaction remove error:", error);
+    log.error("Reaction remove error.", error);
   }
 });
 
@@ -10998,7 +11000,7 @@ client.on("channelCreate", async channel => {
       CreatePrivateThreads: false
     }).catch(() => {});
   } catch (error) {
-    console.error("Channel create mute overwrite error:", error.message);
+    log.error("Channel create mute overwrite error.", error);
   }
 });
 
@@ -12294,7 +12296,7 @@ client.on("interactionCreate", async interaction => {
         }
 
         await processBirthdaySweep("birthday-modal").catch(error => {
-          console.error("Birthday modal sweep error:", error.message);
+          log.error("Birthday modal sweep error.", error);
         });
 
         return interaction.editReply({
@@ -14505,7 +14507,7 @@ client.on("interactionCreate", async interaction => {
 
       if (subcommand === "birthdayrole" || subcommand === "birthdaychannel" || (subcommand === "reset" && ["birthdayrole", "birthdaychannel"].includes(interaction.options.getString("target")))) {
         await processBirthdaySweep("settings").catch(error => {
-          console.error("Birthday settings update error:", error.message);
+          log.error("Birthday settings update error.", error);
         });
       }
 
@@ -14515,7 +14517,7 @@ client.on("interactionCreate", async interaction => {
 
       if (subcommand === "affirmchannel") {
         await postAnonymousAffirmationsPanel("settings").catch(error => {
-          console.error("Anonymous affirmations panel error:", error.message);
+          log.error("Anonymous affirmations panel error.", error);
         });
       }
 
@@ -14541,7 +14543,7 @@ client.on("interactionCreate", async interaction => {
         }
 
         await processBirthdaySweep("birthday-set").catch(error => {
-          console.error("Birthday set sweep error:", error.message);
+          log.error("Birthday set sweep error.", error);
         });
 
         return interaction.reply({
@@ -14644,7 +14646,7 @@ client.on("interactionCreate", async interaction => {
       });
     }
   } catch (error) {
-    console.error("Interaction error:", error);
+    log.error("Interaction error.", error);
 
     if (interaction.deferred || interaction.replied) {
       await interaction.editReply("There was an error while handling that command.").catch(() => {});
@@ -14696,7 +14698,7 @@ client.on("messageCreate", async message => {
       });
     }
   } catch (error) {
-    console.error("messageCreate error:", error);
+    log.error("messageCreate error.", error);
   }
 });
 
@@ -14717,7 +14719,7 @@ client.on("messageDelete", async message => {
       })
     );
   } catch (error) {
-    console.error("Delete log error:", error);
+    log.error("Delete log error.", error);
   }
 });
 
@@ -14741,7 +14743,7 @@ client.on("messageUpdate", async (oldMessage, newMessage) => {
       })
     );
   } catch (error) {
-    console.error("Update log error:", error);
+    log.error("Update log error.", error);
   }
 });
 
@@ -14870,7 +14872,7 @@ client.on("guildMemberAdd", async member => {
 
     if (getTikTokHandle() && (getVerificationRoleId() || unverifiedRoleId)) {
       const verificationResult = await syncTikTokVerification(member, "join").catch(error => {
-        console.error("TikTok verification sync error:", error.message);
+        log.error("TikTok verification sync error.", error);
         return null;
       });
 
@@ -14887,10 +14889,10 @@ client.on("guildMemberAdd", async member => {
     }
 
     await processBirthdaySweep("join").catch(error => {
-      console.error("Birthday join sweep error:", error.message);
+      log.error("Birthday join sweep error.", error);
     });
   } catch (error) {
-    console.error("Welcome error:", error);
+    log.error("Welcome error.", error);
   }
 });
 
@@ -14899,7 +14901,7 @@ client.on("guildMemberUpdate", async (oldMember, newMember) => {
     if (!ENABLE_CORE_BOT) return;
     if (isTikTokVerificationEnabled() && oldMember.displayName !== newMember.displayName) {
       const verificationResult = await syncTikTokVerification(newMember, "nickname-change").catch(error => {
-        console.error("TikTok verification sync error:", error.message);
+        log.error("TikTok verification sync error.", error);
         return null;
       });
       if (verificationResult?.matched && verificationResult?.changed) {
@@ -14950,28 +14952,28 @@ client.on("guildMemberUpdate", async (oldMember, newMember) => {
       })
     );
   } catch (error) {
-    console.error("Nickname filter error:", error);
+    log.error("Nickname filter error.", error);
   }
 });
 
 process.on("unhandledRejection", error => {
-  console.error("Unhandled promise rejection:", error);
+  log.error("Unhandled promise rejection.", error);
 });
 
 process.on("uncaughtException", error => {
-  console.error("Uncaught exception:", error);
+  log.error("Uncaught exception.", error);
 });
 
 process.on("SIGTERM", () => {
   shutdownProcess("SIGTERM").catch(error => {
-    console.error("Shutdown error:", error.message || error);
+    log.error("Shutdown error.", error);
     process.exit(1);
   });
 });
 
 process.on("SIGINT", () => {
   shutdownProcess("SIGINT").catch(error => {
-    console.error("Shutdown error:", error.message || error);
+    log.error("Shutdown error.", error);
     process.exit(1);
   });
 });
@@ -14980,9 +14982,9 @@ try {
   validateEnv();
   startWebServer();
   client.login(TOKEN).catch(error => {
-    console.error("Discord login failed:", error.message || error);
+    log.error("Discord login failed.", error);
   });
 } catch (error) {
-  console.error("Startup error:", error.message);
+  log.error("Startup error.", error);
   process.exit(1);
 }
