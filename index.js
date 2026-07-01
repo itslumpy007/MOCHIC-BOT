@@ -122,6 +122,7 @@ const AUTOMOD_RULE_KEYS = [
   "spam",
   "scam-phrase",
   "scam-link",
+  "scam-image",
   "masked-link",
   "obfuscated-invite",
   "obfuscated-banned-word",
@@ -2563,6 +2564,27 @@ function isSuspiciousDomain(domain) {
   return false;
 }
 
+const IMAGE_ATTACHMENT_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"]);
+
+function isImageAttachment(attachment) {
+  const contentType = String(attachment?.contentType || "").trim().toLowerCase();
+  if (contentType.startsWith("image/")) return true;
+
+  const extension = normalizeExtension(path.extname(attachment?.name || ""));
+  return IMAGE_ATTACHMENT_EXTENSIONS.has(extension);
+}
+
+function extractMessageUrls(content) {
+  const matches = String(content || "").match(/https?:\/\/[^\s]+/gi) || [];
+  return [...new Set(matches.map(match => {
+    try {
+      return new URL(match).href;
+    } catch {
+      return null;
+    }
+  }).filter(Boolean))];
+}
+
 function detectScamAttempt(message, automod = config.automod) {
   const content = message.content || "";
   const normalizedText = normalizeComparisonText(content);
@@ -2671,6 +2693,140 @@ function getTopModerationCategory(result) {
   return Object.entries(scores)
     .filter(([, score]) => Number.isFinite(Number(score)))
     .sort((a, b) => Number(b[1]) - Number(a[1]))[0] || [null, 0];
+}
+
+function mapAiScamCategory(category, hasUrls, hasImages) {
+  const normalized = String(category || "").trim().toLowerCase();
+  if (normalized === "scam-image") return "scam-image";
+  if (normalized === "scam-link") return "scam-link";
+  if (normalized === "scam-phrase") return "scam-phrase";
+  if (normalized === "impersonation" || normalized === "phishing" || normalized === "credential-theft" || normalized === "giveaway-scam") {
+    if (hasImages) return "scam-image";
+    if (hasUrls) return "scam-link";
+    return "scam-phrase";
+  }
+  if (hasImages) return "scam-image";
+  if (hasUrls) return "scam-link";
+  return "scam-phrase";
+}
+
+async function detectAiScamIssue(message, automod = config.automod) {
+  if (!OPENAI_API_KEY || !automod.aiModerationEnabled) return null;
+
+  const content = String(message.content || "").trim();
+  const urls = extractMessageUrls(content);
+  const imageAttachments = Array.from(message.attachments.values()).filter(isImageAttachment).slice(0, 3);
+
+  if (!urls.length && !imageAttachments.length) return null;
+
+  const attachmentLines = imageAttachments.map(attachment => {
+    const fileName = attachment.name || "image";
+    const mimeType = attachment.contentType || "image/*";
+    return `- ${fileName} (${mimeType})`;
+  });
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 9000);
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        input: [
+          {
+            role: "system",
+            content:
+              "You review Discord messages for scam, phishing, impersonation, malicious link, and scam image behavior. " +
+              "Be conservative and only flag likely scams. If the message is harmless, return violated=false."
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text:
+                  `Review this Discord message for scam behavior.\n\n` +
+                  `Message author: ${message.author.tag}\n` +
+                  `Channel: #${message.channel?.name || "unknown"}\n` +
+                  `Message text:\n${content || "(no text)"}\n\n` +
+                  `Extracted URLs:\n${urls.length ? urls.join("\n") : "None"}\n\n` +
+                  `Image attachments:\n${attachmentLines.length ? attachmentLines.join("\n") : "None"}\n\n` +
+                  `Decide whether this is a scam, phishing attempt, malicious link, impersonation attempt, or scam image. ` +
+                  `Prefer "scam-image" when the evidence is mainly in an image, "scam-link" when the evidence is mainly a URL, ` +
+                  `and "scam-phrase" for text-only scams.`
+              },
+              ...imageAttachments.map(attachment => ({
+                type: "input_image",
+                image_url: attachment.url
+              }))
+            ]
+          }
+        ],
+        text: {
+          format: {
+            type: "json_schema",
+            name: "scam_detection",
+            strict: true,
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                violated: { type: "boolean" },
+                category: {
+                  type: "string",
+                  enum: ["scam-link", "scam-image", "scam-phrase", "phishing", "impersonation", "credential-theft", "giveaway-scam", "malware", "other"]
+                },
+                confidence: { type: "integer" },
+                evidence: { type: "string" },
+                explanation: { type: "string" }
+              },
+              required: ["violated", "category", "confidence", "evidence", "explanation"]
+            }
+          }
+        }
+      }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      log.error(`AI scam request failed with status ${response.status}.`, errorText.slice(0, 300));
+      return null;
+    }
+
+    const payload = await response.json();
+    const text = getResponseOutputText(payload);
+    if (!text) return null;
+
+    const result = JSON.parse(text);
+    const confidence = Number(result.confidence || 0);
+    if (!result.violated || confidence / 100 < getAiModerationThreshold()) return null;
+
+    const actionLabel = mapAiScamCategory(result.category, urls.length > 0, imageAttachments.length > 0);
+    return {
+      actionLabel,
+      reason: `AI scam review flagged this message as ${result.category || "potential scam"} (${confidence}% confidence).`,
+      details: [
+        { name: "AI Scam Category", value: result.category || "unknown", inline: true },
+        { name: "AI Scam Confidence", value: `${confidence}%`, inline: true },
+        { name: "AI Scam Model", value: "gpt-4o-mini", inline: true },
+        { name: "AI Scam Evidence", value: String(result.evidence || "No evidence provided.").slice(0, 1024), inline: false },
+        { name: "AI Scam Explanation", value: String(result.explanation || "No explanation provided.").slice(0, 1024), inline: false }
+      ]
+    };
+  } catch (error) {
+    if (error.name !== "AbortError") {
+      log.error("AI scam error.", error);
+    }
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function detectAiModerationIssue(message) {
@@ -3437,6 +3593,7 @@ const allCommands = [
              { name: "invite-link", value: "invite-link" },
              { name: "scam-phrase", value: "scam-phrase" },
              { name: "scam-link", value: "scam-link" },
+             { name: "scam-image", value: "scam-image" },
              { name: "masked-link", value: "masked-link" },
              { name: "obfuscated-invite", value: "obfuscated-invite" },
              { name: "obfuscated-banned-word", value: "obfuscated-banned-word" }
@@ -5131,6 +5288,10 @@ async function evaluateAutoModMessage(message, policy = resolveAutoModPolicy(mes
 
   if (automod.scamFilterEnabled) {
     addMatch(detectScamAttempt(message, automod));
+  }
+
+  if (automod.aiModerationEnabled && matches.length === 0) {
+    addMatch(await detectAiScamIssue(message, automod));
   }
 
   if (automod.evasionFilterEnabled) {
