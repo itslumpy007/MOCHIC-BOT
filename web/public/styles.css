@@ -1737,6 +1737,10 @@ tbody tr:hover td {
     display: none;
   }
 
+  body.sidebar-open {
+    overflow: hidden;
+  }
+
   .app-shell {
     grid-template-columns: 1fr;
   }
@@ -1748,14 +1752,16 @@ tbody tr:hover td {
   .sidebar {
     position: fixed;
     z-index: 20;
-    left: 0;
-    top: 0;
-    width: min(300px, 86vw);
-    height: 100vh;
+    inset: 0;
+    width: 100vw;
+    max-width: 100vw;
+    height: 100dvh;
     gap: 16px;
     padding: 14px;
-    transform: translateX(-105%);
+    transform: translateX(-100%);
     transition: transform 180ms ease;
+    border-right: none;
+    border-radius: 0;
   }
 
   .member-drawer {
@@ -1975,7 +1981,7 @@ tbody tr:hover td {
   }
 }
 
-@media (max-width: 430px) and (hover: none) and (pointer: coarse) {
+@media (max-width: 430px) {
   .app-shell {
     min-height: 100dvh;
   }
