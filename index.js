@@ -323,6 +323,7 @@ function createDefaultConfig() {
       anonymousAffirmationsChannelId: null,
       anonymousAffirmationsCooldownMs: 60 * 1000,
       verificationCaptchaEnabled: false,
+      verificationRequiresApproval: false,
       logChannelId: null,
       automodLogChannelId: null,
       mutedRoleId: null,
@@ -335,6 +336,7 @@ function createDefaultConfig() {
       verifiedRoleId: null,
       unverifiedRoleId: null
     },
+    pendingVerifications: [],
     permissions: {
       modRoleIds: [],
       adminRoleIds: []
@@ -496,6 +498,63 @@ function isTikTokVerificationEnabled() {
 
 function isVerificationCaptchaEnabled() {
   return config.settings?.verificationCaptchaEnabled === true;
+}
+
+function isVerificationApprovalRequired() {
+  return config.settings?.verificationRequiresApproval === true;
+}
+
+function getPendingVerification(userId) {
+  const list = Array.isArray(config.pendingVerifications) ? config.pendingVerifications : [];
+  return list.find(entry => entry.userId === userId) || null;
+}
+
+async function approveVerification(pendingId, moderatorTag) {
+  if (!Array.isArray(config.pendingVerifications)) config.pendingVerifications = [];
+  const idx = config.pendingVerifications.findIndex(e => e.id === pendingId);
+  if (idx === -1) return { ok: false, error: "Pending verification not found." };
+  const entry = config.pendingVerifications[idx];
+  config.pendingVerifications.splice(idx, 1);
+
+  const verifiedRoleId = getVerificationRoleId();
+  const unverifiedRoleId = getUnverifiedRoleId();
+  const guild = client.guilds.cache.get(GUILD_ID) || await client.guilds.fetch(GUILD_ID).catch(() => null);
+  const member = guild ? await guild.members.fetch(entry.userId).catch(() => null) : null;
+
+  if (member && verifiedRoleId) {
+    if (!member.roles.cache.has(verifiedRoleId)) {
+      await member.roles.add(verifiedRoleId, "Verification approved by admin").catch(() => {});
+    }
+    if (unverifiedRoleId && member.roles.cache.has(unverifiedRoleId)) {
+      await member.roles.remove(unverifiedRoleId, "Verification approved by admin").catch(() => {});
+    }
+    await member.send("Your verification request has been approved. Welcome to the server!").catch(() => {});
+  }
+
+  saveConfig();
+  recordAuditLog(moderatorTag, "verification-approved", { userId: entry.userId, userTag: entry.userTag });
+  return { ok: true, entry };
+}
+
+async function denyVerification(pendingId, reason, moderatorTag) {
+  if (!Array.isArray(config.pendingVerifications)) config.pendingVerifications = [];
+  const idx = config.pendingVerifications.findIndex(e => e.id === pendingId);
+  if (idx === -1) return { ok: false, error: "Pending verification not found." };
+  const entry = config.pendingVerifications[idx];
+  config.pendingVerifications.splice(idx, 1);
+
+  const guild = client.guilds.cache.get(GUILD_ID) || await client.guilds.fetch(GUILD_ID).catch(() => null);
+  const member = guild ? await guild.members.fetch(entry.userId).catch(() => null) : null;
+  if (member) {
+    const msg = reason
+      ? `Your verification request was denied. Reason: ${reason}`
+      : "Your verification request was denied. Please contact a staff member if you have questions.";
+    await member.send(msg).catch(() => {});
+  }
+
+  saveConfig();
+  recordAuditLog(moderatorTag, "verification-denied", { userId: entry.userId, userTag: entry.userTag, reason: reason || "" });
+  return { ok: true, entry };
 }
 
 function normalizeVerificationCaptchaInput(value) {
@@ -726,6 +785,46 @@ async function completeRulesVerification(member) {
     };
   }
 
+  if (isVerificationApprovalRequired()) {
+    if (member.roles.cache.has(verifiedRoleId)) {
+      return {
+        ok: true,
+        embed: makeEmbed({
+          title: "You're already verified",
+          description: "You already have access. Thanks for reading the rules.",
+          color: COLORS.mint
+        })
+      };
+    }
+    const existing = getPendingVerification(member.id);
+    if (existing) {
+      return {
+        ok: true,
+        embed: makeEmbed({
+          title: "Request pending",
+          description: "Your verification request is already pending. An admin will review it soon.",
+          color: COLORS.yellow
+        })
+      };
+    }
+    if (!Array.isArray(config.pendingVerifications)) config.pendingVerifications = [];
+    config.pendingVerifications.push({
+      id: crypto.randomUUID(),
+      userId: member.id,
+      userTag: member.user?.tag || member.user?.username || member.id,
+      requestedAt: new Date().toISOString()
+    });
+    saveConfig();
+    return {
+      ok: true,
+      embed: makeEmbed({
+        title: "Request submitted",
+        description: "Your verification request has been submitted. An admin will review it soon.",
+        color: COLORS.blue
+      })
+    };
+  }
+
   const rolesToAdd = member.roles.cache.has(verifiedRoleId) ? [] : [verifiedRoleId];
   const rolesToRemove = unverifiedRoleId && member.roles.cache.has(unverifiedRoleId) ? [unverifiedRoleId] : [];
 
@@ -939,7 +1038,8 @@ function loadConfig() {
         adminRoleIds: Array.isArray(parsed.permissions?.adminRoleIds) ? parsed.permissions.adminRoleIds : []
       },
       nextCaseId: Number.isInteger(parsed.nextCaseId) ? parsed.nextCaseId : defaults.nextCaseId,
-      nextAppealId: Number.isInteger(parsed.nextAppealId) ? parsed.nextAppealId : defaults.nextAppealId
+      nextAppealId: Number.isInteger(parsed.nextAppealId) ? parsed.nextAppealId : defaults.nextAppealId,
+      pendingVerifications: Array.isArray(parsed.pendingVerifications) ? parsed.pendingVerifications : []
     };
   } catch (error) {
     console.error("Failed to load config, using defaults:", error.message);
@@ -8489,6 +8589,8 @@ function buildWebConfigPayload() {
       anonymousAffirmationsChannelId: getAnonymousAffirmationsChannelId() || "",
       anonymousAffirmationsCooldownMs: getAnonymousAffirmationsCooldownMs(),
       verificationCaptchaEnabled: isVerificationCaptchaEnabled(),
+      verificationRequiresApproval: isVerificationApprovalRequired(),
+      pendingVerificationsCount: Array.isArray(config.pendingVerifications) ? config.pendingVerifications.length : 0,
       logChannelId: config.settings.logChannelId || "",
       automodLogChannelId: config.settings.automodLogChannelId || "",
       mutedRoleId: config.settings.mutedRoleId || "",
@@ -8540,6 +8642,7 @@ function updateWebSettings(auth, payload) {
     "anonymousAffirmationsChannelId",
     "anonymousAffirmationsCooldownMs",
     "verificationCaptchaEnabled",
+    "verificationRequiresApproval",
     "logChannelId",
     "automodLogChannelId",
     "mutedRoleId",
@@ -8635,6 +8738,10 @@ function updateWebSettings(auth, payload) {
         config.settings[key] = nextAffirmationsCooldownMs;
       } else if (key === "verificationCaptchaEnabled") {
         config.settings[key] = nextVerificationCaptchaEnabled;
+      } else if (key === "verificationRequiresApproval") {
+        config.settings[key] = Object.prototype.hasOwnProperty.call(payload, "verificationRequiresApproval")
+          ? ["true", "1", "yes", "on"].includes(String(payload.verificationRequiresApproval).toLowerCase())
+          : isVerificationApprovalRequired();
       } else if (key === "generalChatChannelId") {
         config.settings[key] = nextGeneralChatChannelId;
       } else if (key === "generalChatInactivityEnabled") {
@@ -10592,6 +10699,45 @@ async function handleWebApi(req, res, pathname) {
       config.verifyMessageId = previousVerifyMessageId;
     }
     return sendWebJson(res, 200, { ok: true, config: buildWebConfigPayload() });
+  }
+
+  if (req.method === "GET" && pathname === "/api/pending-verifications") {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
+    return sendWebJson(res, 200, {
+      pendingVerifications: Array.isArray(config.pendingVerifications) ? config.pendingVerifications : []
+    });
+  }
+
+  if (req.method === "POST" && pathname.startsWith("/api/pending-verifications/")) {
+    if (!hasWebAccess(auth, "admin")) {
+      return sendWebJson(res, 403, { error: "Admin web access is required." });
+    }
+    const parts = pathname.split("/").filter(Boolean);
+    const pendingId = parts[2];
+    const action = parts[3];
+    if (!pendingId || !["approve", "deny"].includes(action)) {
+      return sendWebJson(res, 400, { error: "Invalid action." });
+    }
+    if (action === "approve") {
+      const result = await approveVerification(pendingId, getWebModeratorTag(auth));
+      if (!result.ok) return sendWebJson(res, 404, { error: result.error });
+      return sendWebJson(res, 200, {
+        ok: true,
+        pendingVerifications: Array.isArray(config.pendingVerifications) ? config.pendingVerifications : []
+      });
+    }
+    if (action === "deny") {
+      const body = await readWebJsonBody(req);
+      const reason = String(body.reason || "").trim().slice(0, 500);
+      const result = await denyVerification(pendingId, reason, getWebModeratorTag(auth));
+      if (!result.ok) return sendWebJson(res, 404, { error: result.error });
+      return sendWebJson(res, 200, {
+        ok: true,
+        pendingVerifications: Array.isArray(config.pendingVerifications) ? config.pendingVerifications : []
+      });
+    }
   }
 
   return sendWebJson(res, 404, { error: "Unknown API route." });

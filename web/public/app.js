@@ -79,6 +79,7 @@ const state = {
   lastDeletedMemberRecord: null,
   templateEditorDrafts: [],
   templateEditorIndex: 0,
+  pendingVerifications: [],
   loading: false,
   refreshIntervalId: null
 };
@@ -394,6 +395,7 @@ const affirmationsSettingLabels = {
 
 const verificationCoreSettingLabels = {
   verificationCaptchaEnabled: "Verification CAPTCHA enabled",
+  verificationRequiresApproval: "Require admin approval to verify",
   verifiedRoleId: "Verified role ID",
   unverifiedRoleId: "Unverified role ID"
 };
@@ -421,6 +423,7 @@ const verificationBonusSettingTypes = {
 
 const verificationCoreSettingTypes = {
   verificationCaptchaEnabled: "boolean",
+  verificationRequiresApproval: "boolean",
   verifiedRoleId: "input",
   unverifiedRoleId: "input"
 };
@@ -2416,6 +2419,84 @@ function renderSettings() {
   renderWebAccounts();
 }
 
+async function loadAndRenderPendingVerifications() {
+  if (!hasPanelAccess("admin")) return;
+  const el = $("#pendingVerificationsList");
+  if (!el) return;
+  try {
+    const result = await api("/api/pending-verifications");
+    state.pendingVerifications = Array.isArray(result.pendingVerifications) ? result.pendingVerifications : [];
+  } catch {
+    state.pendingVerifications = [];
+  }
+  renderPendingVerifications();
+}
+
+function renderPendingVerifications() {
+  const el = $("#pendingVerificationsList");
+  if (!el) return;
+
+  if (!hasPanelAccess("admin")) {
+    el.innerHTML = renderEmptyState("Admins only", "Pending verifications are visible to admins.");
+    return;
+  }
+
+  const list = state.pendingVerifications;
+  if (!list.length) {
+    el.innerHTML = renderEmptyState("No pending requests", "No members are waiting for verification approval.");
+    return;
+  }
+
+  el.innerHTML = list.map(entry => `
+    <article class="event" data-pending-id="${escapeHtml(entry.id)}">
+      <strong>${escapeHtml(entry.userTag)}</strong>
+      <p><code>${escapeHtml(entry.userId)}</code> &mdash; Requested ${escapeHtml(formatDate(entry.requestedAt))}</p>
+      <div class="button-row" style="margin-top:6px;">
+        <button class="save-button verify-approve-btn" data-pending-id="${escapeHtml(entry.id)}" type="button">Approve</button>
+        <button class="ghost-button verify-deny-btn" data-pending-id="${escapeHtml(entry.id)}" type="button">Deny</button>
+      </div>
+    </article>
+  `).join("");
+
+  el.querySelectorAll(".verify-approve-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.pendingId;
+      if (!confirm("Approve this member's verification request?")) return;
+      btn.disabled = true;
+      try {
+        const result = await api(`/api/pending-verifications/${id}/approve`, { method: "POST" });
+        state.pendingVerifications = result.pendingVerifications || [];
+        renderPendingVerifications();
+        showAlert("Verification approved.", "success");
+      } catch (err) {
+        showAlert(err.message || "Failed to approve.", "error");
+        btn.disabled = false;
+      }
+    });
+  });
+
+  el.querySelectorAll(".verify-deny-btn").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.pendingId;
+      const reason = prompt("Reason for denial (optional):");
+      if (reason === null) return;
+      btn.disabled = true;
+      try {
+        const result = await api(`/api/pending-verifications/${id}/deny`, {
+          method: "POST",
+          body: JSON.stringify({ reason })
+        });
+        state.pendingVerifications = result.pendingVerifications || [];
+        renderPendingVerifications();
+        showAlert("Verification denied.", "success");
+      } catch (err) {
+        showAlert(err.message || "Failed to deny.", "error");
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
 function renderWebAccounts() {
   const accounts = Array.isArray(state.webAccounts) ? state.webAccounts : [];
   const list = $("#webAccountsList");
@@ -3886,6 +3967,7 @@ function renderAll() {
   renderAutomod();
   renderAiReview();
   renderSettings();
+  loadAndRenderPendingVerifications();
   renderStaff();
   renderStaffInbox();
   renderOps();
@@ -4832,6 +4914,7 @@ function bindEvents() {
   $("#repostRolePanel").addEventListener("click", () => repostRolePanel().catch(error => setAlert(error.message, "error")));
   $("#repairVerifyPanel").addEventListener("click", () => repairVerifyPanel().catch(error => setAlert(error.message, "error")));
   $("#repairRolePanel").addEventListener("click", () => repairRolePanel().catch(error => setAlert(error.message, "error")));
+  $("#refreshPendingVerifications").addEventListener("click", () => loadAndRenderPendingVerifications().catch(error => setAlert(error.message, "error")));
   $("#runGeneralChatCheck").addEventListener("click", () => updateGeneralChatRule("run-now").catch(error => setAlert(error.message, "error")));
   $("#toggleGeneralChatRule").addEventListener("click", () => updateGeneralChatRule("toggle").catch(error => setAlert(error.message, "error")));
   $("#refreshGeneralChatWatchlist").addEventListener("click", () => loadAll().catch(error => setAlert(error.message, "error")));
