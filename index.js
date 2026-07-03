@@ -256,6 +256,8 @@ function createDefaultConfig() {
       aiModerationModel: "omni-moderation-latest",
       aiModerationThreshold: 70,
       aiModerationAction: "review",
+      aiModerationCategoryThresholds: {},
+      aiModerationSuppressLowConfidenceReviews: true,
       aiCustomRulesEnabled: false,
       aiCustomRulesModel: "gpt-4o-mini",
       aiCustomRulesThreshold: 75,
@@ -1003,6 +1005,12 @@ function loadConfig() {
         blockedAttachmentExtensions: Array.isArray(parsed.automod?.blockedAttachmentExtensions) ? parsed.automod.blockedAttachmentExtensions : defaults.automod.blockedAttachmentExtensions,
         nicknameBlockedTerms: Array.isArray(parsed.automod?.nicknameBlockedTerms) ? parsed.automod.nicknameBlockedTerms : [],
         scamPhraseList: Array.isArray(parsed.automod?.scamPhraseList) ? parsed.automod.scamPhraseList : [],
+        aiModerationCategoryThresholds: parsed.automod?.aiModerationCategoryThresholds && typeof parsed.automod.aiModerationCategoryThresholds === "object"
+          ? parsed.automod.aiModerationCategoryThresholds
+          : {},
+        aiModerationSuppressLowConfidenceReviews: parsed.automod?.aiModerationSuppressLowConfidenceReviews !== undefined
+          ? Boolean(parsed.automod.aiModerationSuppressLowConfidenceReviews)
+          : defaults.automod.aiModerationSuppressLowConfidenceReviews,
         googleBlockListEnabled: parsed.automod?.googleBlockListEnabled !== undefined ? Boolean(parsed.automod.googleBlockListEnabled) : defaults.automod.googleBlockListEnabled,
         googleBlockListUrl: typeof parsed.automod?.googleBlockListUrl === "string" ? parsed.automod.googleBlockListUrl : "",
         googleBlockListSyncMinutes: Number.isFinite(Number(parsed.automod?.googleBlockListSyncMinutes)) ? Number(parsed.automod.googleBlockListSyncMinutes) : defaults.automod.googleBlockListSyncMinutes,
@@ -2647,6 +2655,136 @@ function getAiModerationThreshold() {
   return Math.max(0, Math.min(1, threshold > 1 ? threshold / 100 : threshold));
 }
 
+function normalizeAiModerationCategoryName(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeAiModerationCategoryThresholds(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  return Object.entries(value).reduce((acc, [key, rawThreshold]) => {
+    const normalizedKey = normalizeAiModerationCategoryName(key);
+    const threshold = Number(rawThreshold);
+    if (!normalizedKey || !Number.isFinite(threshold)) return acc;
+    acc[normalizedKey] = Math.max(0, Math.min(1, threshold > 1 ? threshold / 100 : threshold));
+    return acc;
+  }, {});
+}
+
+function parseAiModerationCategoryThresholdsInput(value) {
+  const text = String(value || "").trim();
+  if (!text) return {};
+
+  try {
+    return normalizeAiModerationCategoryThresholds(JSON.parse(text));
+  } catch {
+    // Fall back to a light-weight line parser for admin convenience.
+  }
+
+  const entries = {};
+  for (const line of text.split(/[\n,]/).map(part => part.trim()).filter(Boolean)) {
+    const separatorIndex = line.indexOf(":") >= 0 ? line.indexOf(":") : line.indexOf("=");
+    if (separatorIndex < 1) continue;
+    const key = line.slice(0, separatorIndex).trim();
+    const threshold = Number(line.slice(separatorIndex + 1).trim());
+    if (!key || !Number.isFinite(threshold)) continue;
+    entries[key] = threshold;
+  }
+
+  return normalizeAiModerationCategoryThresholds(entries);
+}
+
+function getAiModerationCategoryThresholds() {
+  return normalizeAiModerationCategoryThresholds(config.automod.aiModerationCategoryThresholds);
+}
+
+function isAiModerationSuppressionEnabled() {
+  return Boolean(config.automod.aiModerationSuppressLowConfidenceReviews);
+}
+
+function getAiModerationPresetConfig(name) {
+  const normalized = String(name || "").trim().toLowerCase();
+  const presets = {
+    lenient: {
+      aiModerationEnabled: true,
+      aiModerationAction: "review",
+      aiModerationThreshold: 85,
+      aiModerationSuppressLowConfidenceReviews: true,
+      aiModerationCategoryThresholds: {
+        sexual: 95,
+        hate: 90,
+        violence: 90,
+        "self-harm": 85,
+        illicit: 85
+      }
+    },
+    balanced: {
+      aiModerationEnabled: true,
+      aiModerationAction: "review",
+      aiModerationThreshold: 70,
+      aiModerationSuppressLowConfidenceReviews: true,
+      aiModerationCategoryThresholds: {
+        sexual: 90,
+        hate: 85,
+        violence: 85,
+        "self-harm": 80,
+        illicit: 80
+      }
+    },
+    strict: {
+      aiModerationEnabled: true,
+      aiModerationAction: "review",
+      aiModerationThreshold: 55,
+      aiModerationSuppressLowConfidenceReviews: false,
+      aiModerationCategoryThresholds: {
+        sexual: 80,
+        hate: 75,
+        violence: 75,
+        "self-harm": 70,
+        illicit: 70
+      }
+    }
+  };
+  return presets[normalized] || null;
+}
+
+function applyAiModerationPreset(name) {
+  const preset = getAiModerationPresetConfig(name);
+  if (!preset) return null;
+
+  config.automod.aiModerationEnabled = Boolean(preset.aiModerationEnabled);
+  config.automod.aiModerationAction = preset.aiModerationAction;
+  config.automod.aiModerationThreshold = preset.aiModerationThreshold;
+  config.automod.aiModerationSuppressLowConfidenceReviews = Boolean(preset.aiModerationSuppressLowConfidenceReviews);
+  config.automod.aiModerationCategoryThresholds = normalizeAiModerationCategoryThresholds(preset.aiModerationCategoryThresholds);
+  saveConfig();
+  return preset;
+}
+
+function buildAiModerationPresetPreview(name, targetUserId = null) {
+  const preset = getAiModerationPresetConfig(name);
+  if (!preset) return null;
+
+  const categoryThresholds = normalizeAiModerationCategoryThresholds(preset.aiModerationCategoryThresholds);
+  const thresholdLines = Object.entries(categoryThresholds).map(([category, threshold]) => `${category}: ${Math.round(threshold * 100)}%`);
+  return makeEmbed({
+    title: `${name[0].toUpperCase()}${name.slice(1)} AI preset`,
+    description: [
+      "This preset updates the AI moderation defaults.",
+      "Confirm to apply it, or cancel to keep the current settings."
+    ].join(" "),
+    color: COLORS.blue,
+    fields: [
+      { name: "AI moderation", value: preset.aiModerationEnabled ? "Enabled" : "Disabled", inline: true },
+      { name: "AI action", value: preset.aiModerationAction || "review", inline: true },
+      { name: "Base threshold", value: `${preset.aiModerationThreshold}%`, inline: true },
+      { name: "Suppress low-confidence", value: preset.aiModerationSuppressLowConfidenceReviews ? "On" : "Off", inline: true },
+      { name: "Category overrides", value: thresholdLines.join("\n") || "None", inline: false },
+      { name: "Applies to", value: targetUserId ? `Selected member context: ${targetUserId}` : "Server-wide AI moderation settings", inline: false }
+    ]
+  });
+}
+
 function getAiModerationModel() {
   return String(config.automod.aiModerationModel || "omni-moderation-latest").trim() || "omni-moderation-latest";
 }
@@ -2688,11 +2826,40 @@ function getAiContextMessageCount() {
   return Number.isInteger(count) ? Math.max(1, Math.min(10, count)) : 3;
 }
 
+function getAiModerationThresholdForCategory(category) {
+  const normalizedCategory = normalizeAiModerationCategoryName(category);
+  const overrides = getAiModerationCategoryThresholds();
+  const override = Object.entries(overrides).find(([key]) =>
+    normalizedCategory === key ||
+    normalizedCategory.startsWith(`${key}/`) ||
+    normalizedCategory.startsWith(`${key}-`) ||
+    normalizedCategory.startsWith(`${key}:`)
+  )?.[1];
+
+  let threshold = Number.isFinite(Number(override)) ? Number(override) : getAiModerationThreshold();
+  if (!Number.isFinite(Number(override)) && isAiModerationSuppressionEnabled()) {
+    threshold = Math.max(threshold, isSevereAiModerationCategory(normalizedCategory) ? 0.85 : 0.95);
+  }
+  return threshold;
+}
+
 function getTopModerationCategory(result) {
   const scores = result?.category_scores || {};
   return Object.entries(scores)
     .filter(([, score]) => Number.isFinite(Number(score)))
     .sort((a, b) => Number(b[1]) - Number(a[1]))[0] || [null, 0];
+}
+
+function isSevereAiModerationCategory(category) {
+  const normalized = String(category || "").trim().toLowerCase();
+  if (!normalized) return false;
+  return [
+    "sexual",
+    "hate",
+    "violence",
+    "self-harm",
+    "illicit"
+  ].some(prefix => normalized.startsWith(prefix));
 }
 
 function mapAiScamCategory(category, hasUrls, hasImages) {
@@ -2863,9 +3030,10 @@ async function detectAiModerationIssue(message) {
     if (!result) return null;
 
     const [category, scoreValue] = getTopModerationCategory(result);
+    const normalizedCategory = String(category || "").trim().toLowerCase();
     const score = Number(scoreValue || 0);
-    const threshold = getAiModerationThreshold();
-    if (!result.flagged && score < threshold) return null;
+    const threshold = getAiModerationThresholdForCategory(normalizedCategory);
+    if (!result.flagged || score < threshold) return null;
 
     const percent = Math.round(score * 100);
     const action = getAiModerationAction();
@@ -4664,13 +4832,17 @@ function calculateUserRisk(userId) {
   const warnings = getWarnings(userId).length;
   const cases = getCasesForUser(userId);
   const now = Date.now();
-  const recentCases = cases.filter(entry => now - new Date(entry.createdAt).getTime() <= 7 * 24 * 60 * 60 * 1000);
-  const aiFlags = cases.filter(entry => entry.action === "automod:ai-review").length;
+  const visibleCases = cases.filter(entry => entry.action !== "automod:ai-review" || !getAiReviewStatus(entry.id));
+  const recentCases = cases.filter(entry =>
+    entry.action !== "automod:ai-review" &&
+    now - new Date(entry.createdAt).getTime() <= 7 * 24 * 60 * 60 * 1000
+  );
+  const aiFlags = cases.filter(entry => entry.action === "automod:ai-review" && !getAiReviewStatus(entry.id)).length;
   const severeCases = cases.filter(entry => ["ban", "tempban", "kick", "timeout", "automod:timeout"].includes(entry.action)).length;
-  const score = Math.min(100, warnings * 10 + recentCases.length * 8 + aiFlags * 6 + severeCases * 12);
+  const score = Math.min(100, warnings * 10 + recentCases.length * 8 + aiFlags * 2 + severeCases * 12);
   const strikes = Math.floor(score / 25);
   const level = score >= 75 ? "high" : score >= 40 ? "medium" : score > 0 ? "low" : "clear";
-  return { score, strikes, level, warnings, cases: cases.length, recentCases: recentCases.length, aiFlags };
+  return { score, strikes, level, warnings, cases: visibleCases.length, recentCases: recentCases.length, aiFlags };
 }
 
 function buildRiskLeaderboard(limit = 10) {
@@ -7335,6 +7507,14 @@ function buildAdminPanelButtons(view, targetUserId = null) {
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "lists", targetUserId)).setLabel("Lists").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "rule-actions", targetUserId)).setLabel("Rule Actions").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "ai-settings", targetUserId)).setLabel("AI Settings").setStyle(ButtonStyle.Primary)
+      ),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "ai-preset-lenient", targetUserId)).setLabel("Lenient").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "ai-preset-balanced", targetUserId)).setLabel("Balanced").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "ai-preset-strict", targetUserId)).setLabel("Strict").setStyle(ButtonStyle.Secondary)
+      ),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("configmodal", "ai-tuning", targetUserId)).setLabel("AI Tuning").setStyle(ButtonStyle.Secondary)
       )
     );
   }
@@ -7526,9 +7706,11 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
           value: [
             `API key: ${OPENAI_API_KEY ? "Configured" : "Missing"}`,
             `Review: ${config.automod.aiModerationEnabled ? "On" : "Off"}`,
+            `Suppress low-confidence: ${config.automod.aiModerationSuppressLowConfidenceReviews ? "On" : "Off"}`,
             `Custom rules: ${config.automod.aiCustomRulesEnabled ? "On" : "Off"}`,
             `Model: ${config.automod.aiModerationModel || "omni-moderation-latest"}`,
             `Threshold: ${config.automod.aiModerationThreshold}%`,
+            `Category overrides: ${Object.keys(config.automod.aiModerationCategoryThresholds || {}).length}`,
             `Context: ${config.automod.aiIncludeRecentContext ? `${config.automod.aiContextMessageCount} msgs` : "Off"}`
           ].join("\n"),
           inline: true
@@ -8970,6 +9152,8 @@ async function updateWebAutomod(auth, payload) {
     aiModerationThreshold: config.automod.aiModerationThreshold,
     aiModerationAction: config.automod.aiModerationAction,
     aiModerationModel: config.automod.aiModerationModel,
+    aiModerationSuppressLowConfidenceReviews: config.automod.aiModerationSuppressLowConfidenceReviews,
+    aiModerationCategoryThresholds: JSON.stringify(config.automod.aiModerationCategoryThresholds || {}),
     aiCustomRulesEnabled: config.automod.aiCustomRulesEnabled,
     aiCustomRulesThreshold: config.automod.aiCustomRulesThreshold,
     aiCustomRulesAction: config.automod.aiCustomRulesAction,
@@ -8995,6 +9179,7 @@ async function updateWebAutomod(auth, payload) {
     "scamFilterEnabled",
     "evasionFilterEnabled",
     "aiModerationEnabled",
+    "aiModerationSuppressLowConfidenceReviews",
     "aiCustomRulesEnabled",
     "aiIncludeRecentContext",
     "dryRunEnabled",
@@ -9053,7 +9238,7 @@ async function updateWebAutomod(auth, payload) {
     }
   }
 
-  const stringKeys = ["aiModerationModel", "aiCustomRulesModel", "aiCustomRules", "aiCustomInstructions", "quietHoursStart", "quietHoursEnd", "quietHoursMode", "googleBlockListUrl"];
+  const stringKeys = ["aiModerationModel", "aiModerationCategoryThresholds", "aiCustomRulesModel", "aiCustomRules", "aiCustomInstructions", "quietHoursStart", "quietHoursEnd", "quietHoursMode", "googleBlockListUrl"];
   const actionKeys = ["aiModerationAction", "aiCustomRulesAction"];
   for (const key of actionKeys) {
     if (Object.prototype.hasOwnProperty.call(payload, key)) {
@@ -9062,8 +9247,13 @@ async function updateWebAutomod(auth, payload) {
     }
   }
 
+  if (Object.prototype.hasOwnProperty.call(payload, "aiModerationCategoryThresholds")) {
+    config.automod.aiModerationCategoryThresholds = parseAiModerationCategoryThresholdsInput(payload.aiModerationCategoryThresholds);
+  }
+
   for (const key of stringKeys) {
     if (Object.prototype.hasOwnProperty.call(payload, key)) {
+      if (key === "aiModerationCategoryThresholds") continue;
       const value = String(payload[key] || "").trim();
       if (key === "quietHoursMode") {
         config.automod[key] = ["strict", "relaxed"].includes(value) ? value : "relaxed";
@@ -9141,6 +9331,8 @@ async function updateWebAutomod(auth, payload) {
       aiModerationThreshold: config.automod.aiModerationThreshold,
       aiModerationAction: config.automod.aiModerationAction,
       aiModerationModel: config.automod.aiModerationModel,
+      aiModerationSuppressLowConfidenceReviews: config.automod.aiModerationSuppressLowConfidenceReviews,
+      aiModerationCategoryThresholds: JSON.stringify(config.automod.aiModerationCategoryThresholds || {}),
       aiCustomRulesEnabled: config.automod.aiCustomRulesEnabled,
       aiCustomRulesThreshold: config.automod.aiCustomRulesThreshold,
       aiCustomRulesAction: config.automod.aiCustomRulesAction,
@@ -11349,6 +11541,25 @@ client.on("interactionCreate", async interaction => {
           });
         }
 
+        if (action === "apply-ai-preset") {
+          const preset = applyAiModerationPreset(pending.presetName);
+          if (!preset) {
+            clearPendingPanelAction(interaction.user.id);
+            return interaction.update({
+              content: "That AI preset expired or is no longer available.",
+              embeds: [],
+              components: []
+            });
+          }
+
+          clearPendingPanelAction(interaction.user.id);
+          return interaction.update({
+            content: `Applied the ${pending.presetName} AI preset and saved it.`,
+            embeds: [],
+            components: []
+          });
+        }
+
         if (action === "cancel") {
           clearPendingPanelAction(interaction.user.id);
           return interaction.update({
@@ -11909,6 +12120,33 @@ client.on("interactionCreate", async interaction => {
             );
           return interaction.showModal(modal);
         }
+
+        if (action === "ai-tuning") {
+          const modal = new ModalBuilder()
+            .setCustomId(buildAdminPanelCustomId("configsubmit", "ai-tuning", targetUserId))
+            .setTitle("Set AI Tuning")
+            .addComponents(
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("suppress")
+                  .setLabel("Suppress low-confidence reviews: on/off")
+                  .setPlaceholder(config.automod.aiModerationSuppressLowConfidenceReviews ? "on" : "off")
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setValue(config.automod.aiModerationSuppressLowConfidenceReviews ? "on" : "off")
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("categoryThresholds")
+                  .setLabel("Category thresholds JSON")
+                  .setPlaceholder('{"sexual": 90, "hate": 85}')
+                  .setStyle(TextInputStyle.Paragraph)
+                  .setRequired(false)
+                  .setValue(JSON.stringify(config.automod.aiModerationCategoryThresholds || {}, null, 2).slice(0, 4000))
+              )
+            );
+          return interaction.showModal(modal);
+        }
       }
 
       if (kind === "toggle") {
@@ -11935,6 +12173,31 @@ client.on("interactionCreate", async interaction => {
       }
 
       if (kind === "action") {
+        if (action === "ai-preset-lenient" || action === "ai-preset-balanced" || action === "ai-preset-strict") {
+          const presetName = action.replace("ai-preset-", "");
+          const previewEmbed = buildAiModerationPresetPreview(presetName, targetUserId);
+          if (!previewEmbed) {
+            return interaction.reply({ content: "Unknown AI preset.", ephemeral: true });
+          }
+
+          setPendingPanelAction(interaction.user.id, {
+            action: "apply-ai-preset",
+            presetName,
+            targetUserId
+          });
+
+          return interaction.reply({
+            embeds: [previewEmbed],
+            components: [
+              new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(buildAdminPanelCustomId("confirm", "apply-ai-preset", targetUserId)).setLabel("Apply preset").setStyle(ButtonStyle.Primary),
+                new ButtonBuilder().setCustomId(buildAdminPanelCustomId("confirm", "cancel", targetUserId)).setLabel("Cancel").setStyle(ButtonStyle.Secondary)
+              )
+            ],
+            ephemeral: true
+          });
+        }
+
         if (action === "status") {
           return interaction.reply({ embeds: [buildStatusEmbed()], ephemeral: true });
         }
@@ -12862,6 +13125,13 @@ client.on("interactionCreate", async interaction => {
           config.automod.aiMinMessageLength = minLength;
           config.automod.aiContextMessageCount = contextCount;
           config.automod.aiIncludeRecentContext = contextCount > 0;
+        }
+
+        if (action === "ai-tuning") {
+          const suppress = parseBooleanInput(interaction.fields.getTextInputValue("suppress"), config.automod.aiModerationSuppressLowConfidenceReviews);
+          const categoryThresholds = interaction.fields.getTextInputValue("categoryThresholds");
+          config.automod.aiModerationSuppressLowConfidenceReviews = suppress;
+          config.automod.aiModerationCategoryThresholds = parseAiModerationCategoryThresholdsInput(categoryThresholds);
         }
 
         if (action === "rule-actions") {

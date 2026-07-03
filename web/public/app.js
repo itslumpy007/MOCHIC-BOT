@@ -336,8 +336,55 @@ const aiActionOptions = [
 ];
 
 const aiTextareaLabels = {
+  aiModerationCategoryThresholds: "Category thresholds JSON",
   aiCustomRules: "AI custom server rules",
   aiCustomInstructions: "Extra AI moderator guidance"
+};
+
+const aiPolicyLabels = {
+  aiModerationSuppressLowConfidenceReviews: "Suppress low-confidence reviews"
+};
+
+const aiModerationPresets = {
+  lenient: {
+    aiModerationEnabled: true,
+    aiModerationAction: "review",
+    aiModerationThreshold: 85,
+    aiModerationSuppressLowConfidenceReviews: true,
+    aiModerationCategoryThresholds: {
+      sexual: 95,
+      hate: 90,
+      violence: 90,
+      "self-harm": 85,
+      illicit: 85
+    }
+  },
+  balanced: {
+    aiModerationEnabled: true,
+    aiModerationAction: "review",
+    aiModerationThreshold: 70,
+    aiModerationSuppressLowConfidenceReviews: true,
+    aiModerationCategoryThresholds: {
+      sexual: 90,
+      hate: 85,
+      violence: 85,
+      "self-harm": 80,
+      illicit: 80
+    }
+  },
+  strict: {
+    aiModerationEnabled: true,
+    aiModerationAction: "review",
+    aiModerationThreshold: 55,
+    aiModerationSuppressLowConfidenceReviews: false,
+    aiModerationCategoryThresholds: {
+      sexual: 80,
+      hate: 75,
+      violence: 75,
+      "self-harm": 70,
+      illicit: 70
+    }
+  }
 };
 
 const modeLabels = {
@@ -2153,10 +2200,18 @@ function renderAutomod() {
       </label>
     `).join("");
 
+  $("#aiPolicyFields").innerHTML = Object.entries(aiPolicyLabels)
+    .map(([key, label]) => `
+      <label class="switch">
+        <span>${label}</span>
+        <input type="checkbox" data-automod-bool="${key}" ${automod[key] ? "checked" : ""}>
+      </label>
+    `).join("");
+
   $("#aiInstructionFields").innerHTML = Object.entries(aiTextareaLabels)
     .map(([key, label]) => `
       <label>${label}
-        <textarea data-automod-string="${key}" rows="${key === "aiCustomRules" ? "8" : "5"}">${escapeHtml(automod[key] || "")}</textarea>
+        <textarea data-automod-string="${key}" rows="${key === "aiCustomRules" ? "8" : "5"}">${escapeHtml(renderAutomodTextareaValue(key, automod[key]))}</textarea>
       </label>
     `).join("");
 
@@ -2227,12 +2282,14 @@ function renderAutomodSummary(automod) {
   const topRule = Object.entries(analytics.ruleCounts || {}).sort((a, b) => b[1] - a[1])[0];
   const overrideCount = Object.values(automod.channelRuleOverrides || {}).reduce((sum, rules) => sum + (rules || []).length, 0);
   const googleSyncCount = Number(automod.googleBlockListLastCount || 0);
+  const categoryOverrideCount = Object.keys(automod.aiModerationCategoryThresholds || {}).length;
   const summary = [
     ["Enabled", `${enabledRules}/${totalRules}`],
     ["Detections", analytics.totalDetections || 0],
     ["Top Rule", topRule ? `${topRule[0]} (${topRule[1]})` : "None"],
     ["Raid Action", automod.raidAction || "log"],
     ["AI", automod.aiModerationEnabled ? `${automod.aiModerationThreshold || 70}% / ${automod.aiModerationAction || "review"}` : "Off"],
+    ["AI Policy", automod.aiModerationSuppressLowConfidenceReviews ? `Suppressed / ${categoryOverrideCount} overrides` : `${categoryOverrideCount} overrides`],
     ["Custom AI", automod.aiCustomRulesEnabled ? `${automod.aiCustomRulesThreshold || 75}% / ${automod.aiCustomRulesAction || "review"}` : "Off"],
     ["Dry Run", automod.dryRunEnabled ? "On" : "Off"],
     ["Profiles", (state.ops?.channelProfiles || "").split("\n").filter(Boolean).length || 0],
@@ -2290,6 +2347,32 @@ function formatChannelRuleOverrides(overrides) {
   return Object.entries(overrides)
     .map(([channelId, rules]) => `${channelId}: ${(rules || []).join(", ")}`)
     .join("\n");
+}
+
+function formatAiModerationCategoryThresholds(thresholds) {
+  if (!thresholds || typeof thresholds !== "object") return "";
+  const entries = Object.entries(thresholds)
+    .filter(([key, value]) => key && Number.isFinite(Number(value)))
+    .sort(([a], [b]) => a.localeCompare(b));
+  return entries.length ? JSON.stringify(Object.fromEntries(entries), null, 2) : "";
+}
+
+function renderAutomodTextareaValue(key, value) {
+  if (key === "channelRuleOverrides") return formatChannelRuleOverrides(value);
+  if (key === "aiModerationCategoryThresholds") return formatAiModerationCategoryThresholds(value);
+  return value || "";
+}
+
+function setAutomodFieldValue(key, value) {
+  const checkbox = document.querySelector(`[data-automod-bool="${key}"]`);
+  const number = document.querySelector(`[data-automod-number="${key}"]`);
+  const duration = document.querySelector(`[data-automod-duration="${key}"]`);
+  const string = document.querySelector(`[data-automod-string="${key}"]`);
+
+  if (checkbox) checkbox.checked = Boolean(value);
+  if (number) number.value = value;
+  if (duration) duration.value = value;
+  if (string) string.value = typeof value === "object" ? JSON.stringify(value, null, 2) : value;
 }
 
 function renderAutomodPreview() {
@@ -4203,18 +4286,22 @@ function applyAutomodPreset(name) {
   if (!preset) return;
 
   Object.entries(preset).forEach(([key, value]) => {
-    const checkbox = document.querySelector(`[data-automod-bool="${key}"]`);
-    const number = document.querySelector(`[data-automod-number="${key}"]`);
-    const duration = document.querySelector(`[data-automod-duration="${key}"]`);
-    const string = document.querySelector(`[data-automod-string="${key}"]`);
-
-    if (checkbox) checkbox.checked = Boolean(value);
-    if (number) number.value = value;
-    if (duration) duration.value = value;
-    if (string) string.value = value;
+    setAutomodFieldValue(key, value);
   });
 
   setAlert(`${name[0].toUpperCase()}${name.slice(1)} AutoMod mode is ready. Save to apply it.`);
+}
+
+function applyAiModerationPreset(name) {
+  if (!hasPanelAccess("admin")) return;
+  const preset = aiModerationPresets[name];
+  if (!preset) return;
+
+  Object.entries(preset).forEach(([key, value]) => {
+    setAutomodFieldValue(key, key === "aiModerationCategoryThresholds" ? formatAiModerationCategoryThresholds(value) : value);
+  });
+
+  setAlert(`${name[0].toUpperCase()}${name.slice(1)} AI preset is ready. Save to apply it.`);
 }
 
 async function saveSettings(options = {}) {
@@ -4962,6 +5049,9 @@ function bindEvents() {
   });
   document.querySelectorAll("[data-automod-preset]").forEach(button => {
     button.addEventListener("click", () => applyAutomodPreset(button.dataset.automodPreset));
+  });
+  document.querySelectorAll("[data-ai-preset]").forEach(button => {
+    button.addEventListener("click", () => applyAiModerationPreset(button.dataset.aiPreset));
   });
   document.querySelectorAll("[data-automod-sample]").forEach(button => {
     button.addEventListener("click", () => {
