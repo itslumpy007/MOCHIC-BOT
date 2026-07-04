@@ -229,6 +229,7 @@ function createDefaultConfig() {
       spam: true,
       caps: true,
       bannedWords: false,
+      bannedWordsContextSensitivity: 65,
       bannedWordList: [],
       linksEnabled: false,
       allowedDomainsOnly: false,
@@ -999,6 +1000,9 @@ function loadConfig() {
         ...defaults.automod,
         ...(parsed.automod || {}),
         bannedWordList: Array.isArray(parsed.automod?.bannedWordList) ? parsed.automod.bannedWordList : [],
+        bannedWordsContextSensitivity: Number.isFinite(Number(parsed.automod?.bannedWordsContextSensitivity))
+          ? Math.max(0, Math.min(100, Number(parsed.automod.bannedWordsContextSensitivity)))
+          : defaults.automod.bannedWordsContextSensitivity,
         allowedDomains: Array.isArray(parsed.automod?.allowedDomains) ? parsed.automod.allowedDomains : [],
         blockedDomains: Array.isArray(parsed.automod?.blockedDomains) ? parsed.automod.blockedDomains : [],
         allowedAttachmentExtensions: Array.isArray(parsed.automod?.allowedAttachmentExtensions) ? parsed.automod.allowedAttachmentExtensions : [],
@@ -1996,6 +2000,12 @@ function getBannedWords() {
   return Array.isArray(config.automod.bannedWordList) ? config.automod.bannedWordList : [];
 }
 
+function getBannedWordsContextSensitivity() {
+  const sensitivity = Number(config.automod.bannedWordsContextSensitivity);
+  if (!Number.isFinite(sensitivity)) return 65;
+  return Math.max(0, Math.min(100, sensitivity));
+}
+
 function normalizeBlockListTerms(value) {
   return [...new Set(
     String(value || "")
@@ -2489,13 +2499,75 @@ function buildBypassPattern(term) {
   return new RegExp(`(^|[^\\p{L}\\p{N}_])${escaped}($|[^\\p{L}\\p{N}_])`, "iu");
 }
 
+function getBannedWordContextSnippet(content, matchIndex, matchLength, windowSize = 48) {
+  const start = Math.max(0, matchIndex - windowSize);
+  const end = Math.min(content.length, matchIndex + matchLength + windowSize);
+  return content.slice(start, end);
+}
+
+function getBannedWordContextScore(snippet, term) {
+  const normalizedSnippet = normalizeComparisonText(snippet).replace(/\s+/g, " ");
+  const normalizedTerm = normalizeComparisonText(term).replace(/\s+/g, " ").trim();
+  if (!normalizedSnippet || !normalizedTerm) return 0;
+
+  let score = 0;
+  const weightedMarkers = [
+    { marker: `not ${normalizedTerm}`, weight: 60 },
+    { marker: `no ${normalizedTerm}`, weight: 60 },
+    { marker: `without ${normalizedTerm}`, weight: 55 },
+    { marker: `instead of ${normalizedTerm}`, weight: 45 },
+    { marker: `rather than ${normalizedTerm}`, weight: 45 },
+    { marker: "the word", weight: 35 },
+    { marker: "word is", weight: 30 },
+    { marker: "word means", weight: 30 },
+    { marker: "means", weight: 20 },
+    { marker: "meaning", weight: 20 },
+    { marker: "definition", weight: 20 },
+    { marker: "example", weight: 18 },
+    { marker: "examples", weight: 18 },
+    { marker: "translation", weight: 18 },
+    { marker: "translated", weight: 18 },
+    { marker: "spelling", weight: 12 },
+    { marker: "spell", weight: 12 },
+    { marker: "quoted", weight: 15 },
+    { marker: "quote", weight: 12 },
+    { marker: "reference", weight: 15 },
+    { marker: "referencing", weight: 15 },
+    { marker: "called", weight: 10 },
+    { marker: "about", weight: 8 },
+    { marker: "talking about", weight: 18 }
+  ];
+
+  for (const entry of weightedMarkers) {
+    if (normalizedSnippet.includes(entry.marker)) score += entry.weight;
+  }
+
+  if (/["'“”‘’].{0,18}\bthe word\b/i.test(snippet)) score += 20;
+  if (/\bwhat does\b.*\bmean\b/i.test(snippet)) score += 35;
+  if (/\bmeans?\s+(to|that)\b/i.test(normalizedSnippet)) score += 12;
+  return Math.min(100, score);
+}
+
 function findBannedWordMatch(content, automod = config.automod) {
   const normalizedContent = normalizeComparisonText(content).replace(/\s+/g, " ");
   const bannedWords = Array.isArray(automod.bannedWordList) ? automod.bannedWordList : getBannedWords();
-  return bannedWords.find(term => {
+  const sensitivity = Number.isFinite(Number(automod.bannedWordsContextSensitivity))
+    ? Math.max(0, Math.min(100, Number(automod.bannedWordsContextSensitivity)))
+    : getBannedWordsContextSensitivity();
+  for (const term of bannedWords) {
     const pattern = buildBoundaryPattern(term);
-    return pattern ? pattern.test(normalizedContent) : false;
-  }) || null;
+    if (!pattern) continue;
+
+    const match = normalizedContent.match(pattern);
+    if (!match) continue;
+
+    const contextSnippet = getBannedWordContextSnippet(normalizedContent, match.index || 0, match[0].length);
+    if (getBannedWordContextScore(contextSnippet, term) >= sensitivity) continue;
+
+    return term;
+  }
+
+  return null;
 }
 
 function findBypassBannedWordMatch(content, automod = config.automod) {
@@ -5948,6 +6020,7 @@ function buildAutoModSummary() {
     `Spam: ${config.automod.spam ? "on" : "off"}`,
     `Caps: ${config.automod.caps ? "on" : "off"}`,
     `Banned words: ${config.automod.bannedWords ? "on" : "off"}`,
+    `Banned word context: ${getBannedWordsContextSensitivity()}`,
     `Banned word count: ${getBannedWords().length}`,
     `Scam filter: ${config.automod.scamFilterEnabled ? "on" : "off"}`,
     `Scam phrase count: ${getScamPhrases().length}`,
@@ -7656,7 +7729,8 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
             `Invites: ${config.automod.invites ? "On" : "Off"}`,
             `Caps: ${config.automod.caps ? "On" : "Off"}`,
             `Links: ${config.automod.linksEnabled ? "On" : "Off"}`,
-            `Words: ${config.automod.bannedWords ? `On (${getBannedWords().length})` : "Off"}`
+            `Words: ${config.automod.bannedWords ? `On (${getBannedWords().length})` : "Off"}`,
+            `Word context: ${getBannedWordsContextSensitivity()}`
           ].join("\n"),
           inline: true
         },
@@ -9161,6 +9235,7 @@ async function updateWebAutomod(auth, payload) {
     aiCustomRulesLength: String(config.automod.aiCustomRules || "").length,
     aiCustomInstructionsLength: String(config.automod.aiCustomInstructions || "").length,
     aiIncludeRecentContext: config.automod.aiIncludeRecentContext,
+    bannedWordsContextSensitivity: getBannedWordsContextSensitivity(),
     dryRunEnabled: config.automod.dryRunEnabled,
     escalationEnabled: config.automod.escalationEnabled,
     emojiSpamEnabled: config.automod.emojiSpamEnabled
@@ -9202,6 +9277,7 @@ async function updateWebAutomod(auth, payload) {
     aiCustomRulesThreshold: [1, 100],
     aiMinMessageLength: [1, 500],
     aiContextMessageCount: [1, 10],
+    bannedWordsContextSensitivity: [0, 100],
     contextMessageCount: [1, 10],
     spamWindowMs: [1000, 60000],
     spamBurstThreshold: [2, 20],
@@ -11936,6 +12012,15 @@ client.on("interactionCreate", async interaction => {
                   .setStyle(TextInputStyle.Paragraph)
                   .setRequired(false)
                   .setValue(getNicknameBlockedTerms().join(", ").slice(0, 4000))
+              ),
+              new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                  .setCustomId("bannedWordsContextSensitivity")
+                  .setLabel("Banned word context sensitivity 0-100")
+                  .setPlaceholder(`${getBannedWordsContextSensitivity()}`)
+                  .setStyle(TextInputStyle.Short)
+                  .setRequired(true)
+                  .setValue(`${getBannedWordsContextSensitivity()}`)
               )
             );
           return interaction.showModal(modal);
@@ -13014,8 +13099,14 @@ client.on("interactionCreate", async interaction => {
         }
 
         if (action === "terms") {
+          const contextSensitivity = Number(interaction.fields.getTextInputValue("bannedWordsContextSensitivity"));
+          if (!Number.isInteger(contextSensitivity) || contextSensitivity < 0 || contextSensitivity > 100) {
+            return interaction.reply({ content: "Banned word context sensitivity must be a whole number from 0 to 100.", ephemeral: true });
+          }
+
           config.automod.bannedWordList = parseCommaSeparatedList(interaction.fields.getTextInputValue("bannedWords"));
           config.automod.nicknameBlockedTerms = parseCommaSeparatedList(interaction.fields.getTextInputValue("nicknameTerms"));
+          config.automod.bannedWordsContextSensitivity = contextSensitivity;
         }
 
         if (action === "domains") {
@@ -13089,8 +13180,14 @@ client.on("interactionCreate", async interaction => {
         }
 
         if (action === "lists") {
+          const contextSensitivity = Number(interaction.fields.getTextInputValue("bannedWordsContextSensitivity"));
+          if (!Number.isInteger(contextSensitivity) || contextSensitivity < 0 || contextSensitivity > 100) {
+            return interaction.reply({ content: "Banned word context sensitivity must be a whole number from 0 to 100.", ephemeral: true });
+          }
+
           config.automod.bannedWordList = parseCommaSeparatedList(interaction.fields.getTextInputValue("bannedWords"));
           config.automod.nicknameBlockedTerms = parseCommaSeparatedList(interaction.fields.getTextInputValue("nicknameTerms"));
+          config.automod.bannedWordsContextSensitivity = contextSensitivity;
           config.automod.allowedDomains = parseCommaSeparatedList(interaction.fields.getTextInputValue("allowedDomains"), normalizeDomain);
           config.automod.blockedDomains = parseCommaSeparatedList(interaction.fields.getTextInputValue("blockedDomains"), normalizeDomain);
           config.automod.scamPhraseList = parseCommaSeparatedList(interaction.fields.getTextInputValue("scamPhrases"), normalizeComparisonText);

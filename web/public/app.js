@@ -418,6 +418,10 @@ const listLabels = {
   blockedAttachmentExtensions: "Blocked extensions"
 };
 
+const bannedWordTuningLabels = {
+  bannedWordsContextSensitivity: "Banned word context sensitivity"
+};
+
 const settingLabels = {
   verifyChannelId: "Verify channel ID",
   rulesChannelId: "Rules channel ID",
@@ -2249,6 +2253,17 @@ function renderAutomod() {
       </label>
     `).join("");
 
+  const tuningValue = Number.isFinite(Number(automod.bannedWordsContextSensitivity))
+    ? Math.max(0, Math.min(100, Number(automod.bannedWordsContextSensitivity)))
+    : 65;
+
+  $("#bannedWordTuningFields").innerHTML = Object.entries(bannedWordTuningLabels)
+    .map(([key, label]) => `
+      <label>${label}
+        <input type="number" min="0" max="100" step="1" data-automod-number="${key}" value="${escapeHtml(tuningValue)}" placeholder="65">
+      </label>
+    `).join("");
+
   $("#durationFields").innerHTML = Object.entries(durationLabels)
     .map(([key, label]) => `
       <label>${label}
@@ -2291,6 +2306,7 @@ function renderAutomodSummary(automod) {
     ["AI", automod.aiModerationEnabled ? `${automod.aiModerationThreshold || 70}% / ${automod.aiModerationAction || "review"}` : "Off"],
     ["AI Policy", automod.aiModerationSuppressLowConfidenceReviews ? `Suppressed / ${categoryOverrideCount} overrides` : `${categoryOverrideCount} overrides`],
     ["Custom AI", automod.aiCustomRulesEnabled ? `${automod.aiCustomRulesThreshold || 75}% / ${automod.aiCustomRulesAction || "review"}` : "Off"],
+    ["Word context", `${Number.isFinite(Number(automod.bannedWordsContextSensitivity)) ? Math.max(0, Math.min(100, Number(automod.bannedWordsContextSensitivity))) : 65}`],
     ["Dry Run", automod.dryRunEnabled ? "On" : "Off"],
     ["Profiles", (state.ops?.channelProfiles || "").split("\n").filter(Boolean).length || 0],
     ["Overrides", overrideCount],
