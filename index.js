@@ -2709,6 +2709,13 @@ function isImageAttachment(attachment) {
   return IMAGE_ATTACHMENT_EXTENSIONS.has(extension);
 }
 
+function isGifAttachment(attachment) {
+  const contentType = String(attachment?.contentType || "").trim().toLowerCase();
+  if (contentType === "image/gif") return true;
+  const extension = normalizeExtension(path.extname(attachment?.name || ""));
+  return extension === ".gif";
+}
+
 function extractMessageUrls(content) {
   const matches = String(content || "").match(/https?:\/\/[^\s]+/gi) || [];
   return [...new Set(matches.map(match => {
@@ -3019,7 +3026,9 @@ async function detectAiScamIssue(message, automod = config.automod) {
 
   const content = String(message.content || "").trim();
   const urls = extractMessageUrls(content);
-  const imageAttachments = Array.from(message.attachments.values()).filter(isImageAttachment).slice(0, 3);
+  const imageAttachments = Array.from(message.attachments.values())
+    .filter(attachment => isImageAttachment(attachment) && !isGifAttachment(attachment))
+    .slice(0, 3);
 
   if (!urls.length && !imageAttachments.length) return null;
 
