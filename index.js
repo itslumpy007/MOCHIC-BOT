@@ -148,13 +148,17 @@ const BUILT_IN_SCAM_PHRASES = [
   "check this file",
   "limited time reward"
 ];
-const SUSPICIOUS_SCAM_DOMAINS = [
+const HIGH_RISK_SCAM_DOMAINS = [
   "bit.ly",
   "cutt.ly",
   "tinyurl.com",
-  "grabify.link",
+  "grabify.link"
+];
+const COMMON_LINK_AGGREGATOR_DOMAINS = [
   "linktr.ee",
-  "lnk.bio"
+  "lnk.bio",
+  "bio.link",
+  "beacons.ai"
 ];
 const spamTracker = new Map();
 const joinTracker = new Map();
@@ -2629,19 +2633,70 @@ function detectMaskedLink(content) {
   return null;
 }
 
-function isSuspiciousDomain(domain) {
-  const normalized = normalizeDomain(domain);
-  if (!normalized) return false;
+function getScamPhraseContextSnippet(content, matchIndex, matchLength, windowSize = 48) {
+  const start = Math.max(0, matchIndex - windowSize);
+  const end = Math.min(content.length, matchIndex + matchLength + windowSize);
+  return content.slice(start, end);
+}
 
-  if (normalized.startsWith("xn--")) return true;
-  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(normalized)) return true;
-  if (normalized.endsWith(".zip") || normalized.endsWith(".mov")) return true;
-  if (SUSPICIOUS_SCAM_DOMAINS.some(entry => normalized === entry || normalized.endsWith(`.${entry}`))) return true;
+function getScamPhraseContextScore(snippet, phrase) {
+  const normalizedSnippet = normalizeComparisonText(snippet).replace(/\s+/g, " ");
+  const normalizedPhrase = normalizeComparisonText(phrase).replace(/\s+/g, " ").trim();
+  if (!normalizedSnippet || !normalizedPhrase) return 0;
+
+  let score = 0;
+  const weightedMarkers = [
+    { marker: `not ${normalizedPhrase}`, weight: 60 },
+    { marker: `no ${normalizedPhrase}`, weight: 60 },
+    { marker: `without ${normalizedPhrase}`, weight: 55 },
+    { marker: `rather than ${normalizedPhrase}`, weight: 45 },
+    { marker: `instead of ${normalizedPhrase}`, weight: 45 },
+    { marker: "the phrase", weight: 25 },
+    { marker: "the word", weight: 25 },
+    { marker: "word means", weight: 30 },
+    { marker: "means", weight: 18 },
+    { marker: "meaning", weight: 18 },
+    { marker: "definition", weight: 18 },
+    { marker: "example", weight: 18 },
+    { marker: "examples", weight: 18 },
+    { marker: "reference", weight: 16 },
+    { marker: "referencing", weight: 16 },
+    { marker: "about", weight: 10 },
+    { marker: "talking about", weight: 18 },
+    { marker: "discussion", weight: 12 },
+    { marker: "guide", weight: 12 },
+    { marker: "tutorial", weight: 12 },
+    { marker: "how to", weight: 20 },
+    { marker: "what is", weight: 16 }
+  ];
+
+  for (const entry of weightedMarkers) {
+    if (normalizedSnippet.includes(entry.marker)) score += entry.weight;
+  }
+
+  if (/["'“”‘’].{0,18}\b(the phrase|the word)\b/i.test(snippet)) score += 15;
+  return Math.min(100, score);
+}
+
+function isSuspiciousDomain(domain) {
+  return getSuspiciousDomainRisk(domain) >= 70;
+}
+
+function getSuspiciousDomainRisk(domain) {
+  const normalized = normalizeDomain(domain);
+  if (!normalized) return 0;
+
+  if (HIGH_RISK_SCAM_DOMAINS.some(entry => normalized === entry || normalized.endsWith(`.${entry}`))) return 95;
+  if (COMMON_LINK_AGGREGATOR_DOMAINS.some(entry => normalized === entry || normalized.endsWith(`.${entry}`))) return 25;
+  if (normalized.startsWith("xn--")) return 90;
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(normalized)) return 90;
+  if (normalized.endsWith(".zip") || normalized.endsWith(".mov")) return 85;
 
   const segments = normalized.split(".");
-  if (segments.some(segment => segment.length >= 18)) return true;
-  if (segments.some(segment => /[0-9]{5,}/.test(segment))) return true;
-  return false;
+  if (segments.some(segment => segment.length >= 18)) return 75;
+  if (segments.some(segment => /[0-9]{5,}/.test(segment))) return 75;
+  if (segments.some(segment => /[^a-z0-9-]/.test(segment))) return 65;
+  return 0;
 }
 
 const IMAGE_ATTACHMENT_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"]);
@@ -2678,17 +2733,27 @@ function detectScamAttempt(message, automod = config.automod) {
     };
   }
 
-  const suspiciousDomain = domains.find(domain => automod.linkReputationEnabled === false ? false : isSuspiciousDomain(domain));
+  const suspiciousDomain = domains.find(domain => automod.linkReputationEnabled === false ? false : getSuspiciousDomainRisk(domain) >= 80);
 
   const matchedPhrase = getScamPhrases().find(phrase => normalizedText.includes(phrase));
-  if (matchedPhrase && suspiciousDomain) {
-    return {
-      actionLabel: "scam-link",
-      reason: `that message matched scam wording and linked to ${suspiciousDomain}.`
-    };
-  }
-
   if (matchedPhrase) {
+    const phraseIndex = normalizedText.indexOf(matchedPhrase);
+    const phraseContext = getScamPhraseContextScore(
+      getScamPhraseContextSnippet(normalizedText, Math.max(0, phraseIndex), matchedPhrase.length),
+      matchedPhrase
+    );
+
+    if (suspiciousDomain && phraseContext < 75) {
+      return {
+        actionLabel: "scam-link",
+        reason: `that message matched scam wording and linked to ${suspiciousDomain}.`
+      };
+    }
+
+    if (phraseContext >= 75) {
+      return null;
+    }
+
     return {
       actionLabel: "scam-phrase",
       reason: `that message matched a scam or phishing phrase (${matchedPhrase}).`
@@ -5661,7 +5726,7 @@ async function evaluateAutoModMessage(message, policy = resolveAutoModPolicy(mes
   }
 
   if (automod.linkReputationEnabled && messageDomains.length) {
-    const suspiciousDomain = messageDomains.find(domain => isSuspiciousDomain(domain));
+    const suspiciousDomain = messageDomains.find(domain => getSuspiciousDomainRisk(domain) >= 80);
     if (suspiciousDomain && !policy.ignoredRules.has("scam-link")) {
       addMatch({
         actionLabel: "scam-link",
