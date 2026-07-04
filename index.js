@@ -3026,11 +3026,44 @@ async function detectAiScamIssue(message, automod = config.automod) {
 
   const content = String(message.content || "").trim();
   const urls = extractMessageUrls(content);
+  const allAttachments = Array.from(message.attachments.values());
   const imageAttachments = Array.from(message.attachments.values())
     .filter(attachment => isImageAttachment(attachment) && !isGifAttachment(attachment))
     .slice(0, 3);
+  const gifAttachments = allAttachments.filter(isGifAttachment).slice(0, 3);
 
-  if (!urls.length && !imageAttachments.length) return null;
+  if (!urls.length && !imageAttachments.length) {
+    if (gifAttachments.length) {
+      const attachmentLines = gifAttachments.map(attachment => {
+        const fileName = attachment.name || "gif";
+        const mimeType = attachment.contentType || "image/gif";
+        return `- ${fileName} (${mimeType})`;
+      });
+
+      recordAuditLog("AutoMod", "gif-ignored", {
+        userId: message.author.id,
+        userTag: message.author.tag,
+        channelId: message.channel?.id || null,
+        attachmentCount: gifAttachments.length,
+        attachments: attachmentLines
+      });
+
+      await logAutoModEmbed(
+        makeEmbed({
+          title: "GIF ignored",
+          description: `Skipped scam-image review for ${message.author.tag} because the attachment was a GIF, not a static image.`,
+          color: COLORS.blue,
+          fields: [
+            { name: "Channel", value: message.channel?.toString?.() || `#${message.channel?.name || "unknown"}`, inline: true },
+            { name: "GIF Count", value: `${gifAttachments.length}`, inline: true },
+            { name: "Attachments", value: attachmentLines.join("\n").slice(0, 1024) || "None", inline: false }
+          ]
+        })
+      );
+    }
+
+    return null;
+  }
 
   const attachmentLines = imageAttachments.map(attachment => {
     const fileName = attachment.name || "image";
