@@ -4639,11 +4639,19 @@ async function saveVerificationSettings(options = {}) {
 
   state.config.settings = result.settings;
   clearAutosaveDraft("settings");
+
+  // Keep the live Discord panel in sync with the verification settings we just saved.
+  await api("/api/verification-panel", {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+  await loadAll();
+
   renderAll();
   if (!auto) {
     updateSaveButton("saveVerificationSettings", "saved");
     window.setTimeout(() => updateSaveButton("saveVerificationSettings", "idle"), 700);
-    setAlert("Verification settings saved.");
+    setAlert("Verification settings saved and verify panel refreshed.");
   }
 }
 
