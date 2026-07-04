@@ -586,6 +586,39 @@ function findAgeRoleRule(age, rules = getAgeRoleRules()) {
   return rules.find(rule => numericAge >= rule.minAge && numericAge <= rule.maxAge) || null;
 }
 
+function describeAgeRoleMatch(age) {
+  const rules = getAgeRoleRules();
+  const numericAge = Number(age);
+  if (!Number.isInteger(numericAge) || !rules.length) {
+    return {
+      age: Number.isInteger(numericAge) ? numericAge : null,
+      matched: false,
+      roleId: null,
+      label: null,
+      summary: rules.length ? "No matching age role" : "No age roles configured"
+    };
+  }
+
+  const matchedRule = findAgeRoleRule(numericAge, rules);
+  if (!matchedRule) {
+    return {
+      age: numericAge,
+      matched: false,
+      roleId: null,
+      label: null,
+      summary: `No matching age role for ${numericAge}`
+    };
+  }
+
+  return {
+    age: numericAge,
+    matched: true,
+    roleId: matchedRule.roleId,
+    label: matchedRule.label,
+    summary: `${matchedRule.label} -> <@&${matchedRule.roleId}>`
+  };
+}
+
 async function applyAgeRoleForAge(member, age, source = "Age verification") {
   const rules = getAgeRoleRules();
   if (!rules.length) {
@@ -11459,7 +11492,10 @@ async function handleWebApi(req, res, pathname) {
       return sendWebJson(res, 403, { error: "Admin web access is required." });
     }
     return sendWebJson(res, 200, {
-      pendingVerifications: Array.isArray(config.pendingVerifications) ? config.pendingVerifications : []
+      pendingVerifications: (Array.isArray(config.pendingVerifications) ? config.pendingVerifications : []).map(entry => ({
+        ...entry,
+        ageRolePreview: describeAgeRoleMatch(entry.age)
+      }))
     });
   }
 
@@ -11478,7 +11514,10 @@ async function handleWebApi(req, res, pathname) {
       if (!result.ok) return sendWebJson(res, 404, { error: result.error });
       return sendWebJson(res, 200, {
         ok: true,
-        pendingVerifications: Array.isArray(config.pendingVerifications) ? config.pendingVerifications : []
+        pendingVerifications: (Array.isArray(config.pendingVerifications) ? config.pendingVerifications : []).map(entry => ({
+          ...entry,
+          ageRolePreview: describeAgeRoleMatch(entry.age)
+        }))
       });
     }
     if (action === "deny") {
@@ -11488,7 +11527,10 @@ async function handleWebApi(req, res, pathname) {
       if (!result.ok) return sendWebJson(res, 404, { error: result.error });
       return sendWebJson(res, 200, {
         ok: true,
-        pendingVerifications: Array.isArray(config.pendingVerifications) ? config.pendingVerifications : []
+        pendingVerifications: (Array.isArray(config.pendingVerifications) ? config.pendingVerifications : []).map(entry => ({
+          ...entry,
+          ageRolePreview: describeAgeRoleMatch(entry.age)
+        }))
       });
     }
   }

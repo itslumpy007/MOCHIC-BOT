@@ -2554,6 +2554,8 @@ function renderPendingVerifications() {
       <p>
         <code>${escapeHtml(entry.userId)}</code> &mdash; Requested ${escapeHtml(formatDate(entry.requestedAt))}<br>
         Age: ${Number.isInteger(Number(entry.age)) ? `${escapeHtml(entry.age)} years old` : "Not provided"}
+        <br>
+        Age role: ${escapeHtml(entry.ageRolePreview?.summary || "Not calculated")}
       </p>
       <div class="button-row" style="margin-top:6px;">
         <button class="save-button verify-approve-btn" data-pending-id="${escapeHtml(entry.id)}" type="button">Approve</button>
