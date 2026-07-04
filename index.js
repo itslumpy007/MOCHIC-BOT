@@ -7433,7 +7433,7 @@ function getPendingPanelAction(userId) {
 function buildAutoModExemptionEmbed() {
   return makeEmbed({
     title: "AutoMod Exemptions",
-    description: "Use the selectors below to replace the current exempt channels, roles, and users.",
+    description: "Use the selectors below to replace the current exempt channels, roles, and users. Roles on this list bypass AutoMod checks.",
     color: COLORS.yellow,
     fields: [
       {
