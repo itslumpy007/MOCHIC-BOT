@@ -334,6 +334,7 @@ function createDefaultConfig() {
       anonymousAffirmationsCooldownMs: 60 * 1000,
       verificationCaptchaEnabled: false,
       verificationRequiresApproval: false,
+      ageRoleRules: "",
       logChannelId: null,
       automodLogChannelId: null,
       mutedRoleId: null,
@@ -514,6 +515,123 @@ function isVerificationApprovalRequired() {
   return config.settings?.verificationRequiresApproval === true;
 }
 
+function normalizeAgeRoleRulesText(value) {
+  return String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith("#") && !line.startsWith("//"))
+    .join("\n")
+    .slice(0, 4000);
+}
+
+function normalizeAgeRoleId(value) {
+  return String(value || "").trim().replace(/[<@&>]/g, "");
+}
+
+function parseAgeRoleRuleLine(line) {
+  const text = String(line || "").trim().replace(/^[*-•]\s*/, "");
+  if (!text) return null;
+
+  const separatorIndex = text.indexOf(":") >= 0 ? text.indexOf(":") : text.indexOf("=");
+  if (separatorIndex < 0) return null;
+
+  const agePart = text.slice(0, separatorIndex).trim();
+  const roleId = normalizeAgeRoleId(text.slice(separatorIndex + 1));
+  if (!agePart || !roleId) return null;
+
+  const rangeMatch = agePart.match(/^(\d{1,3})\s*[-–—]\s*(\d{1,3})$/);
+  if (rangeMatch) {
+    const minAge = Number(rangeMatch[1]);
+    const maxAge = Number(rangeMatch[2]);
+    if (!Number.isInteger(minAge) || !Number.isInteger(maxAge)) return null;
+    return {
+      minAge: Math.min(minAge, maxAge),
+      maxAge: Math.max(minAge, maxAge),
+      roleId,
+      label: `${Math.min(minAge, maxAge)}-${Math.max(minAge, maxAge)}`
+    };
+  }
+
+  const plusMatch = agePart.match(/^(\d{1,3})\s*\+$/);
+  if (plusMatch) {
+    const minAge = Number(plusMatch[1]);
+    if (!Number.isInteger(minAge)) return null;
+    return {
+      minAge,
+      maxAge: 120,
+      roleId,
+      label: `${minAge}+`
+    };
+  }
+
+  return null;
+}
+
+function getAgeRoleRules() {
+  const text = String(config.settings?.ageRoleRules || "");
+  return normalizeAgeRoleRulesText(text)
+    .split("\n")
+    .map(parseAgeRoleRuleLine)
+    .filter(Boolean);
+}
+
+function hasAgeRoleRules() {
+  return getAgeRoleRules().length > 0;
+}
+
+function findAgeRoleRule(age, rules = getAgeRoleRules()) {
+  const numericAge = Number(age);
+  if (!Number.isInteger(numericAge)) return null;
+  return rules.find(rule => numericAge >= rule.minAge && numericAge <= rule.maxAge) || null;
+}
+
+async function applyAgeRoleForAge(member, age, source = "Age verification") {
+  const rules = getAgeRoleRules();
+  if (!rules.length) {
+    return { matched: false, changed: false, rule: null, removedRoleIds: [] };
+  }
+
+  const matchedRule = findAgeRoleRule(age, rules);
+  const configuredRoleIds = [...new Set(rules.map(rule => rule.roleId).filter(Boolean))];
+  const rolesToRemove = configuredRoleIds.filter(roleId => member.roles.cache.has(roleId) && (!matchedRule || roleId !== matchedRule.roleId));
+  const rolesToAdd = matchedRule && !member.roles.cache.has(matchedRule.roleId) ? [matchedRule.roleId] : [];
+
+  if (!rolesToAdd.length && !rolesToRemove.length) {
+    return {
+      matched: Boolean(matchedRule),
+      changed: false,
+      rule: matchedRule,
+      removedRoleIds: []
+    };
+  }
+
+  if (!member.manageable) {
+    return {
+      matched: Boolean(matchedRule),
+      changed: false,
+      rule: matchedRule,
+      removedRoleIds: rolesToRemove,
+      warning: "I could not manage your age role right now."
+    };
+  }
+
+  if (rolesToRemove.length) {
+    await member.roles.remove(rolesToRemove, source).catch(() => {});
+  }
+
+  if (rolesToAdd.length) {
+    await member.roles.add(rolesToAdd, source).catch(() => {});
+  }
+
+  return {
+    matched: Boolean(matchedRule),
+    changed: Boolean(rolesToAdd.length || rolesToRemove.length),
+    rule: matchedRule,
+    removedRoleIds: rolesToRemove
+  };
+}
+
 function getPendingVerification(userId) {
   const list = Array.isArray(config.pendingVerifications) ? config.pendingVerifications : [];
   return list.find(entry => entry.userId === userId) || null;
@@ -537,6 +655,9 @@ async function approveVerification(pendingId, moderatorTag) {
     }
     if (unverifiedRoleId && member.roles.cache.has(unverifiedRoleId)) {
       await member.roles.remove(unverifiedRoleId, "Verification approved by admin").catch(() => {});
+    }
+    if (Number.isInteger(Number(entry.age))) {
+      await applyAgeRoleForAge(member, Number(entry.age), "Verification approved by admin");
     }
     await member.send("Your verification request has been approved. Welcome to the server!").catch(() => {});
   }
@@ -571,6 +692,13 @@ function normalizeVerificationCaptchaInput(value) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
 }
 
+function normalizeAgeInput(value) {
+  const age = Number(String(value || "").trim());
+  if (!Number.isInteger(age)) return null;
+  if (age < 13 || age > 120) return null;
+  return age;
+}
+
 function createVerificationCaptchaChallenge() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   const length = 5;
@@ -580,6 +708,39 @@ function createVerificationCaptchaChallenge() {
     code += alphabet[bytes[index] % alphabet.length];
   }
   return code;
+}
+
+function buildAgeVerificationModal(code = null) {
+  const modal = new ModalBuilder()
+    .setCustomId(code ? "verify:age-captcha" : "verify:age")
+    .setTitle("Age Verification");
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(
+      new TextInputBuilder()
+        .setCustomId("ageYears")
+        .setLabel("Your age in years")
+        .setPlaceholder("18")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setMaxLength(3)
+    )
+  );
+
+  if (code) {
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId("captchaAnswer")
+          .setLabel(`Type the code: ${code}`)
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(8)
+      )
+    );
+  }
+
+  return modal;
 }
 
 function setVerificationCaptchaChallenge(userId, code) {
@@ -675,6 +836,17 @@ function buildRuleVerifyEmbed() {
   const unverifiedRoleId = getUnverifiedRoleId();
   const handle = getTikTokHandle();
   const captchaEnabled = isVerificationCaptchaEnabled();
+  const ageRoleCount = getAgeRoleRules().length;
+  const captchaStep = captchaEnabled ? "3. CAPTCHA" : null;
+  const ageStep = ageRoleCount ? `${captchaEnabled ? "4" : "3"}. Enter age` : null;
+  const bonusStep = `${captchaEnabled && ageRoleCount ? 5 : captchaEnabled || ageRoleCount ? 4 : 3}. Optional bonus`;
+  const howItWorks = [
+    "1. Read the rules",
+    "2. Click verify",
+    ...(captchaStep ? ["3. Solve the CAPTCHA if prompted"] : []),
+    ...(ageStep ? [ageStep] : []),
+    `${captchaEnabled || ageRoleCount ? (captchaEnabled && ageRoleCount ? "5" : "4") : "3"}. React for an optional flavor role`
+  ].join("\n");
 
   return makeEmbed({
     title: "Rules check + verification",
@@ -685,16 +857,18 @@ function buildRuleVerifyEmbed() {
     fields: [
       { name: "1. Read the rules", value: "Make sure you’ve looked over the rules card in this channel.", inline: false },
       { name: "2. Click verify", value: "Press the button below to confirm you’ve read everything and get access.", inline: false },
-      ...(captchaEnabled
-        ? [{ name: "3. CAPTCHA", value: "A quick human check appears only for newer or suspicious accounts.", inline: false }]
+      ...(captchaStep
+        ? [{ name: captchaStep, value: "A quick human check appears only for newer or suspicious accounts.", inline: false }]
         : []),
-      { name: captchaEnabled ? "4. Optional bonus" : "3. Optional bonus", value: handle ? `TikTok matching can still run as a bonus path for @${handle}.` : "TikTok matching can be enabled later for special cases.", inline: false },
+      ...(ageStep
+        ? [{ name: ageStep, value: "Tell me your age so I can give you the right age-based role after verification.", inline: false }]
+        : []),
+      { name: bonusStep, value: handle ? `TikTok matching can still run as a bonus path for @${handle}.` : "TikTok matching can be enabled later for special cases.", inline: false },
       { name: "🍥 Flavor roles", value: "React below if you want a flavor role. They are optional.", inline: false },
-      { name: "How it works", value: captchaEnabled
-        ? "1. Read the rules\n2. Click verify\n3. Solve the CAPTCHA if prompted\n4. React for an optional flavor role"
-        : "1. Read the rules\n2. Click verify\n3. React for an optional flavor role", inline: false },
+      { name: "How it works", value: howItWorks, inline: false },
       { name: "Verified role", value: verifiedRoleId ? `<@&${verifiedRoleId}>` : "Not set", inline: true },
-      { name: "Unverified role", value: unverifiedRoleId ? `<@&${unverifiedRoleId}>` : "Optional", inline: true }
+      { name: "Unverified role", value: unverifiedRoleId ? `<@&${unverifiedRoleId}>` : "Optional", inline: true },
+      { name: "Age roles", value: ageRoleCount ? `${ageRoleCount} rule${ageRoleCount === 1 ? "" : "s"} configured` : "Not configured", inline: true }
     ],
     image: { url: "attachment://cute-rules-card.png" }
   });
@@ -782,8 +956,13 @@ function buildVerificationCaptchaModal(code) {
 }
 
 async function completeRulesVerification(member) {
+  return completeRulesVerificationWithAge(member, null);
+}
+
+async function completeRulesVerificationWithAge(member, age = null) {
   const verifiedRoleId = getVerificationRoleId();
   const unverifiedRoleId = getUnverifiedRoleId();
+  const ageRoleRules = getAgeRoleRules();
   if (!verifiedRoleId) {
     return {
       ok: false,
@@ -797,17 +976,26 @@ async function completeRulesVerification(member) {
 
   if (isVerificationApprovalRequired()) {
     if (member.roles.cache.has(verifiedRoleId)) {
+      if (Number.isInteger(Number(age)) && ageRoleRules.length) {
+        await applyAgeRoleForAge(member, Number(age), "Rules check verification").catch(() => {});
+      }
       return {
         ok: true,
         embed: makeEmbed({
           title: "You're already verified",
-          description: "You already have access. Thanks for reading the rules.",
+          description: Number.isInteger(Number(age)) && ageRoleRules.length
+            ? "You already have access. I also checked your age role."
+            : "You already have access. Thanks for reading the rules.",
           color: COLORS.mint
         })
       };
     }
     const existing = getPendingVerification(member.id);
     if (existing) {
+      if (Number.isInteger(Number(age))) {
+        existing.age = Number(age);
+        saveConfig();
+      }
       return {
         ok: true,
         embed: makeEmbed({
@@ -822,7 +1010,8 @@ async function completeRulesVerification(member) {
       id: crypto.randomUUID(),
       userId: member.id,
       userTag: member.user?.tag || member.user?.username || member.id,
-      requestedAt: new Date().toISOString()
+      requestedAt: new Date().toISOString(),
+      age: Number.isInteger(Number(age)) ? Number(age) : null
     });
     saveConfig();
     return {
@@ -837,13 +1026,19 @@ async function completeRulesVerification(member) {
 
   const rolesToAdd = member.roles.cache.has(verifiedRoleId) ? [] : [verifiedRoleId];
   const rolesToRemove = unverifiedRoleId && member.roles.cache.has(unverifiedRoleId) ? [unverifiedRoleId] : [];
+  const ageRoleOutcome = Number.isInteger(Number(age)) && ageRoleRules.length
+    ? await applyAgeRoleForAge(member, Number(age), "Rules check verification")
+    : null;
+  const ageRoleWarning = ageRoleOutcome?.warning || null;
 
-  if (!rolesToAdd.length && !rolesToRemove.length) {
+  if (!rolesToAdd.length && !rolesToRemove.length && !(ageRoleOutcome?.changed) && !ageRoleWarning) {
     return {
       ok: true,
       embed: makeEmbed({
         title: "You’re already verified",
-        description: "You already have access. Thanks for reading the rules.",
+        description: ageRoleOutcome?.matched
+          ? `You already have access, and your age role is ${ageRoleOutcome.rule?.label || "set"}.`
+          : "You already have access. Thanks for reading the rules.",
         color: COLORS.mint
       })
     };
@@ -869,13 +1064,20 @@ async function completeRulesVerification(member) {
   }
 
   const bonusMatched = isTikTokVerificationEnabled() && matchesTikTokVerification(member);
+  const ageRoleText = ageRoleOutcome?.matched
+    ? ` Your age role has been set to ${ageRoleOutcome.rule?.label || "the configured match"}.`
+    : ageRoleWarning
+      ? ` ${ageRoleWarning}`
+    : ageRoleRules.length && Number.isInteger(Number(age))
+      ? " I didn't find a matching age role for your age."
+      : "";
   return {
     ok: true,
     embed: makeEmbed({
       title: "Verified",
       description: bonusMatched
-        ? `You’re verified, and your nickname also matches the TikTok bonus setting for @${getTikTokHandle()}.`
-        : "You’re verified. Welcome in.",
+        ? `You’re verified, and your nickname also matches the TikTok bonus setting for @${getTikTokHandle()}.${ageRoleText}`
+        : `You’re verified. Welcome in.${ageRoleText}`,
       color: COLORS.mint
     })
   };
@@ -1048,7 +1250,10 @@ function loadConfig() {
       },
       settings: {
         ...defaults.settings,
-        ...(parsed.settings || {})
+        ...(parsed.settings || {}),
+        ageRoleRules: typeof parsed.settings?.ageRoleRules === "string"
+          ? parsed.settings.ageRoleRules
+          : defaults.settings.ageRoleRules
       },
       permissions: {
         ...defaults.permissions,
@@ -7177,6 +7382,7 @@ function buildStatusEmbed() {
       { name: "TikTok Bonus", value: isTikTokVerificationEnabled() ? `@${getTikTokHandle()}` : "Disabled", inline: true },
       { name: "Verified Role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
       { name: "Unverified Role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Not set", inline: true },
+      { name: "Age Roles", value: `${getAgeRoleRules().length}`, inline: true },
       { name: "Birthday Role", value: getBirthdayRoleId() ? `<@&${getBirthdayRoleId()}>` : "Not set", inline: true },
       { name: "Core Features", value: ENABLE_CORE_BOT ? "Enabled" : "Disabled", inline: true },
       { name: "Verify Panel", value: config.verifyMessageId || "Not cached", inline: false },
@@ -9116,6 +9322,7 @@ function buildWebConfigPayload() {
       anonymousAffirmationsCooldownMs: getAnonymousAffirmationsCooldownMs(),
       verificationCaptchaEnabled: isVerificationCaptchaEnabled(),
       verificationRequiresApproval: isVerificationApprovalRequired(),
+      ageRoleRules: String(config.settings.ageRoleRules || ""),
       pendingVerificationsCount: Array.isArray(config.pendingVerifications) ? config.pendingVerifications.length : 0,
       logChannelId: config.settings.logChannelId || "",
       automodLogChannelId: config.settings.automodLogChannelId || "",
@@ -9169,6 +9376,7 @@ function updateWebSettings(auth, payload) {
     "anonymousAffirmationsCooldownMs",
     "verificationCaptchaEnabled",
     "verificationRequiresApproval",
+    "ageRoleRules",
     "logChannelId",
     "automodLogChannelId",
     "mutedRoleId",
@@ -9220,6 +9428,9 @@ function updateWebSettings(auth, payload) {
   const nextVerificationCaptchaEnabled = Object.prototype.hasOwnProperty.call(payload, "verificationCaptchaEnabled")
     ? ["true", "1", "yes", "on"].includes(String(payload.verificationCaptchaEnabled).toLowerCase())
     : isVerificationCaptchaEnabled();
+  const nextAgeRoleRules = Object.prototype.hasOwnProperty.call(payload, "ageRoleRules")
+    ? normalizeAgeRoleRulesText(payload.ageRoleRules)
+    : normalizeAgeRoleRulesText(config.settings.ageRoleRules || "");
   const nextMessageArchiveEnabled = Object.prototype.hasOwnProperty.call(payload, "messageArchiveEnabled")
     ? ["true", "1", "yes", "on"].includes(String(payload.messageArchiveEnabled).toLowerCase())
     : Boolean(config.settings.messageArchiveEnabled);
@@ -9239,6 +9450,7 @@ function updateWebSettings(auth, payload) {
     anonymousAffirmationsChannelId: config.settings.anonymousAffirmationsChannelId,
     anonymousAffirmationsCooldownMs: config.settings.anonymousAffirmationsCooldownMs,
     verificationCaptchaEnabled: config.settings.verificationCaptchaEnabled,
+    ageRoleRules: config.settings.ageRoleRules,
     logChannelId: config.settings.logChannelId,
     automodLogChannelId: config.settings.automodLogChannelId,
     mutedRoleId: config.settings.mutedRoleId,
@@ -9268,6 +9480,8 @@ function updateWebSettings(auth, payload) {
         config.settings[key] = Object.prototype.hasOwnProperty.call(payload, "verificationRequiresApproval")
           ? ["true", "1", "yes", "on"].includes(String(payload.verificationRequiresApproval).toLowerCase())
           : isVerificationApprovalRequired();
+      } else if (key === "ageRoleRules") {
+        config.settings[key] = nextAgeRoleRules;
       } else if (key === "generalChatChannelId") {
         config.settings[key] = nextGeneralChatChannelId;
       } else if (key === "generalChatInactivityEnabled") {
@@ -9309,6 +9523,7 @@ function updateWebSettings(auth, payload) {
     anonymousAffirmationsChannelId: config.settings.anonymousAffirmationsChannelId,
     anonymousAffirmationsCooldownMs: config.settings.anonymousAffirmationsCooldownMs,
     verificationCaptchaEnabled: config.settings.verificationCaptchaEnabled,
+    ageRoleRules: config.settings.ageRoleRules,
     logChannelId: config.settings.logChannelId,
     automodLogChannelId: config.settings.automodLogChannelId,
     mutedRoleId: config.settings.mutedRoleId,
@@ -11603,7 +11818,18 @@ client.on("interactionCreate", async interaction => {
           });
         }
 
+        const ageRolesEnabled = hasAgeRoleRules();
         const captchaDecision = shouldRequireVerificationCaptcha(member);
+        if (ageRolesEnabled && captchaDecision.required) {
+          const code = createVerificationCaptchaChallenge();
+          setVerificationCaptchaChallenge(interaction.user.id, code);
+          return interaction.showModal(buildAgeVerificationModal(code));
+        }
+
+        if (ageRolesEnabled) {
+          return interaction.showModal(buildAgeVerificationModal());
+        }
+
         if (captchaDecision.required) {
           const code = createVerificationCaptchaChallenge();
           setVerificationCaptchaChallenge(interaction.user.id, code);
@@ -12966,6 +13192,49 @@ client.on("interactionCreate", async interaction => {
         }
 
         const result = await completeRulesVerification(member);
+        return interaction.editReply({ embeds: [result.embed] });
+      }
+
+      if (interaction.customId === "verify:age" || interaction.customId === "verify:age-captcha") {
+        if (!ENABLE_CORE_BOT) {
+          return interaction.reply({ content: "Verification is disabled on this deployment.", ephemeral: true });
+        }
+
+        if (interaction.customId === "verify:age-captcha") {
+          const challenge = getVerificationCaptchaChallenge(interaction.user.id);
+          if (!challenge) {
+            return interaction.reply({ content: "That CAPTCHA expired. Click the rules button again to get a fresh one.", ephemeral: true });
+          }
+
+          const submitted = normalizeVerificationCaptchaInput(interaction.fields.getTextInputValue("captchaAnswer"));
+          if (submitted !== challenge.code) {
+            clearVerificationCaptchaChallenge(interaction.user.id);
+            return interaction.reply({ content: "That CAPTCHA answer was wrong. Click the rules button again to try a new one.", ephemeral: true });
+          }
+        }
+
+        clearVerificationCaptchaChallenge(interaction.user.id);
+        const age = normalizeAgeInput(interaction.fields.getTextInputValue("ageYears"));
+        if (age === null) {
+          return interaction.reply({ content: "Enter a whole number between 13 and 120 for your age.", ephemeral: true });
+        }
+
+        await interaction.deferReply({ ephemeral: true });
+
+        const member = interaction.member || await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+        if (!member) {
+          return interaction.editReply({
+            embeds: [
+              makeEmbed({
+                title: "Try again",
+                description: "I could not find your server membership.",
+                color: COLORS.red
+              })
+            ]
+          });
+        }
+
+        const result = await completeRulesVerificationWithAge(member, age);
         return interaction.editReply({ embeds: [result.embed] });
       }
 

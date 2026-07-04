@@ -447,6 +447,7 @@ const affirmationsSettingLabels = {
 const verificationCoreSettingLabels = {
   verificationCaptchaEnabled: "Verification CAPTCHA enabled",
   verificationRequiresApproval: "Require admin approval to verify",
+  ageRoleRules: "Age role rules",
   verifiedRoleId: "Verified role ID",
   unverifiedRoleId: "Unverified role ID"
 };
@@ -475,6 +476,7 @@ const verificationBonusSettingTypes = {
 const verificationCoreSettingTypes = {
   verificationCaptchaEnabled: "boolean",
   verificationRequiresApproval: "boolean",
+  ageRoleRules: "textarea",
   verifiedRoleId: "input",
   unverifiedRoleId: "input"
 };
@@ -2549,7 +2551,10 @@ function renderPendingVerifications() {
   el.innerHTML = list.map(entry => `
     <article class="event" data-pending-id="${escapeHtml(entry.id)}">
       <strong>${escapeHtml(entry.userTag)}</strong>
-      <p><code>${escapeHtml(entry.userId)}</code> &mdash; Requested ${escapeHtml(formatDate(entry.requestedAt))}</p>
+      <p>
+        <code>${escapeHtml(entry.userId)}</code> &mdash; Requested ${escapeHtml(formatDate(entry.requestedAt))}<br>
+        Age: ${Number.isInteger(Number(entry.age)) ? `${escapeHtml(entry.age)} years old` : "Not provided"}
+      </p>
       <div class="button-row" style="margin-top:6px;">
         <button class="save-button verify-approve-btn" data-pending-id="${escapeHtml(entry.id)}" type="button">Approve</button>
         <button class="ghost-button verify-deny-btn" data-pending-id="${escapeHtml(entry.id)}" type="button">Deny</button>
@@ -2701,7 +2706,11 @@ function renderSettingFields(targetSelector, entries, types = {}) {
               <option value="false" ${(state.config?.settings?.[key] ?? false) === false || String(state.config?.settings?.[key]) === "false" ? "selected" : ""}>Off</option>
             </select>`
           : types[key] === "textarea"
-          ? `<textarea data-setting="${key}" rows="4" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="${key === "tiktokNicknameAliases" ? "Paste @name, tiktok.com/@name, or multiple names separated by commas or new lines" : ""}">${escapeHtml(Array.isArray(state.config?.settings?.[key]) ? state.config.settings[key].join(", ") : (state.config?.settings?.[key] || ""))}</textarea>`
+          ? `<textarea data-setting="${key}" rows="4" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="${key === "tiktokNicknameAliases"
+            ? "Paste @name, tiktok.com/@name, or multiple names separated by commas or new lines"
+            : key === "ageRoleRules"
+              ? "13-17: roleId\\n18+: roleId"
+              : ""}">${escapeHtml(Array.isArray(state.config?.settings?.[key]) ? state.config.settings[key].join(", ") : (state.config?.settings?.[key] || ""))}</textarea>`
           : `<input data-setting="${key}" value="${escapeHtml(Array.isArray(state.config?.settings?.[key]) ? state.config.settings[key].join(", ") : (state.config?.settings?.[key] || ""))}" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="${key === "tiktokHandle" ? "Paste @yourhandle or tiktok.com/@yourhandle" : ""}">`}
       </label>
     `).join("");
@@ -4615,6 +4624,7 @@ async function saveVerificationSettings(options = {}) {
     "rulesCardDescription",
     "rulesCardRules",
     "verificationCaptchaEnabled",
+    "ageRoleRules",
     "tiktokHandle",
     "tiktokNicknameAliases",
     "verifiedRoleId",
