@@ -1728,8 +1728,13 @@ tbody tr:hover td {
 
   .sidebar-close-button {
     display: inline-flex;
-    width: 100%;
+    width: auto;
+    min-width: 44px;
+    position: sticky;
+    top: calc(10px + env(safe-area-inset-top));
+    margin-left: auto;
     justify-content: center;
+    z-index: 21;
     touch-action: manipulation;
   }
 
@@ -2008,7 +2013,7 @@ tbody tr:hover td {
   }
 
   .sidebar-close-button {
-    width: 100%;
+    width: auto;
   }
 
   .topbar {
