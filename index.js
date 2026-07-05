@@ -7787,6 +7787,15 @@ async function purgeChannelMessages(channel, amount, deleteAll = false) {
   let deletedCount = 0;
   let before;
   const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
+  const deleteBatchSize = 10;
+
+  async function deleteOldMessagesInBatches(messages) {
+    for (let index = 0; index < messages.length; index += deleteBatchSize) {
+      const batch = messages.slice(index, index + deleteBatchSize);
+      const results = await Promise.allSettled(batch.map(message => message.delete()));
+      deletedCount += results.filter(result => result.status === "fulfilled").length;
+    }
+  }
 
   while (true) {
     const messages = await channel.messages.fetch({
@@ -7814,8 +7823,7 @@ async function purgeChannelMessages(channel, amount, deleteAll = false) {
     }
 
     if (oldMessages.length) {
-      const results = await Promise.allSettled(oldMessages.map(message => message.delete()));
-      deletedCount += results.filter(result => result.status === "fulfilled").length;
+      await deleteOldMessagesInBatches(oldMessages);
     }
 
     const oldestMessage = [...messages.values()].reduce((oldest, message) => {
