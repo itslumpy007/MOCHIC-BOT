@@ -2698,6 +2698,10 @@ function isDomainAllowed(domain, allowedDomains = []) {
   return allowedDomains.some(allowed => normalizedDomain === allowed || normalizedDomain.endsWith(`.${allowed}`));
 }
 
+function areAllDomainsAllowed(domains, allowedDomains = []) {
+  return Array.isArray(domains) && domains.length > 0 && domains.every(domain => isDomainAllowed(domain, allowedDomains));
+}
+
 function normalizeExtension(value) {
   const trimmed = (value || "").trim().toLowerCase();
   if (!trimmed) return "";
@@ -5886,6 +5890,7 @@ async function evaluateAutoModMessage(message, policy = resolveAutoModPolicy(mes
   const messageDomains = extractMessageDomains(message.content);
   const normalizedBlockedDomains = (automod.blockedDomains || []).map(normalizeDomain);
   const normalizedAllowedDomains = (automod.allowedDomains || []).map(normalizeDomain);
+  const trustedLinkMessage = areAllDomainsAllowed(messageDomains, normalizedAllowedDomains);
   const contextMessages = [];
 
   const matches = [];
@@ -5895,11 +5900,11 @@ async function evaluateAutoModMessage(message, policy = resolveAutoModPolicy(mes
     }
   };
 
-  if (automod.scamFilterEnabled) {
+  if (automod.scamFilterEnabled && !trustedLinkMessage) {
     addMatch(detectScamAttempt(message, automod, normalizedAllowedDomains));
   }
 
-  if (automod.aiModerationEnabled && matches.length === 0) {
+  if (automod.aiModerationEnabled && matches.length === 0 && !trustedLinkMessage) {
     addMatch(await detectAiScamIssue(message, automod));
   }
 
@@ -6025,7 +6030,7 @@ async function evaluateAutoModMessage(message, policy = resolveAutoModPolicy(mes
     addMatch({ actionLabel: "spam", reason: "please slow down and avoid spam." });
   }
 
-  if (automod.linkReputationEnabled && messageDomains.length) {
+  if (automod.linkReputationEnabled && messageDomains.length && !trustedLinkMessage) {
     const suspiciousDomain = messageDomains.find(domain =>
       getSuspiciousDomainRisk(domain) >= 80 &&
       !isDomainAllowed(domain, normalizedAllowedDomains)
