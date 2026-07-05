@@ -3908,6 +3908,8 @@ const allCommands = [
       option
         .setName("amount")
         .setDescription("How many recent messages to delete")
+        .setMinValue(1)
+        .setMaxValue(1000)
         .setRequired(false)
     )
     .addChannelOption(option =>
@@ -7778,10 +7780,64 @@ async function getRecentMessagesForUserAcrossGuild(guild, userId, limit = 40) {
 
 async function purgeChannelMessages(channel, amount, deleteAll = false) {
   if (!channel?.messages?.fetch) return 0;
+  const purgeLimit = Math.max(1, Math.min(1000, Number(amount) || 0));
 
   if (!deleteAll) {
-    const deleted = await channel.bulkDelete(amount, true).catch(() => null);
-    return deleted?.size || 0;
+    let deletedCount = 0;
+    let before;
+    const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
+    const deleteBatchSize = 25;
+
+    async function deleteOldMessagesInBatches(messages) {
+      for (let index = 0; index < messages.length; index += deleteBatchSize) {
+        const batch = messages.slice(index, index + deleteBatchSize);
+        const results = await Promise.allSettled(batch.map(message => message.delete()));
+        deletedCount += results.filter(result => result.status === "fulfilled").length;
+        if (deletedCount >= purgeLimit) break;
+      }
+    }
+
+    while (deletedCount < purgeLimit) {
+      const messages = await channel.messages.fetch({
+        limit: 100,
+        ...(before ? { before } : {})
+      });
+
+      if (!messages.size) break;
+
+      const now = Date.now();
+      const recentMessages = [];
+      const oldMessages = [];
+
+      messages.forEach(message => {
+        if (now - message.createdTimestamp < fourteenDaysMs) {
+          recentMessages.push(message);
+        } else {
+          oldMessages.push(message);
+        }
+      });
+
+      const remaining = purgeLimit - deletedCount;
+      if (recentMessages.length && remaining > 0) {
+        const recentBatch = recentMessages.slice(0, Math.min(remaining, 100));
+        const deletedRecent = await channel.bulkDelete(recentBatch, true).catch(() => null);
+        deletedCount += deletedRecent?.size || 0;
+      }
+
+      if (oldMessages.length && deletedCount < purgeLimit) {
+        await deleteOldMessagesInBatches(oldMessages.slice(0, purgeLimit - deletedCount));
+      }
+
+      const oldestMessage = [...messages.values()].reduce((oldest, message) => {
+        if (!oldest) return message;
+        return message.createdTimestamp < oldest.createdTimestamp ? message : oldest;
+      }, null);
+
+      if (!oldestMessage || messages.size < 100 || deletedCount >= purgeLimit) break;
+      before = oldestMessage.id;
+    }
+
+    return deletedCount;
   }
 
   let deletedCount = 0;
@@ -7818,12 +7874,12 @@ async function purgeChannelMessages(channel, amount, deleteAll = false) {
     });
 
     if (recentMessages.length) {
-      const deletedRecent = await channel.bulkDelete(recentMessages, true).catch(() => null);
+      const deletedRecent = await channel.bulkDelete(recentMessages.slice(0, 100), true).catch(() => null);
       deletedCount += deletedRecent?.size || 0;
     }
 
     if (oldMessages.length) {
-      await deleteOldMessagesInBatches(oldMessages);
+      await deleteOldMessagesInBatches(oldMessages.slice(0, 100));
     }
 
     const oldestMessage = [...messages.values()].reduce((oldest, message) => {
@@ -14326,8 +14382,8 @@ client.on("interactionCreate", async interaction => {
         return interaction.editReply({ content: "That channel type cannot be purged." });
       }
 
-      if (!deleteAll && (amount == null || amount < 1 || amount > 100)) {
-        return interaction.editReply({ content: "Choose a number from 1 to 100, or turn on `all` to clear the whole channel." });
+      if (!deleteAll && (amount == null || amount < 1 || amount > 1000)) {
+        return interaction.editReply({ content: "Choose a number from 1 to 1000, or turn on `all` to clear the whole channel." });
       }
 
       const deletedCount = await purgeChannelMessages(targetChannel, amount, deleteAll);
