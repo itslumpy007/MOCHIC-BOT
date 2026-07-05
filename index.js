@@ -3636,7 +3636,7 @@ function recordAutoModOffense(userId, action, reason) {
   return offenses;
 }
 
-function recordAutoModAnalytics(action, reason, userTag = "Unknown user") {
+function recordAutoModAnalytics(action, reason, userTag = "Unknown user", meta = {}) {
   const analytics = getAutoModAnalytics();
   analytics.totalDetections = Number(analytics.totalDetections || 0) + 1;
   analytics.ruleCounts[action] = Number(analytics.ruleCounts[action] || 0) + 1;
@@ -3645,10 +3645,46 @@ function recordAutoModAnalytics(action, reason, userTag = "Unknown user") {
       action,
       reason: String(reason || "").slice(0, 200),
       userTag: String(userTag || "Unknown user").slice(0, 80),
+      severity: classifyAutoModSeverity(action, reason, meta),
+      channelId: meta.channelId || null,
+      channelName: meta.channelName || null,
+      guildId: meta.guildId || null,
+      guildName: meta.guildName || null,
+      ruleAction: meta.ruleAction || null,
+      dryRun: Boolean(meta.dryRun),
+      alertOnly: Boolean(meta.alertOnly),
+      profile: meta.profile || null,
       createdAt: new Date().toISOString()
     },
     ...(Array.isArray(analytics.recentViolations) ? analytics.recentViolations : [])
   ].slice(0, 20);
+}
+
+function classifyAutoModSeverity(action, reason = "", meta = {}) {
+  const normalized = String(action || "").trim().toLowerCase();
+  const text = String(reason || "").toLowerCase();
+
+  if (["scam-image", "scam-link", "phishing", "impersonation", "credential-theft", "giveaway-scam", "malware"].includes(normalized)) {
+    return "high";
+  }
+
+  if (["ai-review", "blocked-domain", "disallowed-domain", "invite-link", "masked-link", "blocked-extension", "raid-join"].includes(normalized)) {
+    return "high";
+  }
+
+  if (["spam", "banned-word", "caps", "nickname", "inactive-general-chat", "inactive-general-chat-warning", "member-age-links", "account-age-links"].includes(normalized)) {
+    return "medium";
+  }
+
+  if (["warning", "note", "review"].includes(normalized)) {
+    return "medium";
+  }
+
+  if (meta.dryRun || meta.alertOnly) {
+    return "low";
+  }
+
+  return "low";
 }
 
 function buildAutoModAnalyticsLines(limit = 5) {
@@ -6116,7 +6152,16 @@ async function handleAutoModViolation(message, reason, actionLabel, extraDetails
     }
   }
 
-  recordAutoModAnalytics(actionLabel, reason, message.author.tag);
+  recordAutoModAnalytics(actionLabel, reason, message.author.tag, {
+    channelId: message.channel?.id || null,
+    channelName: message.channel?.name || null,
+    guildId: message.guild?.id || null,
+    guildName: message.guild?.name || null,
+    dryRun,
+    alertOnly,
+    ruleAction,
+    profile: policy.profile?.selector || null
+  });
 
   const entry = addCase({
     action: `automod:${actionLabel}`,

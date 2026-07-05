@@ -1748,12 +1748,21 @@ function renderRecentViolations() {
     return;
   }
   $("#recentViolations").innerHTML = items.length
-    ? items.slice(0, 8).map((item, index) => `
+    ? items.slice(0, 8).map((item, index) => {
+      const triage = getViolationTriage(item);
+      return `
       <article class="event" ${revealStyle(index)}>
-        <strong><span class="status-dot red"></span>${escapeHtml(item.action)} - ${escapeHtml(item.userTag)}</strong>
+        <strong>
+          <span class="status-dot ${triage.statusTone}"></span>
+          ${escapeHtml(item.action)}
+          <span class="badge">${escapeHtml(triage.statusLabel)}</span>
+          <span class="badge">${escapeHtml(item.userTag)}</span>
+          ${item.channelName ? `<span class="badge">#${escapeHtml(item.channelName)}</span>` : item.channelId ? `<span class="badge">${escapeHtml(item.channelId)}</span>` : ""}
+        </strong>
         <p>${escapeHtml(item.reason)}</p>
       </article>
-    `).join("")
+    `;
+    }).join("")
     : renderEmptyState("No detections", "AutoMod has not recorded recent violations.");
 }
 
@@ -1770,6 +1779,93 @@ function renderQuickActions() {
       <span>${escapeHtml(action.description)}</span>
     </button>
   `).join("");
+}
+
+function getViolationTriage(item = {}) {
+  const action = String(item.action || "").toLowerCase();
+  const reason = String(item.reason || "").toLowerCase();
+  const severity = String(item.severity || "").toLowerCase() || (
+    ["scam-image", "scam-link", "ai-review", "phishing", "impersonation", "credential-theft", "giveaway-scam", "malware", "blocked-domain", "disallowed-domain", "invite-link", "masked-link"].includes(action)
+      ? "high"
+      : ["spam", "banned-word", "caps", "nickname", "inactive-general-chat", "inactive-general-chat-warning", "raid-join", "account-age-links", "member-age-links"].includes(action)
+        ? "medium"
+        : "low"
+  );
+
+  const contextSignals = [
+    "quoted",
+    "quote",
+    "example",
+    "definition",
+    "meaning",
+    "translation",
+    "talking about",
+    "not saying",
+    "not used",
+    "in context"
+  ];
+  const likelyContext = ["banned-word", "caps", "spam", "nickname"].includes(action)
+    && contextSignals.some(signal => reason.includes(signal));
+
+  return {
+    severity,
+    likelyContext,
+    statusLabel: likelyContext
+      ? "Likely context"
+      : severity === "high"
+        ? "Needs attention"
+        : severity === "medium"
+          ? "Review soon"
+          : "Low priority",
+    statusTone: likelyContext
+      ? "mint"
+      : severity === "high"
+        ? "red"
+        : severity === "medium"
+          ? "yellow"
+          : "blue"
+  };
+}
+
+function renderModerationTriage() {
+  const items = Array.isArray(state.dashboard?.analytics?.recentViolations) ? state.dashboard.analytics.recentViolations : [];
+  const triaged = items.map(item => ({ ...item, triage: getViolationTriage(item) }));
+  const highPriority = triaged.filter(item => item.triage.severity === "high").length;
+  const reviewSoon = triaged.filter(item => item.triage.severity === "medium").length;
+  const likelyContext = triaged.filter(item => item.triage.likelyContext).length;
+  const topRule = Object.entries(state.dashboard?.analytics?.ruleCounts || {}).sort((a, b) => b[1] - a[1])[0];
+  const allowedDomains = state.config?.automod?.allowedDomains || [];
+  const alerts = [
+    ["High priority", highPriority],
+    ["Review soon", reviewSoon],
+    ["Likely context", likelyContext],
+    ["Recent hits", items.length],
+    ["Top rule", topRule ? `${topRule[0]} (${topRule[1]})` : "None"],
+    ["Allowed domains", allowedDomains.length]
+  ];
+
+  $("#moderationTriageSummary").innerHTML = alerts
+    .map(([label, value], index) => `<article class="summary-item" ${revealStyle(index)}><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`)
+    .join("");
+
+  const hints = triaged.slice(0, 5);
+  $("#moderationTriageHints").innerHTML = hints.length
+    ? hints.map((item, index) => `
+      <article class="event" ${revealStyle(index)}>
+        <strong>
+          <span class="status-dot ${item.triage.statusTone}"></span>
+          ${escapeHtml(item.action || "AutoMod")}
+          <span class="badge">${escapeHtml(item.triage.statusLabel)}</span>
+          ${item.severity ? `<span class="badge">${escapeHtml(item.severity)}</span>` : ""}
+        </strong>
+        <p>
+          ${escapeHtml(item.userTag || "Unknown user")}<br>
+          ${escapeHtml(item.channelName ? `#${item.channelName}` : item.channelId || "Channel not recorded")}<br>
+          ${escapeHtml(item.reason || "No reason")}
+        </p>
+      </article>
+    `).join("")
+    : renderEmptyState("No recent moderation hits", "AutoMod activity will appear here as it happens.");
 }
 
 function renderPanelChanges() {
@@ -4065,6 +4161,7 @@ async function updateGeneralChatRule(action) {
 function renderAll() {
   renderMetrics();
   renderQuickActions();
+  renderModerationTriage();
   renderAttentionBoard();
   renderGeneralChatRulePanel();
   renderWorkloadSummary();
