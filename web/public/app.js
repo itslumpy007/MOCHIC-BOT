@@ -1760,6 +1760,7 @@ function renderRecentViolations() {
           ${item.channelName ? `<span class="badge">#${escapeHtml(item.channelName)}</span>` : item.channelId ? `<span class="badge">${escapeHtml(item.channelId)}</span>` : ""}
         </strong>
         <p>${escapeHtml(item.reason)}</p>
+        ${renderViolationActions(item)}
       </article>
     `;
     }).join("")
@@ -1779,6 +1780,158 @@ function renderQuickActions() {
       <span>${escapeHtml(action.description)}</span>
     </button>
   `).join("");
+}
+
+function normalizeDomain(value) {
+  return String(value || "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "");
+}
+
+function extractViolationDomain(item = {}) {
+  const haystack = [
+    item.reason || "",
+    item.detail || "",
+    item.note || "",
+    item.explanation || ""
+  ].join(" ");
+
+  const bracketMatch = haystack.match(/\(([^()]+)\)/);
+  if (bracketMatch) {
+    const candidate = normalizeDomain(bracketMatch[1]);
+    if (candidate && candidate.includes(".")) return candidate;
+  }
+
+  const domainMatch = haystack.match(/\b(?:https?:\/\/)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)\b/i);
+  if (domainMatch) {
+    return normalizeDomain(domainMatch[1]);
+  }
+
+  return "";
+}
+
+function renderViolationActions(item = {}) {
+  const buttons = [];
+  if (item.userId) {
+    buttons.push(`<button class="ghost-button" type="button" data-violation-action="open-member" data-user-id="${escapeHtml(item.userId)}">Open member</button>`);
+    buttons.push(`<button class="ghost-button" type="button" data-violation-action="exempt-user" data-user-id="${escapeHtml(item.userId)}">Exempt user</button>`);
+  }
+
+  const domain = extractViolationDomain(item);
+  if (domain) {
+    buttons.push(`<button class="ghost-button" type="button" data-violation-action="whitelist-domain" data-domain="${escapeHtml(domain)}">Whitelist domain</button>`);
+  }
+
+  if (item.channelId) {
+    buttons.push(`<button class="ghost-button" type="button" data-violation-action="ignore-channel" data-channel-id="${escapeHtml(item.channelId)}" data-rule-key="${escapeHtml(item.action || "")}">Ignore in channel</button>`);
+  }
+
+  return buttons.length ? `<div class="button-row">${buttons.join("")}</div>` : "";
+}
+
+async function openViolationMember(userId) {
+  const cleanUserId = String(userId || "").trim();
+  if (!cleanUserId) {
+    setAlert("No user ID was recorded for that hit.", "error");
+    return;
+  }
+
+  const [memberPayload, chatLogsPayload] = await Promise.all([
+    api(`/api/member?query=${encodeURIComponent(cleanUserId)}`),
+    api(`/api/member-chat-logs?query=${encodeURIComponent(cleanUserId)}`).catch(() => ({ chatLogs: [] }))
+  ]);
+
+  state.selectedMember = memberPayload.member;
+  state.memberChatLogs = chatLogsPayload.chatLogs || [];
+  state.memberAiSummary = null;
+  state.memberDrawerOpen = true;
+  $("#memberSearchInput").value = cleanUserId;
+  setActiveView("members");
+  renderMemberProfile();
+  setAlert("");
+}
+
+async function exemptViolationUser(userId) {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to change exemptions.", "error");
+    return;
+  }
+
+  const cleanUserId = String(userId || "").trim();
+  if (!cleanUserId) {
+    setAlert("No user ID was recorded for that hit.", "error");
+    return;
+  }
+
+  const exemptUserIds = new Set(state.config?.automod?.exemptUserIds || []);
+  exemptUserIds.add(cleanUserId);
+
+  const result = await api("/api/automod", {
+    method: "POST",
+    body: JSON.stringify({
+      exemptUserIds: Array.from(exemptUserIds)
+    })
+  });
+
+  state.config.automod = result.automod;
+  await loadAll();
+  setAlert("Member added to AutoMod exemptions.");
+}
+
+async function whitelistViolationDomain(domain) {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to change allowed domains.", "error");
+    return;
+  }
+
+  const cleanDomain = normalizeDomain(domain);
+  if (!cleanDomain) {
+    setAlert("No domain was detected for that hit.", "error");
+    return;
+  }
+
+  const allowedDomains = new Set(state.config?.automod?.allowedDomains || []);
+  allowedDomains.add(cleanDomain);
+
+  const result = await api("/api/automod", {
+    method: "POST",
+    body: JSON.stringify({
+      allowedDomains: Array.from(allowedDomains)
+    })
+  });
+
+  state.config.automod = result.automod;
+  await loadAll();
+  setAlert(`Allowed domain added: ${cleanDomain}.`);
+}
+
+async function ignoreViolationInChannel(channelId, ruleKey) {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to change AutoMod overrides.", "error");
+    return;
+  }
+
+  const cleanChannelId = String(channelId || "").trim();
+  const cleanRuleKey = String(ruleKey || "").trim();
+  if (!cleanChannelId || !cleanRuleKey) {
+    setAlert("That hit does not have enough context to ignore it in-channel.", "error");
+    return;
+  }
+
+  if (!confirmDangerousAction("Ignore this rule in the channel?", cleanRuleKey, `Channel: ${cleanChannelId}`)) {
+    return;
+  }
+
+  const result = await api("/api/automod-override", {
+    method: "POST",
+    body: JSON.stringify({
+      channelId: cleanChannelId,
+      ruleKey: cleanRuleKey,
+      mode: "rule"
+    })
+  });
+
+  state.config.automod.channelRuleOverrides = result.channelRuleOverrides || {};
+  renderAll();
+  setAlert(`Ignored ${cleanRuleKey} in that channel.`);
 }
 
 function getViolationTriage(item = {}) {
@@ -5445,6 +5598,30 @@ function bindEvents() {
 
     if (action.bulkPreset) {
       applyBulkPreset(action.bulkPreset);
+    }
+  });
+  $("#recentViolations").addEventListener("click", event => {
+    const button = event.target.closest("[data-violation-action]");
+    if (!button) return;
+
+    const action = button.dataset.violationAction;
+    if (action === "open-member") {
+      openViolationMember(button.dataset.userId).catch(error => setAlert(error.message, "error"));
+      return;
+    }
+
+    if (action === "exempt-user") {
+      exemptViolationUser(button.dataset.userId).catch(error => setAlert(error.message, "error"));
+      return;
+    }
+
+    if (action === "whitelist-domain") {
+      whitelistViolationDomain(button.dataset.domain).catch(error => setAlert(error.message, "error"));
+      return;
+    }
+
+    if (action === "ignore-channel") {
+      ignoreViolationInChannel(button.dataset.channelId, button.dataset.ruleKey).catch(error => setAlert(error.message, "error"));
     }
   });
 

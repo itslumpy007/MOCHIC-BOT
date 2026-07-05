@@ -3645,6 +3645,7 @@ function recordAutoModAnalytics(action, reason, userTag = "Unknown user", meta =
       action,
       reason: String(reason || "").slice(0, 200),
       userTag: String(userTag || "Unknown user").slice(0, 80),
+      userId: meta.userId || null,
       severity: classifyAutoModSeverity(action, reason, meta),
       channelId: meta.channelId || null,
       channelName: meta.channelName || null,
@@ -6153,6 +6154,7 @@ async function handleAutoModViolation(message, reason, actionLabel, extraDetails
   }
 
   recordAutoModAnalytics(actionLabel, reason, message.author.tag, {
+    userId: message.author.id,
     channelId: message.channel?.id || null,
     channelName: message.channel?.name || null,
     guildId: message.guild?.id || null,
