@@ -2691,6 +2691,13 @@ function normalizeDomain(value) {
   return (value || "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "");
 }
 
+function isDomainAllowed(domain, allowedDomains = []) {
+  const normalizedDomain = normalizeDomain(domain);
+  if (!normalizedDomain) return false;
+
+  return allowedDomains.some(allowed => normalizedDomain === allowed || normalizedDomain.endsWith(`.${allowed}`));
+}
+
 function normalizeExtension(value) {
   const trimmed = (value || "").trim().toLowerCase();
   if (!trimmed) return "";
@@ -2965,20 +2972,24 @@ function extractMessageUrls(content) {
   }).filter(Boolean))];
 }
 
-function detectScamAttempt(message, automod = config.automod) {
+function detectScamAttempt(message, automod = config.automod, allowedDomains = []) {
   const content = message.content || "";
   const normalizedText = normalizeComparisonText(content);
   const domains = extractMessageDomains(content);
 
   const maskedDomain = detectMaskedLink(content);
-  if (maskedDomain) {
+  if (maskedDomain && !isDomainAllowed(maskedDomain, allowedDomains)) {
     return {
       actionLabel: "masked-link",
       reason: `masked links pointing to ${maskedDomain} are not allowed here.`
     };
   }
 
-  const suspiciousDomain = domains.find(domain => automod.linkReputationEnabled === false ? false : getSuspiciousDomainRisk(domain) >= 80);
+  const suspiciousDomain = domains.find(domain =>
+    automod.linkReputationEnabled !== false &&
+    getSuspiciousDomainRisk(domain) >= 80 &&
+    !isDomainAllowed(domain, allowedDomains)
+  );
 
   const matchedPhrase = getScamPhrases().find(phrase => normalizedText.includes(phrase));
   if (matchedPhrase) {
@@ -3264,13 +3275,22 @@ async function detectAiScamIssue(message, automod = config.automod) {
 
   const content = String(message.content || "").trim();
   const urls = extractMessageUrls(content);
+  const normalizedAllowedDomains = (automod.allowedDomains || []).map(normalizeDomain);
+  const urlDomains = urls.map(url => {
+    try {
+      return normalizeDomain(new URL(url).hostname);
+    } catch {
+      return null;
+    }
+  }).filter(Boolean);
+  const hasUnallowlistedUrls = urlDomains.some(domain => !isDomainAllowed(domain, normalizedAllowedDomains));
   const allAttachments = Array.from(message.attachments.values());
   const imageAttachments = Array.from(message.attachments.values())
     .filter(attachment => isImageAttachment(attachment) && !isGifAttachment(attachment))
     .slice(0, 3);
   const gifAttachments = allAttachments.filter(isGifAttachment).slice(0, 3);
 
-  if (!urls.length && !imageAttachments.length) {
+  if (!hasUnallowlistedUrls && !imageAttachments.length) {
     if (gifAttachments.length) {
       const attachmentLines = gifAttachments.map(attachment => {
         const fileName = attachment.name || "gif";
@@ -5876,7 +5896,7 @@ async function evaluateAutoModMessage(message, policy = resolveAutoModPolicy(mes
   };
 
   if (automod.scamFilterEnabled) {
-    addMatch(detectScamAttempt(message, automod));
+    addMatch(detectScamAttempt(message, automod, normalizedAllowedDomains));
   }
 
   if (automod.aiModerationEnabled && matches.length === 0) {
@@ -6006,7 +6026,10 @@ async function evaluateAutoModMessage(message, policy = resolveAutoModPolicy(mes
   }
 
   if (automod.linkReputationEnabled && messageDomains.length) {
-    const suspiciousDomain = messageDomains.find(domain => getSuspiciousDomainRisk(domain) >= 80);
+    const suspiciousDomain = messageDomains.find(domain =>
+      getSuspiciousDomainRisk(domain) >= 80 &&
+      !isDomainAllowed(domain, normalizedAllowedDomains)
+    );
     if (suspiciousDomain && !policy.ignoredRules.has("scam-link")) {
       addMatch({
         actionLabel: "scam-link",
