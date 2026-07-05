@@ -15644,6 +15644,11 @@ client.on("messageCreate", async message => {
     }
     if (isAutoModExempt(message)) return;
     const policy = resolveAutoModPolicy(message);
+    const messageDomains = extractMessageDomains(message.content);
+    const trustedLinkMessage = areAllDomainsAllowed(
+      messageDomains,
+      (policy.automod.allowedDomains || []).map(normalizeDomain)
+    );
     const evaluation = await evaluateAutoModMessage(message, policy, false);
     const match = evaluation.match;
 
@@ -15655,7 +15660,7 @@ client.on("messageCreate", async message => {
       return;
     }
 
-    const aiMatch = await detectAiModerationIssue(message);
+    const aiMatch = trustedLinkMessage ? null : await detectAiModerationIssue(message);
     if (aiMatch) {
       await handleAutoModViolation(message, aiMatch.reason, aiMatch.actionLabel, aiMatch.details, {
         dryRun: policy.automod.dryRunEnabled,
