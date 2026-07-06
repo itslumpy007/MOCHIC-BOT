@@ -3927,6 +3927,18 @@ const allCommands = [
     ),
 
   new SlashCommandBuilder()
+    .setName("resetchannel")
+    .setDescription("Recreate a channel empty")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels)
+    .addChannelOption(option =>
+      option
+        .setName("channel")
+        .setDescription("Channel to reset instead of the current one")
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+        .setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
     .setName("userinfo")
     .setDescription("View user info")
     .addUserOption(option =>
@@ -7450,7 +7462,7 @@ function buildHelpEmbed() {
     },
     {
       name: "Server Tools",
-      value: "`/setupverify`, `/setuptiktokverify`, `/setuprules`, `/announce`, `/purge`, `/lockdown`, `/unlockdown`, `/lockverified`, `/unlockverified`\nAnonymous affirmations: use the button in the affirmations channel after `/settings affirmchannel`.\nVerification: rules + button verify for most users, TikTok matching is optional.",
+      value: "`/setupverify`, `/setuptiktokverify`, `/setuprules`, `/announce`, `/purge`, `/resetchannel`, `/lockdown`, `/unlockdown`, `/lockverified`, `/unlockverified`\nAnonymous affirmations: use the button in the affirmations channel after `/settings affirmchannel`.\nVerification: rules + button verify for most users, TikTok matching is optional.",
       inline: false
     },
     {
@@ -14387,6 +14399,38 @@ client.on("interactionCreate", async interaction => {
 
       const scopeLabel = deleteAll ? "the whole channel history" : `${purgeResult.deletedCount} message(s)`;
       return interaction.editReply({ content: `Deleted ${scopeLabel} from ${channelLabel}.` });
+    }
+
+    if (interaction.commandName === "resetchannel") {
+      const targetChannel = interaction.options.getChannel("channel") || channel;
+      await interaction.deferReply({ ephemeral: true });
+
+      const botMember = guild.members.me || guild.members.cache?.get(client.user.id) || null;
+      const targetPermissions = targetChannel && typeof targetChannel.permissionsFor === "function" && botMember
+        ? targetChannel.permissionsFor(botMember)
+        : null;
+
+      if (!targetChannel || typeof targetChannel.clone !== "function" || typeof targetChannel.delete !== "function") {
+        return interaction.editReply({ content: "That channel type cannot be reset." });
+      }
+
+      if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)) {
+        return interaction.editReply({ content: "Resetting a channel requires `Manage Channels`." });
+      }
+
+      if (!targetPermissions?.has(PermissionFlagsBits.ManageChannels)) {
+        return interaction.editReply({ content: "I need `Manage Channels` in that channel to reset it." });
+      }
+
+      const purgeResult = await purgeChannelMessages(targetChannel, 0, true, `${interaction.user.tag}: /resetchannel`);
+      if (purgeResult.recreated) {
+        const channelLabel = targetChannel.id === channel.id ? "this channel" : `<#${targetChannel.id}>`;
+        return interaction.editReply({
+          content: `Recreated ${channelLabel} as a fresh empty channel: <#${purgeResult.newChannelId}>.`
+        });
+      }
+
+      return interaction.editReply({ content: "I could not reset that channel." });
     }
 
     if (interaction.commandName === "userinfo") {
