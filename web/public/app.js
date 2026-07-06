@@ -5207,6 +5207,10 @@ function bindEvents() {
       event.preventDefault();
       closeSidebar();
     }, { passive: false });
+    $("#sidebarEscape").addEventListener(eventName, event => {
+      event.preventDefault();
+      closeSidebarAndDrawer();
+    }, { passive: false });
     $("#sidebarBackdrop").addEventListener(eventName, event => {
       event.preventDefault();
       closeSidebarAndDrawer();

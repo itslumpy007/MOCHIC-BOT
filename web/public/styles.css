@@ -518,6 +518,10 @@ textarea {
   -webkit-tap-highlight-color: transparent;
 }
 
+.sidebar-escape-button {
+  display: none;
+}
+
 .sidebar-backdrop {
   position: fixed;
   inset: 0;
@@ -1739,6 +1743,26 @@ tbody tr:hover td {
     touch-action: manipulation;
   }
 
+  .sidebar-escape-button {
+    position: fixed;
+    top: calc(12px + env(safe-area-inset-top));
+    right: calc(12px + env(safe-area-inset-right));
+    z-index: 41;
+    width: 48px;
+    height: 48px;
+    padding: 0;
+    border-radius: 16px;
+    justify-content: center;
+    align-items: center;
+    box-shadow: 0 16px 30px rgba(23, 30, 44, 0.18);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body.sidebar-open .sidebar-escape-button {
+    display: inline-flex;
+  }
+
   .sidebar-backdrop {
     display: none;
   }
@@ -2030,6 +2054,13 @@ tbody tr:hover td {
   .sidebar-close-button {
     width: 44px;
     height: 44px;
+  }
+
+  .sidebar-escape-button {
+    top: calc(10px + env(safe-area-inset-top));
+    right: calc(10px + env(safe-area-inset-right));
+    width: 46px;
+    height: 46px;
   }
 
   .topbar {
