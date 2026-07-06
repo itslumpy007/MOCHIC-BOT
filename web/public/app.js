@@ -1206,6 +1206,13 @@ function setSidebarOpen(open) {
   }
 }
 
+function resetMobileOverlays() {
+  setSidebarOpen(false);
+  state.memberDrawerOpen = false;
+  renderMemberDrawer();
+  closeCommandPalette();
+}
+
 function syncWorkspacePreset(preset) {
   const selected = preset || "auto";
   localStorage.setItem(storageKeys.workspacePreset, selected);
@@ -1508,6 +1515,9 @@ function restorePanelMemory() {
   applyThemePreset(migratedTheme);
   const isCompactMobile = window.matchMedia("(max-width: 760px)").matches;
   setSidebarOpen(isCompactMobile ? false : localStorage.getItem(storageKeys.sidebarOpen) === "true");
+  if (isCompactMobile) {
+    resetMobileOverlays();
+  }
   updateAdvancedToolsVisibility();
   const workspacePreset = localStorage.getItem(storageKeys.workspacePreset) || "auto";
   if (workspacePreset && workspacePreset !== "auto") {
@@ -5198,9 +5208,7 @@ function bindEvents() {
     setSidebarOpen(false);
   };
   const closeSidebarAndDrawer = () => {
-    closeSidebar();
-    state.memberDrawerOpen = false;
-    renderMemberDrawer();
+    resetMobileOverlays();
   };
   ["click", "touchend", "pointerup"].forEach(eventName => {
     $("#sidebarClose").addEventListener(eventName, event => {
@@ -5677,6 +5685,19 @@ function bindEvents() {
     if (event.key === "Escape" && state.memberDrawerOpen) {
       state.memberDrawerOpen = false;
       renderMemberDrawer();
+    }
+  });
+
+  window.addEventListener("pageshow", () => {
+    if (window.matchMedia("(max-width: 760px)").matches) {
+      resetMobileOverlays();
+    }
+  });
+
+  window.addEventListener("resize", () => {
+    if (!window.matchMedia("(max-width: 760px)").matches) return;
+    if (document.body.classList.contains("sidebar-open") || state.memberDrawerOpen || !$("#commandPalette").classList.contains("hidden")) {
+      resetMobileOverlays();
     }
   });
 }
