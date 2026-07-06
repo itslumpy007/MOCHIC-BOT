@@ -3902,7 +3902,7 @@ const allCommands = [
 
   new SlashCommandBuilder()
     .setName("purge")
-    .setDescription("Delete messages in bulk or clear a channel")
+    .setDescription("Delete messages in bulk or recreate a channel empty")
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addIntegerOption(option =>
       option
@@ -3922,7 +3922,7 @@ const allCommands = [
     .addBooleanOption(option =>
       option
         .setName("all")
-        .setDescription("Delete the whole channel history")
+        .setDescription("Delete the whole channel history and recreate the channel empty")
         .setRequired(false)
     ),
 
@@ -7778,8 +7778,10 @@ async function getRecentMessagesForUserAcrossGuild(guild, userId, limit = 40) {
     .map(({ createdTimestamp, ...entry }) => entry);
 }
 
-async function purgeChannelMessages(channel, amount, deleteAll = false) {
-  if (!channel?.messages?.fetch) return 0;
+async function purgeChannelMessages(channel, amount, deleteAll = false, reason = "Channel purge") {
+  if (!channel?.messages?.fetch) {
+    return { deletedCount: 0, recreated: false, newChannelId: null };
+  }
   const purgeLimit = Math.max(1, Math.min(1000, Number(amount) || 0));
 
   if (!deleteAll) {
@@ -7837,61 +7839,35 @@ async function purgeChannelMessages(channel, amount, deleteAll = false) {
       before = oldestMessage.id;
     }
 
-    return deletedCount;
+    return { deletedCount, recreated: false, newChannelId: null };
   }
 
-  let deletedCount = 0;
-  let before;
-  const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
-  const deleteBatchSize = 10;
-
-  async function deleteOldMessagesInBatches(messages) {
-    for (let index = 0; index < messages.length; index += deleteBatchSize) {
-      const batch = messages.slice(index, index + deleteBatchSize);
-      const results = await Promise.allSettled(batch.map(message => message.delete()));
-      deletedCount += results.filter(result => result.status === "fulfilled").length;
-    }
+  if (typeof channel.clone !== "function" || typeof channel.delete !== "function") {
+    return { deletedCount: 0, recreated: false, newChannelId: null };
   }
 
-  while (true) {
-    const messages = await channel.messages.fetch({
-      limit: 100,
-      ...(before ? { before } : {})
-    });
+  const cloneOptions = {};
+  if (typeof channel.topic === "string") cloneOptions.topic = channel.topic;
+  if (typeof channel.nsfw === "boolean") cloneOptions.nsfw = channel.nsfw;
+  if (typeof channel.rateLimitPerUser === "number") cloneOptions.rateLimitPerUser = channel.rateLimitPerUser;
+  if (channel.parentId) cloneOptions.parent = channel.parentId;
+  if (typeof channel.clone === "function") cloneOptions.reason = reason;
 
-    if (!messages.size) break;
-
-    const now = Date.now();
-    const recentMessages = [];
-    const oldMessages = [];
-
-    messages.forEach(message => {
-      if (now - message.createdTimestamp < fourteenDaysMs) {
-        recentMessages.push(message);
-      } else {
-        oldMessages.push(message);
-      }
-    });
-
-    if (recentMessages.length) {
-      const deletedRecent = await channel.bulkDelete(recentMessages.slice(0, 100), true).catch(() => null);
-      deletedCount += deletedRecent?.size || 0;
-    }
-
-    if (oldMessages.length) {
-      await deleteOldMessagesInBatches(oldMessages.slice(0, 100));
-    }
-
-    const oldestMessage = [...messages.values()].reduce((oldest, message) => {
-      if (!oldest) return message;
-      return message.createdTimestamp < oldest.createdTimestamp ? message : oldest;
-    }, null);
-
-    if (!oldestMessage || messages.size < 100) break;
-    before = oldestMessage.id;
+  const clonedChannel = await channel.clone(cloneOptions).catch(() => null);
+  if (!clonedChannel) {
+    return { deletedCount: 0, recreated: false, newChannelId: null };
   }
 
-  return deletedCount;
+  if (typeof channel.position === "number" && typeof clonedChannel.setPosition === "function") {
+    await clonedChannel.setPosition(channel.position).catch(() => {});
+  }
+
+  await channel.delete(reason).catch(async error => {
+    await clonedChannel.delete(`Cleanup after failed channel reset: ${error?.message || "delete failed"}`).catch(() => {});
+    throw error;
+  });
+
+  return { deletedCount: 0, recreated: true, newChannelId: clonedChannel.id };
 }
 
 function clearPendingPanelAction(userId) {
@@ -14378,17 +14354,38 @@ client.on("interactionCreate", async interaction => {
       const targetChannel = interaction.options.getChannel("channel") || channel;
       await interaction.deferReply({ ephemeral: true });
 
-      if (!targetChannel || typeof targetChannel.bulkDelete !== "function") {
+      const botMember = guild.members.me || guild.members.cache?.get(client.user.id) || null;
+      const targetPermissions = targetChannel && typeof targetChannel.permissionsFor === "function" && botMember
+        ? targetChannel.permissionsFor(botMember)
+        : null;
+
+      if (!targetChannel || (!deleteAll && typeof targetChannel.bulkDelete !== "function") || (deleteAll && (typeof targetChannel.clone !== "function" || typeof targetChannel.delete !== "function"))) {
         return interaction.editReply({ content: "That channel type cannot be purged." });
       }
 
-      if (!deleteAll && (amount == null || amount < 1 || amount > 1000)) {
-        return interaction.editReply({ content: "Choose a number from 1 to 1000, or turn on `all` to clear the whole channel." });
+      if (deleteAll) {
+        if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)) {
+          return interaction.editReply({ content: "Resetting a channel requires `Manage Channels`." });
+        }
+
+        if (!targetPermissions?.has(PermissionFlagsBits.ManageChannels)) {
+          return interaction.editReply({ content: "I need `Manage Channels` in that channel to reset it." });
+        }
       }
 
-      const deletedCount = await purgeChannelMessages(targetChannel, amount, deleteAll);
+      if (!deleteAll && (amount == null || amount < 1 || amount > 1000)) {
+        return interaction.editReply({ content: "Choose a number from 1 to 1000, or turn on `all` to recreate the channel." });
+      }
+
+      const purgeResult = await purgeChannelMessages(targetChannel, amount, deleteAll, `${interaction.user.tag}: /purge`);
       const channelLabel = targetChannel.id === channel.id ? "this channel" : `<#${targetChannel.id}>`;
-      const scopeLabel = deleteAll ? "the whole channel history" : `${deletedCount} message(s)`;
+      if (deleteAll && purgeResult.recreated) {
+        return interaction.editReply({
+          content: `Recreated ${channelLabel} as a fresh empty channel: <#${purgeResult.newChannelId}>.`
+        });
+      }
+
+      const scopeLabel = deleteAll ? "the whole channel history" : `${purgeResult.deletedCount} message(s)`;
       return interaction.editReply({ content: `Deleted ${scopeLabel} from ${channelLabel}.` });
     }
 
