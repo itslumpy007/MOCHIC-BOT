@@ -5194,13 +5194,23 @@ function bindEvents() {
   $("#sidebarToggle").addEventListener("click", () => {
     setSidebarOpen(!document.body.classList.contains("sidebar-open"));
   });
-  $("#sidebarClose").addEventListener("click", () => {
+  const closeSidebar = () => {
     setSidebarOpen(false);
-  });
-  $("#sidebarBackdrop").addEventListener("click", () => {
-    setSidebarOpen(false);
+  };
+  const closeSidebarAndDrawer = () => {
+    closeSidebar();
     state.memberDrawerOpen = false;
     renderMemberDrawer();
+  };
+  ["click", "touchend", "pointerup"].forEach(eventName => {
+    $("#sidebarClose").addEventListener(eventName, event => {
+      event.preventDefault();
+      closeSidebar();
+    }, { passive: false });
+    $("#sidebarBackdrop").addEventListener(eventName, event => {
+      event.preventDefault();
+      closeSidebarAndDrawer();
+    }, { passive: false });
   });
   document.querySelectorAll(".tab, .view-tab").forEach(button => {
     button.addEventListener("click", () => {
