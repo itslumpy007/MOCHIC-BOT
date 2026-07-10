@@ -1715,85 +1715,15 @@ tbody tr:hover td {
 
 @media (max-width: 760px) {
   .mobile-only {
-    display: inline-flex;
-  }
-
-  .mobile-sidebar-toggle {
-    position: fixed;
-    top: calc(12px + env(safe-area-inset-top));
-    left: calc(12px + env(safe-area-inset-left));
-    z-index: 36;
-    width: 48px;
-    height: 48px;
-    padding: 0;
-    border-radius: 16px;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 16px 30px rgba(23, 30, 44, 0.18);
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  .sidebar-close-button {
-    display: inline-flex;
-    width: 44px;
-    height: 44px;
-    position: absolute;
-    top: calc(12px + env(safe-area-inset-top));
-    right: calc(12px + env(safe-area-inset-right));
-    margin-left: 0;
-    justify-content: center;
-    z-index: 25;
-    touch-action: manipulation;
-  }
-
-  .sidebar-escape-button {
-    position: fixed;
-    top: calc(12px + env(safe-area-inset-top));
-    right: calc(12px + env(safe-area-inset-right));
-    z-index: 41;
-    width: 48px;
-    height: 48px;
-    padding: 0;
-    border-radius: 16px;
-    justify-content: center;
-    align-items: center;
-    box-shadow: 0 16px 30px rgba(23, 30, 44, 0.18);
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  body.sidebar-open .sidebar-escape-button {
-    display: inline-flex;
-  }
-
-  .sidebar-dock-close {
-    position: fixed;
-    left: 16px;
-    right: 16px;
-    bottom: calc(16px + env(safe-area-inset-bottom));
-    z-index: 42;
     display: none;
-    min-height: 52px;
-    padding: 14px 18px;
-    border-radius: 18px;
-    justify-content: center;
-    align-items: center;
-    box-shadow: 0 18px 34px rgba(23, 30, 44, 0.24);
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  body.sidebar-open .sidebar-dock-close {
-    display: inline-flex;
   }
 
   .sidebar-backdrop {
-    display: none;
+    display: none !important;
   }
 
   body.sidebar-open {
-    overflow: hidden;
+    overflow: auto;
   }
 
   .app-shell {
@@ -1805,21 +1735,20 @@ tbody tr:hover td {
   }
 
   .sidebar {
-    position: fixed;
-    z-index: 20;
-    top: 0;
-    left: 0;
-    bottom: 0;
-    width: min(340px, calc(100vw - 56px));
-    max-width: 340px;
-    height: 100dvh;
+    position: relative;
+    z-index: 1;
+    inset: auto;
+    width: 100%;
+    max-width: none;
+    height: auto;
     gap: 16px;
-    padding: calc(14px + env(safe-area-inset-top)) 14px calc(14px + env(safe-area-inset-bottom));
-    transform: translateX(calc(-100% - 12px));
-    transition: transform 180ms ease;
+    padding: 14px;
+    transform: none;
+    transition: none;
     border-right: none;
-    border-radius: 0 24px 24px 0;
-    box-shadow: 18px 0 46px rgba(5, 8, 14, 0.22);
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    box-shadow: none;
   }
 
   .member-drawer {
@@ -1827,14 +1756,6 @@ tbody tr:hover td {
     right: 0;
     width: 100vw;
     max-height: 100vh;
-  }
-
-  body.sidebar-open .sidebar {
-    transform: translateX(0);
-  }
-
-  body.sidebar-open .sidebar-backdrop {
-    display: block;
   }
 
   .brand {
@@ -2055,14 +1976,6 @@ tbody tr:hover td {
     min-height: 100dvh;
   }
 
-  .mobile-sidebar-toggle {
-    width: 46px;
-    height: 46px;
-    border-radius: 14px;
-    top: calc(10px + env(safe-area-inset-top));
-    left: calc(10px + env(safe-area-inset-left));
-  }
-
   .content {
     padding: 10px;
     padding-top: calc(10px + env(safe-area-inset-top));
@@ -2070,40 +1983,12 @@ tbody tr:hover td {
   }
 
   .sidebar {
-    position: fixed;
-    z-index: 20;
-    top: 0;
-    left: 0;
-    bottom: 0;
-    width: min(340px, calc(100vw - 56px));
-    max-width: 340px;
-    padding-top: calc(68px + env(safe-area-inset-top));
-    padding-bottom: calc(14px + env(safe-area-inset-bottom));
-    border-radius: 0 24px 24px 0;
-    box-shadow: 18px 0 46px rgba(5, 8, 14, 0.22);
-  }
-
-  .sidebar-close-button {
-    width: 44px;
-    height: 44px;
-  }
-
-  .sidebar-escape-button {
-    top: calc(10px + env(safe-area-inset-top));
-    right: calc(10px + env(safe-area-inset-right));
-    width: 46px;
-    height: 46px;
-  }
-
-  .sidebar-dock-close {
-    left: 12px;
-    right: 12px;
-    bottom: calc(12px + env(safe-area-inset-bottom));
-    min-height: 50px;
+    padding-top: 14px;
+    padding-bottom: 14px;
   }
 
   .topbar {
-    padding: 12px 12px 14px 62px;
+    padding: 12px;
     border-radius: 22px;
   }
 
