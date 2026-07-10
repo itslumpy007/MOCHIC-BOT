@@ -5220,12 +5220,15 @@ function bindEvents() {
   const mobileSidebarDismiss = event => {
     if (!window.matchMedia("(max-width: 760px)").matches) return;
     if (!document.body.classList.contains("sidebar-open")) return;
-    if (event.target.closest?.(".sidebar")) return;
-    if (event.target.closest?.("#sidebarToggle, #sidebarEscape, #sidebarDockClose")) return;
+    const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+    const hitSidebar = path.some(node => node?.classList?.contains?.("sidebar"));
+    const hitControls = path.some(node => node?.id && ["sidebarToggle", "sidebarEscape", "sidebarDockClose"].includes(node.id));
+    if (hitSidebar || hitControls) return;
     resetMobileOverlays();
   };
-  document.addEventListener("pointerup", mobileSidebarDismiss, { passive: true });
-  document.addEventListener("click", mobileSidebarDismiss, { passive: true });
+  window.addEventListener("pointerdown", mobileSidebarDismiss, { capture: true, passive: true });
+  window.addEventListener("touchstart", mobileSidebarDismiss, { capture: true, passive: true });
+  window.addEventListener("click", mobileSidebarDismiss, { capture: true, passive: true });
   const closeSidebar = () => {
     setSidebarOpen(false);
   };
