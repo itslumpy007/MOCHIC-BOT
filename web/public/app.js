@@ -1206,6 +1206,10 @@ function setSidebarOpen(open) {
   if (escapeButton) {
     escapeButton.classList.toggle("hidden", !next);
   }
+  const dockClose = $("#sidebarDockClose");
+  if (dockClose) {
+    dockClose.classList.toggle("hidden", !next);
+  }
   const toggle = $("#sidebarToggle");
   if (toggle) {
     toggle.setAttribute("aria-expanded", next ? "true" : "false");
@@ -5217,7 +5221,7 @@ function bindEvents() {
     if (!window.matchMedia("(max-width: 760px)").matches) return;
     if (!document.body.classList.contains("sidebar-open")) return;
     if (event.target.closest?.(".sidebar")) return;
-    if (event.target.closest?.("#sidebarToggle, #sidebarEscape")) return;
+    if (event.target.closest?.("#sidebarToggle, #sidebarEscape, #sidebarDockClose")) return;
     resetMobileOverlays();
   };
   document.addEventListener("pointerup", mobileSidebarDismiss, { passive: true });
@@ -5234,6 +5238,10 @@ function bindEvents() {
       closeSidebar();
     }, { passive: false });
     $("#sidebarEscape").addEventListener(eventName, event => {
+      event.preventDefault();
+      closeSidebarAndDrawer();
+    }, { passive: false });
+    $("#sidebarDockClose").addEventListener(eventName, event => {
       event.preventDefault();
       closeSidebarAndDrawer();
     }, { passive: false });
