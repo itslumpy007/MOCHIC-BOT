@@ -1197,6 +1197,15 @@ function setSidebarOpen(open) {
   const next = Boolean(open);
   document.body.classList.toggle("sidebar-open", next);
   localStorage.setItem(storageKeys.sidebarOpen, next ? "true" : "false");
+  const backdrop = $("#sidebarBackdrop");
+  if (backdrop) {
+    backdrop.classList.toggle("hidden", !next);
+    backdrop.setAttribute("aria-hidden", next ? "false" : "true");
+  }
+  const escapeButton = $("#sidebarEscape");
+  if (escapeButton) {
+    escapeButton.classList.toggle("hidden", !next);
+  }
   const toggle = $("#sidebarToggle");
   if (toggle) {
     toggle.setAttribute("aria-expanded", next ? "true" : "false");
