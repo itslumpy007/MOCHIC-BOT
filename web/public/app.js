@@ -5204,6 +5204,15 @@ function bindEvents() {
   $("#sidebarToggle").addEventListener("click", () => {
     setSidebarOpen(!document.body.classList.contains("sidebar-open"));
   });
+  const mobileSidebarDismiss = event => {
+    if (!window.matchMedia("(max-width: 760px)").matches) return;
+    if (!document.body.classList.contains("sidebar-open")) return;
+    if (event.target.closest?.(".sidebar")) return;
+    if (event.target.closest?.("#sidebarToggle, #sidebarEscape")) return;
+    resetMobileOverlays();
+  };
+  document.addEventListener("pointerup", mobileSidebarDismiss, { passive: true });
+  document.addEventListener("click", mobileSidebarDismiss, { passive: true });
   const closeSidebar = () => {
     setSidebarOpen(false);
   };
