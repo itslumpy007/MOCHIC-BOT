@@ -3062,7 +3062,7 @@ function renderReactionRoleEditor() {
             <input data-reaction-role-emoji value="${escapeHtml(row.displayEmoji || row.emoji || "")}" placeholder="🌸 or <:name:id>">
           </label>
           <label>Role ID
-            <input data-reaction-role-id value="${escapeHtml(row.roleId || "")}" placeholder="Role ID">
+            <input data-reaction-role-id value="${escapeHtml(row.roleId || "")}" placeholder="Role ID or @role">
           </label>
         </div>
         <div class="button-row">
@@ -3076,9 +3076,6 @@ function renderReactionRoleEditor() {
       <label>Reaction role channel ID
         <input data-setting="reactionRoleChannelId" value="${escapeHtml(channelId)}" placeholder="Channel ID">
       </label>
-    </div>
-    <div class="button-row" style="margin-bottom: 12px;">
-      <button class="ghost-button" type="button" id="addReactionRoleRow">Add Row</button>
     </div>
     <textarea id="reactionRoleRulesText" data-setting="reactionRoleRules" class="hidden" aria-hidden="true">${escapeHtml(settings.reactionRoleRules || "")}</textarea>
     <div class="event-list">
@@ -5482,6 +5479,7 @@ function bindEvents() {
   $("#saveVerificationSettings").addEventListener("click", () => saveVerificationSettings().catch(error => setAlert(error.message, "error")));
   $("#repostRulesPanel").addEventListener("click", () => repostRulesPanel().catch(error => setAlert(error.message, "error")));
   $("#saveBirthdaySettings").addEventListener("click", () => saveBirthdaySettings().catch(error => setAlert(error.message, "error")));
+  $("#addReactionRoleRow").addEventListener("click", () => addReactionRoleRow());
   $("#saveReactionRoleSettings").addEventListener("click", () => saveReactionRoleSettings().catch(error => setAlert(error.message, "error")));
   $("#reactionRoleFields").addEventListener("input", event => {
     if (event.target.matches("[data-reaction-role-emoji], [data-reaction-role-id], [data-setting='reactionRoleChannelId']")) {
@@ -5489,12 +5487,6 @@ function bindEvents() {
     }
   });
   $("#reactionRoleFields").addEventListener("click", event => {
-    const addButton = event.target.closest("#addReactionRoleRow");
-    if (addButton) {
-      addReactionRoleRow();
-      return;
-    }
-
     const removeButton = event.target.closest("[data-reaction-role-remove]");
     if (removeButton) {
       removeReactionRoleRow(Number(removeButton.dataset.reactionRoleRemove));
