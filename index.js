@@ -72,6 +72,19 @@ const OPENAI_SUMMARY_MODEL = process.env.OPENAI_SUMMARY_MODEL || "gpt-4o-mini";
 const webPublicDir = path.join(__dirname, "web", "public");
 const log = createLogger("bot");
 
+function buildDefaultReactionRoleRulesText() {
+  return [
+    { emoji: "🌸", roleId: SAKURA_ROLE_ID, name: "Sakura" },
+    { emoji: "🍓", roleId: STRAWBERRY_ROLE_ID, name: "Strawberry Milk" },
+    { emoji: "🍵", roleId: MATCHA_ROLE_ID, name: "Matcha Dream" },
+    { emoji: "🫐", roleId: MYSTIC_ROLE_ID, name: "Mystic Berry" },
+    { emoji: "💜", roleId: TARO_ROLE_ID, name: "Taro Cloud" }
+  ]
+    .filter(rule => rule.roleId)
+    .map(rule => `${rule.emoji}: ${rule.roleId}`)
+    .join("\n");
+}
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -328,7 +341,7 @@ function createDefaultConfig() {
       ].join("\n"),
       welcomeChannelId: null,
       reactionRoleChannelId: null,
-      reactionRoleRules: DEFAULT_REACTION_ROLE_RULES,
+      reactionRoleRules: buildDefaultReactionRoleRulesText(),
       generalChatChannelId: null,
       generalChatInactivityEnabled: true,
       generalChatInactivityWarnings: {},
@@ -3758,17 +3771,6 @@ function validateEnv() {
   }
 }
 
-const DEFAULT_REACTION_ROLE_RULES = [
-  { emoji: "🌸", roleId: SAKURA_ROLE_ID, name: "Sakura" },
-  { emoji: "🍓", roleId: STRAWBERRY_ROLE_ID, name: "Strawberry Milk" },
-  { emoji: "🍵", roleId: MATCHA_ROLE_ID, name: "Matcha Dream" },
-  { emoji: "🫐", roleId: MYSTIC_ROLE_ID, name: "Mystic Berry" },
-  { emoji: "💜", roleId: TARO_ROLE_ID, name: "Taro Cloud" }
-]
-  .filter(rule => rule.roleId)
-  .map(rule => `${rule.emoji}: ${rule.roleId}`)
-  .join("\n");
-
 function normalizeReactionRoleRulesText(value) {
   return String(value || "")
     .replace(/\r\n?/g, "\n")
@@ -3809,7 +3811,7 @@ function parseReactionRoleRuleLine(line) {
 }
 
 function getReactionRoleRulesText() {
-  return normalizeReactionRoleRulesText(config.settings?.reactionRoleRules || DEFAULT_REACTION_ROLE_RULES);
+  return normalizeReactionRoleRulesText(config.settings?.reactionRoleRules || buildDefaultReactionRoleRulesText());
 }
 
 function getReactionRoleDefinitions() {
@@ -3820,7 +3822,7 @@ function getReactionRoleDefinitions() {
 
   if (rules.length) return rules;
 
-  return normalizeReactionRoleRulesText(DEFAULT_REACTION_ROLE_RULES)
+  return normalizeReactionRoleRulesText(buildDefaultReactionRoleRulesText())
     .split("\n")
     .map(parseReactionRoleRuleLine)
     .filter(Boolean);
