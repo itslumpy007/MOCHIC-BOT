@@ -819,6 +819,33 @@ function clearVerificationCaptchaChallenge(userId) {
   verificationCaptchaChallenges.delete(userId);
 }
 
+async function logAgeVerificationSubmission(user, age, source = "Age verification") {
+  const userId = user?.id || null;
+  const userTag = user?.tag || user?.username || userId || "Unknown";
+  const numericAge = Number(age);
+  const fields = [
+    { name: "User", value: userId ? `${userTag} (${userId})` : userTag, inline: false },
+    { name: "Age", value: `${numericAge}`, inline: true },
+    { name: "Source", value: source, inline: true }
+  ];
+
+  recordAuditLog("Verification", "age-verification-submitted", {
+    userId,
+    userTag,
+    age: numericAge,
+    source
+  });
+
+  await logEmbed(
+    makeEmbed({
+      title: "Age verification submitted",
+      description: `${userTag} submitted an age during verification.`,
+      color: COLORS.blue,
+      fields
+    })
+  ).catch(() => {});
+}
+
 function shouldRequireVerificationCaptcha(member) {
   if (!isVerificationCaptchaEnabled() || !member?.user) {
     return { required: false, reason: null, accountAgeMs: null };
@@ -13566,6 +13593,12 @@ client.on("interactionCreate", async interaction => {
         if (age === null) {
           return interaction.reply({ content: "Enter a whole number between 13 and 120 for your age.", ephemeral: true });
         }
+
+        await logAgeVerificationSubmission(
+          interaction.user,
+          age,
+          interaction.customId === "verify:age-captcha" ? "Age verification with CAPTCHA" : "Age verification"
+        );
 
         await interaction.deferReply({ ephemeral: true });
 
