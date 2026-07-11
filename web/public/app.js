@@ -3054,8 +3054,8 @@ function renderReactionRoleEditor() {
   const settings = state.config?.settings || {};
   const channelId = settings.reactionRoleChannelId || "";
   const rows = getReactionRoleRows();
-  const rowMarkup = rows.length
-    ? rows.map((row, index) => `
+  const editableRows = rows.length ? rows : [{ emoji: "", displayEmoji: "", roleId: "" }];
+  const rowMarkup = editableRows.map((row, index) => `
       <article class="event" data-reaction-role-row data-reaction-role-row-index="${index}">
         <div class="form-grid">
           <label>Emoji
@@ -3069,8 +3069,7 @@ function renderReactionRoleEditor() {
           <button class="ghost-button" type="button" data-reaction-role-remove="${index}">Remove</button>
         </div>
       </article>
-    `).join("")
-    : renderEmptyState("No reaction roles", "Add a row to define an emoji-to-role mapping.");
+    `).join("");
 
   $("#reactionRoleFields").innerHTML = `
     <div class="form-grid">
@@ -3085,7 +3084,7 @@ function renderReactionRoleEditor() {
     <div class="event-list">
       ${rowMarkup}
     </div>
-    <p class="panel-note">Use `|` between the emoji and the role ID. Example: <code>🌸 | roleId</code> or <code>&lt;:name:id&gt; | roleId</code>.</p>
+    <p class="panel-note">Use `|` between the emoji and the role ID. Example: <code>🌸 | roleId</code> or <code>&lt;:name:id&gt; | roleId</code>. Leave the row blank until you are ready to add the first mapping.</p>
   `;
 
   syncReactionRoleRulesText();
