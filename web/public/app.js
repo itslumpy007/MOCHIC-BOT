@@ -3057,24 +3057,33 @@ function renderReactionRoleEditor() {
   const channelId = settings.reactionRoleChannelId || "";
 
   $("#reactionRoleFields").innerHTML = `
-    <div class="form-grid">
-      <label>Reaction role channel ID
-        <input data-setting="reactionRoleChannelId" value="${escapeHtml(channelId)}" placeholder="Channel ID">
-      </label>
+    <div class="reaction-role-editor">
+      <div class="form-grid">
+        <label>Reaction role channel ID
+          <input data-setting="reactionRoleChannelId" value="${escapeHtml(channelId)}" placeholder="Channel ID">
+        </label>
+      </div>
+      <div class="stacked-fields reaction-role-textarea-wrap">
+        <label for="reactionRoleRulesText">Reaction role rules</label>
+        <textarea
+          id="reactionRoleRulesText"
+          data-setting="reactionRoleRules"
+          rows="10"
+          spellcheck="false"
+          autocapitalize="off"
+          autocomplete="off"
+          placeholder="emoji | roleId&#10;emoji | roleId&#10;&lt;:name:id&gt; | roleId"
+        >${escapeHtml(settings.reactionRoleRules || "")}</textarea>
+      </div>
+      <p class="panel-note">Use <code>|</code> between the emoji and the role ID. Example: <code>emoji | roleId</code> or <code>&lt;:name:id&gt; | roleId</code>. Click Add Role to append a new blank line.</p>
     </div>
-    <label>Reaction role rules
-      <textarea
-        id="reactionRoleRulesText"
-        data-setting="reactionRoleRules"
-        rows="8"
-        spellcheck="false"
-        autocapitalize="off"
-        autocomplete="off"
-        placeholder="🌸 | roleId&#10;🍓 | roleId&#10;&lt;:name:id&gt; | roleId"
-      >${escapeHtml(settings.reactionRoleRules || "")}</textarea>
-    </label>
-    <p class="panel-note">Use `|` between the emoji and the role ID. Example: <code>🌸 | roleId</code> or <code>&lt;:name:id&gt; | roleId</code>. Click Add Role to append a new blank line.</p>
   `;
+
+  const textarea = $("#reactionRoleRulesText");
+  if (textarea && !textarea.dataset.reactionRoleBound) {
+    textarea.dataset.reactionRoleBound = "true";
+    textarea.addEventListener("input", () => syncReactionRoleRulesText());
+  }
 }
 
 function addReactionRoleRow() {
@@ -3082,9 +3091,10 @@ function addReactionRoleRow() {
   if (textarea) {
     const current = String(textarea.value || "").trimEnd();
     const nextLine = current ? "\n" : "";
-    textarea.value = `${current}${nextLine}🌸 | `;
+    textarea.value = `${current}${nextLine}emoji | `;
     textarea.focus();
     textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
   }
 }
 
@@ -5873,3 +5883,4 @@ function bindEvents() {
 
 bindEvents();
 loadAll();
+
