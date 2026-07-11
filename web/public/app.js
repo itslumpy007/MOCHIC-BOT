@@ -3042,34 +3042,19 @@ function serializeReactionRoleRows(rows) {
 function syncReactionRoleRulesText() {
   const textarea = $("#reactionRoleRulesText");
   if (!textarea) return;
-  const rows = [...document.querySelectorAll("[data-reaction-role-row]")].map(row => ({
+  const rows = [...document.querySelectorAll("[data-reaction-role-row]")];
+  if (!rows.length) return;
+  const mappedRows = rows.map(row => ({
     emoji: row.querySelector("[data-reaction-role-emoji]")?.value.trim() || "",
     displayEmoji: row.querySelector("[data-reaction-role-emoji]")?.value.trim() || "",
     roleId: row.querySelector("[data-reaction-role-id]")?.value.trim() || ""
   })).filter(row => row.emoji || row.roleId);
-  textarea.value = serializeReactionRoleRows(rows);
+  textarea.value = serializeReactionRoleRows(mappedRows);
 }
 
 function renderReactionRoleEditor() {
   const settings = state.config?.settings || {};
   const channelId = settings.reactionRoleChannelId || "";
-  const rows = getReactionRoleRows();
-  const editableRows = rows.length ? rows : [{ emoji: "", displayEmoji: "", roleId: "" }];
-  const rowMarkup = editableRows.map((row, index) => `
-      <article class="event" data-reaction-role-row data-reaction-role-row-index="${index}">
-        <div class="form-grid">
-          <label>Emoji
-            <input data-reaction-role-emoji value="${escapeHtml(row.displayEmoji || row.emoji || "")}" placeholder="🌸 or <:name:id>">
-          </label>
-          <label>Role ID
-            <input data-reaction-role-id value="${escapeHtml(row.roleId || "")}" placeholder="Role ID or @role">
-          </label>
-        </div>
-        <div class="button-row">
-          <button class="ghost-button" type="button" data-reaction-role-remove="${index}">Remove</button>
-        </div>
-      </article>
-    `).join("");
 
   $("#reactionRoleFields").innerHTML = `
     <div class="form-grid">
@@ -3077,34 +3062,30 @@ function renderReactionRoleEditor() {
         <input data-setting="reactionRoleChannelId" value="${escapeHtml(channelId)}" placeholder="Channel ID">
       </label>
     </div>
-    <textarea id="reactionRoleRulesText" data-setting="reactionRoleRules" class="hidden" aria-hidden="true">${escapeHtml(settings.reactionRoleRules || "")}</textarea>
-    <div class="event-list">
-      ${rowMarkup}
-    </div>
-    <p class="panel-note">Use `|` between the emoji and the role ID. Example: <code>🌸 | roleId</code> or <code>&lt;:name:id&gt; | roleId</code>. Leave the row blank until you are ready to add the first mapping.</p>
+    <label>Reaction role rules
+      <textarea
+        id="reactionRoleRulesText"
+        data-setting="reactionRoleRules"
+        rows="8"
+        spellcheck="false"
+        autocapitalize="off"
+        autocomplete="off"
+        placeholder="🌸 | roleId&#10;🍓 | roleId&#10;&lt;:name:id&gt; | roleId"
+      >${escapeHtml(settings.reactionRoleRules || "")}</textarea>
+    </label>
+    <p class="panel-note">Use `|` between the emoji and the role ID. Example: <code>🌸 | roleId</code> or <code>&lt;:name:id&gt; | roleId</code>. Click Add Role to append a new blank line.</p>
   `;
-
-  syncReactionRoleRulesText();
 }
 
 function addReactionRoleRow() {
   const textarea = $("#reactionRoleRulesText");
-  const rows = getReactionRoleRows();
-  rows.push({ emoji: "", displayEmoji: "", roleId: "" });
   if (textarea) {
-    textarea.value = serializeReactionRoleRows(rows);
+    const current = String(textarea.value || "").trimEnd();
+    const nextLine = current ? "\n" : "";
+    textarea.value = `${current}${nextLine}🌸 | `;
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
   }
-  renderReactionRoleEditor();
-}
-
-function removeReactionRoleRow(index) {
-  const rows = getReactionRoleRows();
-  rows.splice(index, 1);
-  const textarea = $("#reactionRoleRulesText");
-  if (textarea) {
-    textarea.value = serializeReactionRoleRows(rows);
-  }
-  renderReactionRoleEditor();
 }
 
 function renderStaff() {
