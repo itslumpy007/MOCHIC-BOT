@@ -205,6 +205,7 @@ function createDefaultConfig() {
   return {
     verifyMessageId: null,
     bonusVerifyMessageId: null,
+    reactionRoleMessageId: null,
     birthdays: {},
     warnings: {},
     notes: {},
@@ -326,6 +327,8 @@ function createDefaultConfig() {
         "Please use the verify button in {verify} so you can fully access the server."
       ].join("\n"),
       welcomeChannelId: null,
+      reactionRoleChannelId: null,
+      reactionRoleRules: DEFAULT_REACTION_ROLE_RULES,
       generalChatChannelId: null,
       generalChatInactivityEnabled: true,
       generalChatInactivityWarnings: {},
@@ -452,6 +455,10 @@ function getWelcomeChannelId() {
   return config.settings?.welcomeChannelId || null;
 }
 
+function getReactionRoleChannelId() {
+  return config.settings?.reactionRoleChannelId || null;
+}
+
 function getGeneralChatChannelId() {
   return config.settings?.generalChatChannelId || null;
 }
@@ -533,7 +540,9 @@ function parseAgeRoleRuleLine(line) {
   const text = String(line || "").trim().replace(/^[*-•]\s*/, "");
   if (!text) return null;
 
-  const separatorIndex = text.indexOf(":") >= 0 ? text.indexOf(":") : text.indexOf("=");
+  let separatorIndex = text.indexOf("|");
+  if (separatorIndex < 0) separatorIndex = text.indexOf("=");
+  if (separatorIndex < 0) separatorIndex = text.lastIndexOf(":");
   if (separatorIndex < 0) return null;
 
   const agePart = text.slice(0, separatorIndex).trim();
@@ -817,7 +826,16 @@ function shouldRequireVerificationCaptcha(member) {
 
 function getSelectedMochiRoleId(member) {
   if (!member?.roles?.cache) return null;
-  return ALL_ROLES.find(roleId => roleId && member.roles.cache.has(roleId)) || null;
+  return getReactionRoleRoleIds().find(roleId => roleId && member.roles.cache.has(roleId)) || null;
+}
+
+function getReactionRoleMessageId() {
+  return config.reactionRoleMessageId || null;
+}
+
+async function getTrackedReactionRoleMessageIds() {
+  const messageId = getReactionRoleMessageId();
+  return messageId ? [messageId] : [];
 }
 
 function getTikTokVerificationSetupIssues() {
@@ -855,12 +873,12 @@ function buildTikTokVerificationSummary() {
   return [
     `Verification mode: Rules + button verify`,
     `Verification CAPTCHA: ${isVerificationCaptchaEnabled() ? "Enabled (new/suspicious accounts only)" : "Disabled"}`,
-    `TikTok bonus: ${handle ? `Enabled (@${handle})` : "Disabled"}`,
+    `TikTok matching: ${handle ? `Enabled (@${handle})` : "Disabled"}`,
     `Saved nicknames: ${aliases.length}`,
     `Verified role: ${getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set"}`,
     `Unverified role: ${getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Not set"}`,
     `Welcome channel: ${getWelcomeChannelId() ? `<#${getWelcomeChannelId()}>` : "Not set"}`,
-    `Bonus automation: ${isTikTokVerificationEnabled() ? "Enabled" : "Disabled"}`
+    `Matching automation: ${isTikTokVerificationEnabled() ? "Enabled" : "Disabled"}`
   ].join("\n");
 }
 
@@ -872,13 +890,11 @@ function buildRuleVerifyEmbed() {
   const ageRoleCount = getAgeRoleRules().length;
   const captchaStep = captchaEnabled ? "3. CAPTCHA" : null;
   const ageStep = ageRoleCount ? `${captchaEnabled ? "4" : "3"}. Enter age` : null;
-  const bonusStep = `${captchaEnabled && ageRoleCount ? 5 : captchaEnabled || ageRoleCount ? 4 : 3}. Optional bonus`;
   const howItWorks = [
     "1. Read the rules",
     "2. Click verify",
     ...(captchaStep ? ["3. Solve the CAPTCHA if prompted"] : []),
-    ...(ageStep ? [ageStep] : []),
-    `${captchaEnabled || ageRoleCount ? (captchaEnabled && ageRoleCount ? "5" : "4") : "3"}. React for an optional flavor role`
+    ...(ageStep ? [ageStep] : [])
   ].join("\n");
 
   return makeEmbed({
@@ -896,8 +912,7 @@ function buildRuleVerifyEmbed() {
       ...(ageStep
         ? [{ name: ageStep, value: "Tell me your age so I can give you the right age-based role after verification.", inline: false }]
         : []),
-      { name: bonusStep, value: handle ? `TikTok matching can still run as a bonus path for @${handle}.` : "TikTok matching can be enabled later for special cases.", inline: false },
-      { name: "🍥 Flavor roles", value: "React below if you want a flavor role. They are optional.", inline: false },
+      { name: "TikTok matching", value: handle ? `Enabled for @${handle}.` : "Disabled.", inline: false },
       { name: "How it works", value: howItWorks, inline: false },
       { name: "Verified role", value: verifiedRoleId ? `<@&${verifiedRoleId}>` : "Not set", inline: true },
       { name: "Unverified role", value: unverifiedRoleId ? `<@&${unverifiedRoleId}>` : "Optional", inline: true },
@@ -949,8 +964,6 @@ async function postRuleVerifyPanel(source = "manual") {
     components: buildRuleVerifyComponents(),
     files: [buildCuteRulesCardAttachment()]
   });
-
-  await addMochiRoleReactions(sentMessage);
 
   config.verifyMessageId = sentMessage.id;
   saveConfig();
@@ -1109,7 +1122,7 @@ async function completeRulesVerificationWithAge(member, age = null) {
     embed: makeEmbed({
       title: "Verified",
       description: bonusMatched
-        ? `You’re verified, and your nickname also matches the TikTok bonus setting for @${getTikTokHandle()}.${ageRoleText}`
+        ? `You’re verified, and your nickname also matches the TikTok matching setting for @${getTikTokHandle()}.${ageRoleText}`
         : `You’re verified. Welcome in.${ageRoleText}`,
       color: COLORS.mint
     })
@@ -1126,7 +1139,7 @@ async function postOnboardingRepair(source = "manual") {
   let bonusResult = null;
   if (isTikTokVerificationEnabled()) {
     bonusResult = await postTikTokVerifyPanel(source).catch(error => {
-      throw new Error(`TikTok bonus panel: ${error.message}`);
+      throw new Error(`TikTok matching panel: ${error.message}`);
     });
   }
 
@@ -1176,8 +1189,8 @@ async function syncTikTokVerification(member, source = "manual") {
       matched,
       changed: false,
       reason: matched
-        ? "Nickname already matches the TikTok bonus setting."
-        : `Nickname does not match the TikTok bonus setting.`
+        ? "Nickname already matches the TikTok matching setting."
+        : `Nickname does not match the TikTok matching setting.`
     };
   }
 
@@ -1198,7 +1211,7 @@ async function syncTikTokVerification(member, source = "manual") {
     changed: Boolean(rolesToAdd.length || rolesToRemove.length),
     reason: matched
       ? `Verified as @${handle}.`
-      : `Nickname does not match the TikTok bonus setting.`
+      : `Nickname does not match the TikTok matching setting.`
   };
 }
 
@@ -1220,6 +1233,7 @@ function loadConfig() {
       notes: parsed.notes && typeof parsed.notes === "object" ? parsed.notes : {},
       cases: Array.isArray(parsed.cases) ? parsed.cases : [],
       appeals: Array.isArray(parsed.appeals) ? parsed.appeals : [],
+      reactionRoleMessageId: typeof parsed.reactionRoleMessageId === "string" ? parsed.reactionRoleMessageId : defaults.reactionRoleMessageId,
       generalChatInactivityWarnings: parsed.generalChatInactivityWarnings && typeof parsed.generalChatInactivityWarnings === "object"
         ? parsed.generalChatInactivityWarnings
         : {},
@@ -1286,7 +1300,13 @@ function loadConfig() {
         ...(parsed.settings || {}),
         ageRoleRules: typeof parsed.settings?.ageRoleRules === "string"
           ? parsed.settings.ageRoleRules
-          : defaults.settings.ageRoleRules
+          : defaults.settings.ageRoleRules,
+        reactionRoleChannelId: typeof parsed.settings?.reactionRoleChannelId === "string"
+          ? parsed.settings.reactionRoleChannelId
+          : defaults.settings.reactionRoleChannelId,
+        reactionRoleRules: typeof parsed.settings?.reactionRoleRules === "string"
+          ? parsed.settings.reactionRoleRules
+          : defaults.settings.reactionRoleRules
       },
       permissions: {
         ...defaults.permissions,
@@ -3738,17 +3758,77 @@ function validateEnv() {
   }
 }
 
-const MOCHI_ROLES = {
-  "🌸": { id: SAKURA_ROLE_ID, name: "Sakura" },
-  "🍓": { id: STRAWBERRY_ROLE_ID, name: "Strawberry Milk" },
-  "🍵": { id: MATCHA_ROLE_ID, name: "Matcha Dream" },
-  "🫐": { id: MYSTIC_ROLE_ID, name: "Mystic Berry" },
-  "💜": { id: TARO_ROLE_ID, name: "Taro Cloud" }
-};
+const DEFAULT_REACTION_ROLE_RULES = [
+  { emoji: "🌸", roleId: SAKURA_ROLE_ID, name: "Sakura" },
+  { emoji: "🍓", roleId: STRAWBERRY_ROLE_ID, name: "Strawberry Milk" },
+  { emoji: "🍵", roleId: MATCHA_ROLE_ID, name: "Matcha Dream" },
+  { emoji: "🫐", roleId: MYSTIC_ROLE_ID, name: "Mystic Berry" },
+  { emoji: "💜", roleId: TARO_ROLE_ID, name: "Taro Cloud" }
+]
+  .filter(rule => rule.roleId)
+  .map(rule => `${rule.emoji}: ${rule.roleId}`)
+  .join("\n");
 
-const ALL_ROLES = Object.values(MOCHI_ROLES)
-  .map(role => role.id)
-  .filter(Boolean);
+function normalizeReactionRoleRulesText(value) {
+  return String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith("#") && !line.startsWith("//"))
+    .join("\n")
+    .slice(0, 4000);
+}
+
+function normalizeReactionRoleId(value) {
+  return String(value || "").trim().replace(/[<@&>]/g, "");
+}
+
+function parseReactionRoleRuleLine(line) {
+  const text = String(line || "").trim().replace(/^[*-•]\s*/, "");
+  if (!text) return null;
+
+  const separatorIndex = text.indexOf(":") >= 0 ? text.indexOf(":") : text.indexOf("=");
+  if (separatorIndex < 0) return null;
+
+  const emojiPart = String(text.slice(0, separatorIndex) || "").trim();
+  const roleId = normalizeReactionRoleId(text.slice(separatorIndex + 1));
+  if (!emojiPart || !roleId) return null;
+
+  const customEmojiMatch = emojiPart.match(/^<a?:([a-z0-9_]+):(\d+)>$/i) || emojiPart.match(/^([a-z0-9_]+):(\d+)$/i);
+  const emoji = customEmojiMatch ? customEmojiMatch[2] : emojiPart;
+  const displayEmoji = customEmojiMatch
+    ? `<:${customEmojiMatch[1]}:${customEmojiMatch[2]}>`
+    : emojiPart;
+
+  return {
+    emoji,
+    displayEmoji,
+    roleId,
+    label: displayEmoji
+  };
+}
+
+function getReactionRoleRulesText() {
+  return normalizeReactionRoleRulesText(config.settings?.reactionRoleRules || DEFAULT_REACTION_ROLE_RULES);
+}
+
+function getReactionRoleDefinitions() {
+  const rules = getReactionRoleRulesText()
+    .split("\n")
+    .map(parseReactionRoleRuleLine)
+    .filter(Boolean);
+
+  if (rules.length) return rules;
+
+  return normalizeReactionRoleRulesText(DEFAULT_REACTION_ROLE_RULES)
+    .split("\n")
+    .map(parseReactionRoleRuleLine)
+    .filter(Boolean);
+}
+
+function getReactionRoleRoleIds() {
+  return [...new Set(getReactionRoleDefinitions().map(rule => rule.roleId).filter(Boolean))];
+}
 
 const allCommands = [
   new SlashCommandBuilder()
@@ -3835,6 +3915,18 @@ const allCommands = [
     .setName("setuptiktokverify")
     .setDescription("Create the TikTok onboarding panel")
     .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+
+  new SlashCommandBuilder()
+    .setName("setupreactionroles")
+    .setDescription("Create the reaction role panel")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addChannelOption(option =>
+      option
+        .setName("channel")
+        .setDescription("Channel for the reaction role panel")
+        .setRequired(false)
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+    ),
 
   new SlashCommandBuilder()
     .setName("setuprules")
@@ -6509,6 +6601,7 @@ function buildSettingsSummary() {
     `Verification CAPTCHA: ${isVerificationCaptchaEnabled() ? "Enabled" : "Disabled"}`,
     `Rules channel: ${getRulesChannelId() ? `<#${getRulesChannelId()}>` : "Not set"}`,
     `General chat: ${getGeneralChatChannelId() ? `<#${getGeneralChatChannelId()}>` : "Not set"}`,
+    `Reaction roles: ${getReactionRoleChannelId() ? `<#${getReactionRoleChannelId()}>` : "Not set"}`,
     `General chat inactivity: ${isGeneralChatInactivityEnabled() ? "Enabled" : "Disabled"}`,
     `Anonymous affirmations: ${isAnonymousAffirmationsEnabled() ? "Enabled" : "Disabled"} (${getAnonymousAffirmationsChannelId() ? `<#${getAnonymousAffirmationsChannelId()}>` : "Not set"})`,
     `Muted role: ${getMutedRoleId() ? `<@&${getMutedRoleId()}>` : "Not set"}`,
@@ -6566,11 +6659,11 @@ function buildTikTokVerifyEmbed() {
   const handle = getTikTokHandle();
   const aliases = getTikTokNicknameAliases();
   return makeEmbed({
-    title: "TikTok bonus verification",
+    title: "TikTok matching verification",
     description:
       handle
-        ? `Optional bonus path: pick a flavor role below, then tap **Set My Name** and type your TikTok username.\n\nI’ll match it against **@${handle}** and any saved nicknames, then hand you the verified role if it matches.`
-        : `Optional bonus path: pick a flavor role by reacting below, then tap the button and type your TikTok username.\n\nAsk staff if you are not sure what format they want.`,
+        ? `Optional matching path: tap **Set My Name** and type your TikTok username.\n\nI’ll match it against **@${handle}** and any saved nicknames, then hand you the verified role if it matches.`
+        : `Optional matching path: tap the button and type your TikTok username.\n\nAsk staff if you are not sure what format they want.`,
     color: COLORS.pink,
     fields: [
       { name: "🌸 Bonus handle", value: handle ? `@${handle}` : "Not set", inline: true },
@@ -6578,7 +6671,23 @@ function buildTikTokVerifyEmbed() {
       { name: "🫧 Unverified role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Optional", inline: true },
       { name: "🍡 Saved nicknames", value: aliases.length ? `${aliases.length} saved` : "None saved", inline: false },
       { name: "How it works", value: "1. Tap Set My Name\n2. Type your TikTok username\n3. Enjoy the garden if it matches", inline: false },
-      { name: "Flavor roles", value: "Optional flavor-role reactions live on the main verify panel.", inline: false }
+      { name: "Reaction roles", value: "Use the dedicated reaction-role panel instead.", inline: false }
+    ]
+  });
+}
+
+function buildReactionRolePanelEmbed() {
+  const roleList = getReactionRoleDefinitions()
+    .map(roleData => `${roleData.displayEmoji || roleData.emoji} <@&${roleData.roleId}>`)
+    .join("\n");
+
+  return makeEmbed({
+    title: "Reaction roles",
+    description: "React with one of the emojis below to get a role. Remove your reaction to remove the role.",
+    color: COLORS.pink,
+    fields: [
+      { name: "Available roles", value: roleList || "No roles configured.", inline: false },
+      { name: "How it works", value: "One reaction = one role from the Mochi flavor set.", inline: false }
     ]
   });
 }
@@ -6591,9 +6700,60 @@ function buildTikTokVerifyCardAttachment() {
 }
 
 async function addMochiRoleReactions(message) {
-  for (const emoji of Object.keys(MOCHI_ROLES)) {
+  for (const { emoji } of getReactionRoleDefinitions()) {
     await message.react(emoji).catch(() => {});
   }
+}
+
+function getReactionRoleSetupIssues() {
+  const issues = [];
+  if (!getReactionRoleDefinitions().length) {
+    issues.push("at least one reaction role");
+  }
+  return issues;
+}
+
+async function postReactionRolePanel(source = "manual", channelOverride = null) {
+  const setupIssues = getReactionRoleSetupIssues();
+  if (setupIssues.length) {
+    const listed = setupIssues.length === 1 ? setupIssues[0] : `${setupIssues.slice(0, -1).join(", ")} and ${setupIssues[setupIssues.length - 1]}`;
+    throw new Error(`Set ${listed} first.`);
+  }
+
+  const targetChannelId = channelOverride || getReactionRoleChannelId() || getVerifyChannelId();
+  if (!targetChannelId) {
+    throw new Error("Pick a reaction-role channel first.");
+  }
+
+  const targetChannel = await client.channels.fetch(targetChannelId).catch(() => null);
+  if (!targetChannel || typeof targetChannel.send !== "function") {
+    throw new Error("The reaction-role channel could not be found.");
+  }
+
+  const botMember = targetChannel.guild?.members?.me || targetChannel.guild?.members?.cache?.get(client.user.id) || null;
+  const requiredPermissions = ["ViewChannel", "SendMessages", "EmbedLinks", "AddReactions", "ReadMessageHistory"];
+  if (botMember && typeof targetChannel.permissionsFor === "function") {
+    const permissions = targetChannel.permissionsFor(botMember);
+    const missing = requiredPermissions.filter(permission => !permissions?.has(PermissionFlagsBits[permission]));
+    if (missing.length) {
+      throw new Error(`I am missing permissions in the reaction-role channel: ${missing.join(", ")}.`);
+    }
+  }
+
+  const sentMessage = await targetChannel.send({
+    embeds: [buildReactionRolePanelEmbed()]
+  });
+  await addMochiRoleReactions(sentMessage);
+
+  config.settings.reactionRoleChannelId = targetChannelId;
+  config.reactionRoleMessageId = sentMessage.id;
+  saveConfig();
+
+  return {
+    channelId: targetChannelId,
+    messageId: sentMessage.id,
+    source
+  };
 }
 
 function buildTikTokSuccessCardAttachment(finalNickname) {
@@ -7164,7 +7324,7 @@ async function setVerifiedVisibility(channel, locked) {
     if (unverifiedRoleId) {
       await channel.permissionOverwrites.edit(unverifiedRoleId, { ViewChannel: false }).catch(() => {});
     }
-    for (const roleId of ALL_ROLES) {
+    for (const roleId of getReactionRoleRoleIds()) {
       if (roleId) {
         await channel.permissionOverwrites.edit(roleId, { ViewChannel: false }).catch(() => {});
       }
@@ -7175,7 +7335,7 @@ async function setVerifiedVisibility(channel, locked) {
     if (unverifiedRoleId) {
       await channel.permissionOverwrites.delete(unverifiedRoleId).catch(() => {});
     }
-    for (const roleId of ALL_ROLES) {
+    for (const roleId of getReactionRoleRoleIds()) {
       if (roleId) {
         await channel.permissionOverwrites.delete(roleId).catch(() => {});
       }
@@ -7199,7 +7359,7 @@ async function setWelcomeVisibility(channel, locked) {
     if (unverifiedRoleId) {
       await channel.permissionOverwrites.edit(unverifiedRoleId, { ViewChannel: true }).catch(() => {});
     }
-    for (const roleId of ALL_ROLES) {
+    for (const roleId of getReactionRoleRoleIds()) {
       if (roleId) {
         await channel.permissionOverwrites.edit(roleId, { ViewChannel: false }).catch(() => {});
       }
@@ -7212,7 +7372,7 @@ async function setWelcomeVisibility(channel, locked) {
     if (unverifiedRoleId) {
       await channel.permissionOverwrites.delete(unverifiedRoleId).catch(() => {});
     }
-    for (const roleId of ALL_ROLES) {
+    for (const roleId of getReactionRoleRoleIds()) {
       if (roleId) {
         await channel.permissionOverwrites.delete(roleId).catch(() => {});
       }
@@ -7229,7 +7389,7 @@ async function enforceFlavorRoleVisibility(guild) {
   for (const channel of guild.channels.cache.values()) {
     if (!channel?.permissionOverwrites?.edit) continue;
 
-    for (const roleId of ALL_ROLES) {
+    for (const roleId of getReactionRoleRoleIds()) {
       if (!roleId) continue;
       try {
         await channel.permissionOverwrites.edit(roleId, { ViewChannel: false });
@@ -7446,6 +7606,11 @@ function buildHelpEmbed() {
       inline: false
     },
     {
+      name: "Reaction Roles",
+      value: "`/setupreactionroles`\nPosts a reaction-role panel in a channel you choose.",
+      inline: false
+    },
+    {
       name: "Birthdays",
       value: "`/birthday`, `/birthdaypanel`, `/settings birthdayrole`, `/settings birthdaychannel`",
       inline: false
@@ -7462,7 +7627,7 @@ function buildHelpEmbed() {
     },
     {
       name: "Server Tools",
-      value: "`/setupverify`, `/setuptiktokverify`, `/setuprules`, `/announce`, `/purge`, `/resetchannel`, `/lockdown`, `/unlockdown`, `/lockverified`, `/unlockverified`\nAnonymous affirmations: use the button in the affirmations channel after `/settings affirmchannel`.\nVerification: rules + button verify for most users, TikTok matching is optional.",
+      value: "`/setupverify`, `/setuptiktokverify`, `/setupreactionroles`, `/setuprules`, `/announce`, `/purge`, `/resetchannel`, `/lockdown`, `/unlockdown`, `/lockverified`, `/unlockverified`\nAnonymous affirmations: use the button in the affirmations channel after `/settings affirmchannel`.\nVerification: rules + button verify for most users, TikTok matching is optional.",
       inline: false
     },
     {
@@ -7498,6 +7663,7 @@ function buildStatusEmbed() {
       { name: "Verify Channel", value: verifyChannelId ? `<#${verifyChannelId}>` : "Not set", inline: true },
       { name: "Rules Channel", value: rulesChannelId ? `<#${rulesChannelId}>` : "Not set", inline: true },
       { name: "General Chat", value: generalChatChannelId ? `<#${generalChatChannelId}>` : "Not set", inline: true },
+      { name: "Reaction Roles", value: getReactionRoleChannelId() ? `<#${getReactionRoleChannelId()}>` : "Not set", inline: true },
       { name: "General Chat Rule", value: `Gentle reminder at 53 days, kick at 60 days.`, inline: false },
       { name: "Log Channel", value: logChannelId ? `<#${logChannelId}>` : "Not set", inline: true },
       { name: "AutoMod Log Channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
@@ -7509,6 +7675,7 @@ function buildStatusEmbed() {
       { name: "Core Features", value: ENABLE_CORE_BOT ? "Enabled" : "Disabled", inline: true },
       { name: "Verify Panel", value: config.verifyMessageId || "Not cached", inline: false },
       { name: "Bonus Panel", value: config.bonusVerifyMessageId || "Not cached", inline: false },
+      { name: "Reaction Role Panel", value: config.reactionRoleMessageId || "Not cached", inline: false },
       { name: "Cases Logged", value: `${config.cases.length}`, inline: true },
       { name: "Banned Words", value: `${getBannedWords().length}`, inline: true },
       { name: "Birthdays Saved", value: `${Object.keys(getBirthdayStore()).length}`, inline: true },
@@ -7520,28 +7687,28 @@ function buildStatusEmbed() {
 async function buildReactionRoleHealth() {
   const guild = client.guilds.cache.get(GUILD_ID) || await client.guilds.fetch(GUILD_ID).catch(() => null);
   const botMember = guild?.members?.me || (guild ? await guild.members.fetchMe().catch(() => null) : null);
-  const verifyChannelId = getVerifyChannelId();
-  const verifyMessageId = await resolveVerifyMessageId();
-  const verifyChannel = verifyChannelId && guild?.channels?.fetch ? await guild.channels.fetch(verifyChannelId).catch(() => null) : null;
-  const verifyMessage = verifyChannel && verifyMessageId && verifyChannel.messages?.fetch
-    ? await verifyChannel.messages.fetch(verifyMessageId).catch(() => null)
+  const panelChannelId = getReactionRoleChannelId();
+  const panelMessageId = getReactionRoleMessageId();
+  const panelChannel = panelChannelId && guild?.channels?.fetch ? await guild.channels.fetch(panelChannelId).catch(() => null) : null;
+  const panelMessage = panelChannel && panelMessageId && panelChannel.messages?.fetch
+    ? await panelChannel.messages.fetch(panelMessageId).catch(() => null)
     : null;
   const botManageRoles = Boolean(botMember?.permissions?.has(PermissionFlagsBits.ManageRoles));
 
   const roles = [];
-  for (const [emoji, roleData] of Object.entries(MOCHI_ROLES)) {
-    const role = roleData?.id && guild?.roles?.fetch
-      ? guild.roles.cache.get(roleData.id) || await guild.roles.fetch(roleData.id).catch(() => null)
+  for (const roleData of getReactionRoleDefinitions()) {
+    const role = roleData?.roleId && guild?.roles?.fetch
+      ? guild.roles.cache.get(roleData.roleId) || await guild.roles.fetch(roleData.roleId).catch(() => null)
       : null;
     const reactionPresent = Boolean(
-      verifyMessage?.reactions?.cache?.find(reaction => reaction.emoji?.name === emoji || reaction.emoji?.id === emoji)
+      panelMessage?.reactions?.cache?.find(reaction => reaction.emoji?.name === roleData.emoji || reaction.emoji?.id === roleData.emoji)
     );
     const hierarchyOk = Boolean(botMember && role && botMember.roles.highest.comparePositionTo(role) > 0);
 
     roles.push({
-      emoji,
-      label: roleData?.name || emoji,
-      roleId: roleData?.id || null,
+      emoji: roleData.displayEmoji || roleData.emoji,
+      label: role?.name || roleData.displayEmoji || roleData.emoji,
+      roleId: roleData?.roleId || null,
       roleExists: Boolean(role),
       reactionPresent,
       hierarchyOk,
@@ -7550,8 +7717,8 @@ async function buildReactionRoleHealth() {
   }
 
   const issues = [];
-  if (!verifyChannelId) issues.push("Verify channel is not set.");
-  if (!verifyMessage) issues.push("The verify panel message could not be found.");
+  if (!panelChannelId) issues.push("Reaction-role channel is not set.");
+  if (!panelMessage) issues.push("The reaction-role panel message could not be found.");
   if (!botManageRoles) issues.push("The bot is missing Manage Roles permission.");
   for (const role of roles) {
     if (!role.roleId) issues.push(`${role.label} role is not configured.`);
@@ -7562,11 +7729,11 @@ async function buildReactionRoleHealth() {
 
   return {
     ready: issues.length === 0,
-    verifyChannelId,
-    verifyMessageId: verifyMessage?.id || verifyMessageId || null,
+    verifyChannelId: panelChannelId,
+    verifyMessageId: panelMessage?.id || panelMessageId || null,
     botManageRoles,
     roleHierarchyOk: roles.every(role => role.hierarchyOk),
-    panelMessageFound: Boolean(verifyMessage),
+    panelMessageFound: Boolean(panelMessage),
     roles,
     issues: [...new Set(issues)]
   };
@@ -7592,7 +7759,7 @@ async function buildDashboardEmbed() {
       { name: "Total cases", value: `${allCases.length}`, inline: true },
       { name: "Warnings saved", value: `${Object.keys(config.warnings || {}).length}`, inline: true },
       { name: "Staff notes", value: `${Object.keys(config.notes || {}).length}`, inline: true },
-      { name: "TikTok bonus", value: isTikTokVerificationEnabled() ? `@${getTikTokHandle()}` : "Disabled", inline: true },
+      { name: "TikTok matching", value: isTikTokVerificationEnabled() ? `@${getTikTokHandle()}` : "Disabled", inline: true },
       { name: "AutoMod log channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
       { name: "Alert-only rules", value: getAlertOnlyRules().join(", ") || "None", inline: false },
       { name: "Nickname filter terms", value: `${getNicknameBlockedTerms().length}`, inline: true },
@@ -9483,6 +9650,8 @@ function buildWebConfigPayload() {
       verificationCaptchaEnabled: isVerificationCaptchaEnabled(),
       verificationRequiresApproval: isVerificationApprovalRequired(),
       ageRoleRules: String(config.settings.ageRoleRules || ""),
+      reactionRoleChannelId: getReactionRoleChannelId() || "",
+      reactionRoleRules: String(config.settings.reactionRoleRules || ""),
       pendingVerificationsCount: Array.isArray(config.pendingVerifications) ? config.pendingVerifications.length : 0,
       logChannelId: config.settings.logChannelId || "",
       automodLogChannelId: config.settings.automodLogChannelId || "",
@@ -9537,6 +9706,8 @@ function updateWebSettings(auth, payload) {
     "verificationCaptchaEnabled",
     "verificationRequiresApproval",
     "ageRoleRules",
+    "reactionRoleChannelId",
+    "reactionRoleRules",
     "logChannelId",
     "automodLogChannelId",
     "mutedRoleId",
@@ -9611,6 +9782,8 @@ function updateWebSettings(auth, payload) {
     anonymousAffirmationsCooldownMs: config.settings.anonymousAffirmationsCooldownMs,
     verificationCaptchaEnabled: config.settings.verificationCaptchaEnabled,
     ageRoleRules: config.settings.ageRoleRules,
+    reactionRoleChannelId: config.settings.reactionRoleChannelId,
+    reactionRoleRules: config.settings.reactionRoleRules,
     logChannelId: config.settings.logChannelId,
     automodLogChannelId: config.settings.automodLogChannelId,
     mutedRoleId: config.settings.mutedRoleId,
@@ -9642,8 +9815,12 @@ function updateWebSettings(auth, payload) {
           : isVerificationApprovalRequired();
       } else if (key === "ageRoleRules") {
         config.settings[key] = nextAgeRoleRules;
+      } else if (key === "reactionRoleRules") {
+        config.settings[key] = normalizeReactionRoleRulesText(payload[key]);
       } else if (key === "generalChatChannelId") {
         config.settings[key] = nextGeneralChatChannelId;
+      } else if (key === "reactionRoleChannelId") {
+        config.settings[key] = String(payload[key] || "").trim() || null;
       } else if (key === "generalChatInactivityEnabled") {
         config.settings[key] = nextGeneralChatInactivityEnabled;
       } else if (key === "messageArchiveEnabled") {
@@ -9684,6 +9861,8 @@ function updateWebSettings(auth, payload) {
     anonymousAffirmationsCooldownMs: config.settings.anonymousAffirmationsCooldownMs,
     verificationCaptchaEnabled: config.settings.verificationCaptchaEnabled,
     ageRoleRules: config.settings.ageRoleRules,
+    reactionRoleChannelId: config.settings.reactionRoleChannelId,
+    reactionRoleRules: config.settings.reactionRoleRules,
     logChannelId: config.settings.logChannelId,
     automodLogChannelId: config.settings.automodLogChannelId,
     mutedRoleId: config.settings.mutedRoleId,
@@ -11438,14 +11617,12 @@ async function handleWebApi(req, res, pathname) {
         return sendWebJson(res, 403, { error: "Admin web access is required." });
       }
       await readWebJsonBody(req).catch(() => null);
-      const posted = await postTikTokVerifyPanel("web");
-      recordAuditLog(getWebModeratorTag(auth), "bonus-panel-posted", {
+      const posted = await postReactionRolePanel("web");
+      recordAuditLog(getWebModeratorTag(auth), "reaction-role-panel-posted", {
         channelId: posted.channelId,
         messageId: posted.messageId,
-        tiktokHandle: config.settings.tiktokHandle,
-        verifiedRoleId: config.settings.verifiedRoleId,
-        unverifiedRoleId: config.settings.unverifiedRoleId,
-        aliases: config.settings.tiktokNicknameAliases
+        reactionRoleChannelId: config.settings.reactionRoleChannelId,
+        reactionRoleMessageId: config.reactionRoleMessageId
       });
       return sendWebJson(res, 200, { ok: true, posted });
     }
@@ -11843,27 +12020,27 @@ client.on("messageReactionAdd", async (reaction, user) => {
     if (reaction.partial) await reaction.fetch();
     if (reaction.message.partial) await reaction.message.fetch();
 
-    const verifyMessageId = await resolveVerifyMessageId();
-    if (!verifyMessageId || reaction.message.id !== verifyMessageId) return;
+    const trackedMessageIds = await getTrackedReactionRoleMessageIds();
+    if (!trackedMessageIds.includes(reaction.message.id)) return;
 
     const emojiKey = reaction.emoji?.name || reaction.emoji?.id;
-    const roleData = MOCHI_ROLES[emojiKey];
-    if (!roleData?.id) return;
+    const roleData = getReactionRoleDefinitions().find(role => role.emoji === emojiKey);
+    if (!roleData?.roleId) return;
 
     const member = await reaction.message.guild.members.fetch(user.id);
-    await member.roles.add(roleData.id, `Reaction role selected: ${roleData.name}`).catch(error => {
-      throw new Error(`Failed to add role ${roleData.name}: ${error.message}`);
+    await member.roles.add(roleData.roleId, `Reaction role selected: ${roleData.label}`).catch(error => {
+      throw new Error(`Failed to add role ${roleData.label}: ${error.message}`);
     });
 
-    for (const roleId of ALL_ROLES) {
-      if (roleId === roleData.id) continue;
-      await member.roles.remove(roleId, `Reaction role cleanup: ${roleData.name}`).catch(() => {});
+    for (const roleId of getReactionRoleRoleIds()) {
+      if (roleId === roleData.roleId) continue;
+      await member.roles.remove(roleId, `Reaction role cleanup: ${roleData.label}`).catch(() => {});
     }
 
     await logEmbed(
       makeEmbed({
         title: "Role selected",
-        description: `${user.tag} received ${roleData.name}.`,
+        description: `${user.tag} received ${roleData.label}.`,
         color: COLORS.mint
       })
     );
@@ -11878,21 +12055,21 @@ client.on("messageReactionRemove", async (reaction, user) => {
     if (reaction.partial) await reaction.fetch();
     if (reaction.message.partial) await reaction.message.fetch();
 
-    const verifyMessageId = await resolveVerifyMessageId();
-    if (!verifyMessageId || reaction.message.id !== verifyMessageId) return;
+    const trackedMessageIds = await getTrackedReactionRoleMessageIds();
+    if (!trackedMessageIds.includes(reaction.message.id)) return;
 
     const emojiKey = reaction.emoji?.name || reaction.emoji?.id;
-    const roleData = MOCHI_ROLES[emojiKey];
-    if (!roleData?.id) return;
+    const roleData = getReactionRoleDefinitions().find(role => role.emoji === emojiKey);
+    if (!roleData?.roleId) return;
 
     const member = await reaction.message.guild.members.fetch(user.id);
-    if (!member.roles.cache.has(roleData.id)) return;
+    if (!member.roles.cache.has(roleData.roleId)) return;
 
-    await member.roles.remove(roleData.id);
+    await member.roles.remove(roleData.roleId);
     await logEmbed(
       makeEmbed({
         title: "Role removed",
-        description: `${user.tag} removed ${roleData.name}.`,
+        description: `${user.tag} removed ${roleData.label}.`,
         color: COLORS.yellow
       })
     );
@@ -14021,6 +14198,7 @@ client.on("interactionCreate", async interaction => {
       "reload",
       "setupverify",
       "setuptiktokverify",
+      "setupreactionroles",
       "setuprules",
       "automod",
       "automodlinks",
@@ -14247,7 +14425,7 @@ client.on("interactionCreate", async interaction => {
       }
 
       return interaction.reply({
-        content: `Head to <#${verifyChannelId}> and click **I Read the Rules** to verify.${isTikTokVerificationEnabled() ? ` TikTok matching is available there as a bonus.` : ""}`,
+        content: `Head to <#${verifyChannelId}> and click **I Read the Rules** to verify.${isTikTokVerificationEnabled() ? ` TikTok matching is available in the verify flow.` : ""}`,
         ephemeral: true
       });
     }
@@ -14269,6 +14447,17 @@ client.on("interactionCreate", async interaction => {
         return interaction.editReply("TikTok onboarding panel created.");
       } catch (error) {
         return interaction.editReply(error.message || "TikTok onboarding panel could not be posted.");
+      }
+    }
+
+    if (interaction.commandName === "setupreactionroles") {
+      const targetChannel = interaction.options.getChannel("channel") || interaction.channel;
+      await interaction.deferReply({ ephemeral: true });
+      try {
+        const posted = await postReactionRolePanel("slash", targetChannel?.id || null);
+        return interaction.editReply(`Reaction role panel created in <#${posted.channelId}>.`);
+      } catch (error) {
+        return interaction.editReply(error.message || "Reaction role panel could not be posted.");
       }
     }
 
@@ -15944,7 +16133,7 @@ client.on("guildMemberAdd", async member => {
           `Hi ${member.user.username}.\n\n` +
           `We are happy you joined.\n` +
           (isTikTokVerificationEnabled()
-            ? `Please head to ${getVerifyChannelMention()} and click **I Read the Rules** to verify. If you want a flavor role, react below. TikTok matching is available there as a bonus.\n\n`
+            ? `Please head to ${getVerifyChannelMention()} and click **I Read the Rules** to verify. TikTok matching is available in the same verify flow.\n\n`
             : `Please head to ${getVerifyChannelMention()} and click **I Read the Rules** to verify and unlock the garden.\n\n`) +
           "Have fun and enjoy your stay.",
         color: COLORS.pink,

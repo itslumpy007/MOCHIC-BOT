@@ -594,16 +594,35 @@
           </div>
 
           <div class="view-stack hidden" data-view-subtab-group="settings" data-subtab="verification">
-            <section class="panel">
+            <section class="panel verification-panel">
               <div class="panel-header">
                 <h3>Verification <span class="header-status" id="verificationDirtyStatus"></span></h3>
                 <div class="button-row">
                   <button class="save-button" id="saveVerificationSettings" type="button">Save Verification</button>
-                  <button class="ghost-button" id="repostRolePanel" type="button">Repost Bonus Panel</button>
                 </div>
               </div>
-              <p class="panel-note">Set the verify channel, roles, optional CAPTCHA, and bonus details.</p>
-              <p class="panel-note">Repost Bonus Panel uses the saved verification settings to rebuild the optional bonus panel.</p>
+              <div class="verification-hero">
+                <div class="verification-hero-copy">
+                  <span class="eyebrow">Verification</span>
+                  <h4>Control center for entry</h4>
+                  <p>Keep the rules button, optional CAPTCHA, and role gating in one place so the first step into the server stays clear.</p>
+                </div>
+                <div class="verification-hero-grid">
+                  <article class="summary-item">
+                    <span>Primary flow</span>
+                    <strong>Button first</strong>
+                  </article>
+                  <article class="summary-item">
+                    <span>Safety layer</span>
+                    <strong>CAPTCHA when needed</strong>
+                  </article>
+                  <article class="summary-item">
+                    <span>Access rules</span>
+                    <strong>Verified + age roles</strong>
+                  </article>
+                </div>
+              </div>
+              <p class="panel-note">Set the verify channel, roles, and optional CAPTCHA here.</p>
               <div class="button-row" style="margin-bottom: 12px;">
                 <button class="ghost-button" id="lockVerifiedCurrent" type="button">Lock Verified Here</button>
                 <button class="ghost-button" id="unlockVerifiedCurrent" type="button">Unlock Verified Here</button>
@@ -625,7 +644,7 @@
                 <div class="form-grid" id="rulesCardFields"></div>
               </section>
               <div class="split">
-                <section class="panel">
+                <section class="panel verification-card">
                   <div class="panel-header">
                     <h3>Core Verification</h3>
                   </div>
@@ -633,24 +652,35 @@
                   <p class="panel-note">Age role rules use lines like `13-17: roleId` or `18+: roleId`. Put the most specific ranges first.</p>
                   <div class="form-grid" id="verificationCoreFields"></div>
                 </section>
-                <section class="panel">
+                <section class="panel verification-card">
                   <div class="panel-header">
-                    <h3>TikTok Bonus</h3>
+                    <h3>TikTok Matching</h3>
                   </div>
-                  <p class="panel-note">Optional bonus path. Most members should use the rules button instead.</p>
+                  <p class="panel-note">Optional matching path. Most members should use the rules button instead.</p>
                   <div class="form-grid" id="verificationBonusFields"></div>
                 </section>
               </div>
             </section>
             <section class="panel">
               <div class="panel-header">
+                <h3>Reaction Roles <span class="header-status" id="reactionRoleDirtyStatus"></span></h3>
+                <div class="button-row">
+                  <button class="save-button" id="saveReactionRoleSettings" type="button">Save &amp; Post</button>
+                  <button class="ghost-button" id="repostRolePanel" type="button">Post Panel</button>
+                </div>
+              </div>
+              <p class="panel-note">Edit the emoji-to-role mappings here. Use one line per role, like <code>🌸 | roleId</code> or <code>&lt;:name:id&gt; | roleId</code>. The bot will post the live panel from these saved rules.</p>
+              <div class="form-grid" id="reactionRoleFields"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
                 <h3>Panel Repair</h3>
               </div>
-              <p class="panel-note">Use these if the verify panel, rules card, or bonus panel is missing, stale, or missing reactions.</p>
+              <p class="panel-note">Use these if the verify panel, rules card, or reaction-role panel is missing, stale, or missing reactions.</p>
               <div class="button-row">
                 <button class="ghost-button" id="repairOnboardingButton" type="button">Repair Onboarding</button>
                 <button class="ghost-button" id="repairVerifyPanel" type="button">Repair Verify Panel</button>
-                <button class="ghost-button" id="repairRolePanel" type="button">Repair Bonus Panel</button>
+                <button class="ghost-button" id="repairRolePanel" type="button">Repair Reaction Roles</button>
               </div>
             </section>
             <section class="panel">

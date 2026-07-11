@@ -473,6 +473,15 @@ const verificationBonusSettingTypes = {
   tiktokNicknameAliases: "textarea"
 };
 
+const reactionRoleSettingLabels = {
+  reactionRoleChannelId: "Reaction role channel ID",
+  reactionRoleRules: "Reaction role rules"
+};
+
+const reactionRoleSettingTypes = {
+  reactionRoleRules: "textarea"
+};
+
 const verificationCoreSettingTypes = {
   verificationCaptchaEnabled: "boolean",
   verificationRequiresApproval: "boolean",
@@ -980,6 +989,7 @@ function updateDirtyIndicators() {
     settingsDirtyStatus: ["settings", "Unsaved"],
     affirmationsDirtyStatus: ["settings", "Unsaved"],
     verificationDirtyStatus: ["settings", "Unsaved"],
+    reactionRoleDirtyStatus: ["settings", "Unsaved"],
     birthdaysDirtyStatus: ["settings", "Unsaved"],
     exemptionsDirtyStatus: ["exemptions", "Unsaved"],
     privacyDirtyStatus: ["settings", "Unsaved"],
@@ -2741,6 +2751,7 @@ function renderSettings() {
   renderSettingFields("#verificationCoreFields", verificationCoreSettingLabels, verificationCoreSettingTypes);
   renderSettingFields("#rulesCardFields", rulesCardSettingLabels, rulesCardSettingTypes);
   renderSettingFields("#verificationBonusFields", verificationBonusSettingLabels, verificationBonusSettingTypes);
+  renderReactionRoleEditor();
 
   $("#birthdaySettingsFields").innerHTML = Object.entries(birthdaySettingLabels)
     .map(([key, label]) => `
@@ -2980,10 +2991,124 @@ function renderSettingFields(targetSelector, entries, types = {}) {
             ? "Paste @name, tiktok.com/@name, or multiple names separated by commas or new lines"
             : key === "ageRoleRules"
               ? "13-17: roleId\\n18+: roleId"
+              : key === "reactionRoleRules"
+                ? "🌸 | roleId\\n<:name:id> | roleId"
               : ""}">${escapeHtml(Array.isArray(state.config?.settings?.[key]) ? state.config.settings[key].join(", ") : (state.config?.settings?.[key] || ""))}</textarea>`
           : `<input data-setting="${key}" value="${escapeHtml(Array.isArray(state.config?.settings?.[key]) ? state.config.settings[key].join(", ") : (state.config?.settings?.[key] || ""))}" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="${key === "tiktokHandle" ? "Paste @yourhandle or tiktok.com/@yourhandle" : ""}">`}
       </label>
     `).join("");
+}
+
+function parseReactionRoleRuleLine(line) {
+  const text = String(line || "").trim().replace(/^[*-•]\s*/, "");
+  if (!text) return null;
+
+  let separatorIndex = text.indexOf("|");
+  if (separatorIndex < 0) separatorIndex = text.indexOf("=");
+  if (separatorIndex < 0) separatorIndex = text.lastIndexOf(":");
+  if (separatorIndex < 0) return null;
+
+  const emojiInput = text.slice(0, separatorIndex).trim();
+  const roleId = text.slice(separatorIndex + 1).trim().replace(/[<@&>]/g, "");
+  if (!emojiInput || !roleId) return null;
+
+  const customEmojiMatch = emojiInput.match(/^<a?:([a-z0-9_]+):(\d+)>$/i) || emojiInput.match(/^([a-z0-9_]+):(\d+)$/i);
+  const emoji = customEmojiMatch ? customEmojiMatch[2] : emojiInput;
+  const displayEmoji = customEmojiMatch ? `<:${customEmojiMatch[1]}:${customEmojiMatch[2]}>` : emojiInput;
+
+  return {
+    emoji,
+    displayEmoji,
+    roleId
+  };
+}
+
+function getReactionRoleRows() {
+  const raw = String(state.config?.settings?.reactionRoleRules || "").trim();
+  if (!raw) return [];
+  return raw
+    .split(/\n+/)
+    .map(parseReactionRoleRuleLine)
+    .filter(Boolean);
+}
+
+function serializeReactionRoleRows(rows) {
+  return rows
+    .map(row => `${String(row.displayEmoji || row.emoji || "").trim()} | ${String(row.roleId || "").trim()}`)
+    .filter(line => line && !line.startsWith(" | "))
+    .join("\n");
+}
+
+function syncReactionRoleRulesText() {
+  const textarea = $("#reactionRoleRulesText");
+  if (!textarea) return;
+  const rows = [...document.querySelectorAll("[data-reaction-role-row]")].map(row => ({
+    emoji: row.querySelector("[data-reaction-role-emoji]")?.value.trim() || "",
+    displayEmoji: row.querySelector("[data-reaction-role-emoji]")?.value.trim() || "",
+    roleId: row.querySelector("[data-reaction-role-id]")?.value.trim() || ""
+  })).filter(row => row.emoji || row.roleId);
+  textarea.value = serializeReactionRoleRows(rows);
+}
+
+function renderReactionRoleEditor() {
+  const settings = state.config?.settings || {};
+  const channelId = settings.reactionRoleChannelId || "";
+  const rows = getReactionRoleRows();
+  const rowMarkup = rows.length
+    ? rows.map((row, index) => `
+      <article class="event" data-reaction-role-row data-reaction-role-row-index="${index}">
+        <div class="form-grid">
+          <label>Emoji
+            <input data-reaction-role-emoji value="${escapeHtml(row.displayEmoji || row.emoji || "")}" placeholder="🌸 or <:name:id>">
+          </label>
+          <label>Role ID
+            <input data-reaction-role-id value="${escapeHtml(row.roleId || "")}" placeholder="Role ID">
+          </label>
+        </div>
+        <div class="button-row">
+          <button class="ghost-button" type="button" data-reaction-role-remove="${index}">Remove</button>
+        </div>
+      </article>
+    `).join("")
+    : renderEmptyState("No reaction roles", "Add a row to define an emoji-to-role mapping.");
+
+  $("#reactionRoleFields").innerHTML = `
+    <div class="form-grid">
+      <label>Reaction role channel ID
+        <input data-setting="reactionRoleChannelId" value="${escapeHtml(channelId)}" placeholder="Channel ID">
+      </label>
+    </div>
+    <div class="button-row" style="margin-bottom: 12px;">
+      <button class="ghost-button" type="button" id="addReactionRoleRow">Add Row</button>
+    </div>
+    <textarea id="reactionRoleRulesText" data-setting="reactionRoleRules" class="hidden" aria-hidden="true">${escapeHtml(settings.reactionRoleRules || "")}</textarea>
+    <div class="event-list">
+      ${rowMarkup}
+    </div>
+    <p class="panel-note">Use `|` between the emoji and the role ID. Example: <code>🌸 | roleId</code> or <code>&lt;:name:id&gt; | roleId</code>.</p>
+  `;
+
+  syncReactionRoleRulesText();
+}
+
+function addReactionRoleRow() {
+  const textarea = $("#reactionRoleRulesText");
+  const rows = getReactionRoleRows();
+  rows.push({ emoji: "", displayEmoji: "", roleId: "" });
+  if (textarea) {
+    textarea.value = serializeReactionRoleRows(rows);
+  }
+  renderReactionRoleEditor();
+}
+
+function removeReactionRoleRow(index) {
+  const rows = getReactionRoleRows();
+  rows.splice(index, 1);
+  const textarea = $("#reactionRoleRulesText");
+  if (textarea) {
+    textarea.value = serializeReactionRoleRows(rows);
+  }
+  renderReactionRoleEditor();
 }
 
 function renderStaff() {
@@ -4924,6 +5049,40 @@ async function saveVerificationSettings(options = {}) {
   }
 }
 
+async function saveReactionRoleSettings(options = {}) {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to change server settings.", "error");
+    return;
+  }
+  const auto = Boolean(options.auto);
+
+  syncReactionRoleRulesText();
+  const payload = collectSettingsPayload([
+    "reactionRoleChannelId",
+    "reactionRoleRules"
+  ]);
+  const result = await api("/api/settings", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+
+  state.config.settings = result.settings;
+  clearAutosaveDraft("settings");
+
+  const posted = await api("/api/reaction-role-panel", {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+  await loadAll();
+
+  renderAll();
+  if (!auto) {
+    updateSaveButton("saveReactionRoleSettings", "saved");
+    window.setTimeout(() => updateSaveButton("saveReactionRoleSettings", "idle"), 700);
+    setAlert(`Reaction role settings saved and panel refreshed in ${posted.posted?.channelId ? `<#${posted.posted.channelId}>` : "the configured channel"}.`);
+  }
+}
+
 async function saveBirthdaySettings(options = {}) {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change server settings.", "error");
@@ -4971,13 +5130,8 @@ async function repostRolePanel() {
     return;
   }
 
-  await api("/api/reaction-role-panel", {
-    method: "POST",
-    body: JSON.stringify({})
-  });
-
-  await loadAll();
-  setAlert("Bonus panel reposted.");
+  await saveReactionRoleSettings({ auto: true });
+  setAlert("Reaction role panel saved and reposted.");
 }
 
 async function repairVerifyPanel() {
@@ -5012,12 +5166,12 @@ async function repairOnboarding() {
 
 async function repairRolePanel() {
   if (!hasPanelAccess("admin")) {
-    setAlert("Admin web access is required to repair the bonus panel.", "error");
+    setAlert("Admin web access is required to repair the reaction role panel.", "error");
     return;
   }
 
   await repostRolePanel();
-  setAlert("Bonus panel repaired.");
+  setAlert("Reaction role panel repaired.");
 }
 
 async function setVerifiedVisibility(locked, scope) {
@@ -5329,9 +5483,27 @@ function bindEvents() {
   $("#saveVerificationSettings").addEventListener("click", () => saveVerificationSettings().catch(error => setAlert(error.message, "error")));
   $("#repostRulesPanel").addEventListener("click", () => repostRulesPanel().catch(error => setAlert(error.message, "error")));
   $("#saveBirthdaySettings").addEventListener("click", () => saveBirthdaySettings().catch(error => setAlert(error.message, "error")));
+  $("#saveReactionRoleSettings").addEventListener("click", () => saveReactionRoleSettings().catch(error => setAlert(error.message, "error")));
+  $("#reactionRoleFields").addEventListener("input", event => {
+    if (event.target.matches("[data-reaction-role-emoji], [data-reaction-role-id], [data-setting='reactionRoleChannelId']")) {
+      syncReactionRoleRulesText();
+    }
+  });
+  $("#reactionRoleFields").addEventListener("click", event => {
+    const addButton = event.target.closest("#addReactionRoleRow");
+    if (addButton) {
+      addReactionRoleRow();
+      return;
+    }
+
+    const removeButton = event.target.closest("[data-reaction-role-remove]");
+    if (removeButton) {
+      removeReactionRoleRow(Number(removeButton.dataset.reactionRoleRemove));
+      return;
+    }
+  });
   $("#repairOnboardingButton").addEventListener("click", () => repairOnboarding().catch(error => setAlert(error.message, "error")));
   $("#postBirthdayPanel").addEventListener("click", () => postBirthdayPanel().catch(error => setAlert(error.message, "error")));
-  $("#repostRolePanel").addEventListener("click", () => repostRolePanel().catch(error => setAlert(error.message, "error")));
   $("#repairVerifyPanel").addEventListener("click", () => repairVerifyPanel().catch(error => setAlert(error.message, "error")));
   $("#repairRolePanel").addEventListener("click", () => repairRolePanel().catch(error => setAlert(error.message, "error")));
   $("#refreshPendingVerifications").addEventListener("click", () => loadAndRenderPendingVerifications().catch(error => setAlert(error.message, "error")));
