@@ -248,6 +248,8 @@ body.is-loading .event {
   flex-direction: column;
   gap: 22px;
   padding: 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   color: var(--text);
   background:
     radial-gradient(circle at 30% 12%, rgba(101, 115, 255, 0.12), transparent 30%),
