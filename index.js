@@ -63,8 +63,6 @@ const WEB_ADMIN_TOKEN = process.env.WEB_ADMIN_TOKEN || "";
 const WEB_BASE_URL = (process.env.WEB_BASE_URL || "").replace(/\/$/, "");
 const SUPPORT_PUBLIC_URL = (process.env.SUPPORT_PUBLIC_URL || "").replace(/\/$/, "");
 const WEB_OAUTH_REDIRECT_URI = (process.env.WEB_OAUTH_REDIRECT_URI || "").trim();
-const WEB_STAFF_OAUTH_REDIRECT_URI = (process.env.WEB_STAFF_OAUTH_REDIRECT_URI || "").trim();
-const WEB_SUPPORT_OAUTH_REDIRECT_URI = (process.env.WEB_SUPPORT_OAUTH_REDIRECT_URI || "").trim();
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || "";
 const SESSION_SECRET = process.env.SESSION_SECRET || WEB_ADMIN_TOKEN || "";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
@@ -9346,9 +9344,8 @@ function redirectWeb(res, location) {
   res.end();
 }
 
-function getWebOAuthRedirectUri(req, purpose = "staff") {
-  const override = WEB_OAUTH_REDIRECT_URI
-    || (purpose === "support" ? WEB_SUPPORT_OAUTH_REDIRECT_URI : WEB_STAFF_OAUTH_REDIRECT_URI);
+function getWebOAuthRedirectUri(req) {
+  const override = WEB_OAUTH_REDIRECT_URI;
   if (override) return override;
 
   return `${getWebBaseUrl(req)}/auth/callback`;
@@ -9365,7 +9362,8 @@ function startWebDiscordLogin(req, res, purpose = "staff") {
     expiresAt: Date.now() + 10 * 60 * 1000
   });
 
-  const redirectUri = getWebOAuthRedirectUri(req, purpose);
+  const redirectUri = getWebOAuthRedirectUri(req);
+  log.info(`Starting Discord OAuth (${purpose}) with redirect URI: ${redirectUri}`);
   const params = new URLSearchParams({
     client_id: CLIENT_ID,
     redirect_uri: redirectUri,
@@ -9388,14 +9386,14 @@ function handleWebSupportLogin(req, res) {
 }
 
 async function handleWebCallback(req, res, requestUrl) {
-  return handleWebDiscordCallback(req, res, requestUrl, "staff");
+  return handleWebDiscordCallback(req, res, requestUrl);
 }
 
 async function handleWebSupportCallback(req, res, requestUrl) {
-  return handleWebDiscordCallback(req, res, requestUrl, "support");
+  return handleWebDiscordCallback(req, res, requestUrl);
 }
 
-async function handleWebDiscordCallback(req, res, requestUrl, fallbackPurpose = "staff") {
+async function handleWebDiscordCallback(req, res, requestUrl) {
   if (!DISCORD_CLIENT_SECRET || !SESSION_SECRET) {
     return sendWebText(res, 503, "Discord OAuth is not configured.");
   }
@@ -9409,10 +9407,10 @@ async function handleWebDiscordCallback(req, res, requestUrl, fallbackPurpose = 
     return sendWebText(res, 400, "OAuth login expired or was cancelled. Try logging in again.");
   }
 
-  const purpose = savedState.purpose || fallbackPurpose;
+  const purpose = savedState.purpose === "support" ? "support" : "staff";
   webOauthStates.delete(state);
 
-  const redirectUri = getWebOAuthRedirectUri(req, purpose);
+  const redirectUri = getWebOAuthRedirectUri(req);
   const tokenPayload = await fetchDiscordJson("https://discord.com/api/oauth2/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
