@@ -5532,6 +5532,7 @@ function bindEvents() {
   $("#repairOnboardingButton").addEventListener("click", () => repairOnboarding().catch(error => setAlert(error.message, "error")));
   $("#postBirthdayPanel").addEventListener("click", () => postBirthdayPanel().catch(error => setAlert(error.message, "error")));
   $("#repairVerifyPanel").addEventListener("click", () => repairVerifyPanel().catch(error => setAlert(error.message, "error")));
+  $("#repairVerifyPanelSecondary").addEventListener("click", () => repairVerifyPanel().catch(error => setAlert(error.message, "error")));
   $("#repairRolePanel").addEventListener("click", () => repairRolePanel().catch(error => setAlert(error.message, "error")));
   $("#refreshPendingVerifications").addEventListener("click", () => loadAndRenderPendingVerifications().catch(error => setAlert(error.message, "error")));
   $("#runGeneralChatCheck").addEventListener("click", () => updateGeneralChatRule("run-now").catch(error => setAlert(error.message, "error")));
