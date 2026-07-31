@@ -218,6 +218,7 @@ function createDefaultConfig() {
     bonusVerifyMessageId: null,
     reactionRoleMessageId: null,
     verificationDenials: {},
+    verificationAttempts: {},
     birthdays: {},
     warnings: {},
     notes: {},
@@ -715,6 +716,13 @@ async function approveVerification(pendingId, moderatorTag) {
     await member.send("Your verification request has been approved. Welcome to the server!").catch(() => {});
   }
 
+  recordVerificationAttempt(entry.userId, {
+    pendingId: entry.id,
+    status: "approved",
+    moderatorTag,
+    userTag: entry.userTag,
+    age: Number.isInteger(Number(entry.age)) ? Number(entry.age) : null
+  });
   saveConfig();
   recordAuditLog(moderatorTag, "verification-approved", { userId: entry.userId, userTag: entry.userTag });
   return { ok: true, entry };
@@ -737,6 +745,14 @@ async function denyVerification(pendingId, reason, moderatorTag) {
     await member.send(msg).catch(() => {});
   }
 
+  recordVerificationAttempt(entry.userId, {
+    pendingId: entry.id,
+    status: "denied",
+    moderatorTag,
+    userTag: entry.userTag,
+    reason: reason || "",
+    age: Number.isInteger(Number(entry.age)) ? Number(entry.age) : null
+  });
   saveConfig();
   recordAuditLog(moderatorTag, "verification-denied", {
     userId: entry.userId,
@@ -1103,6 +1119,12 @@ async function completeRulesVerificationWithAge(member, age = null) {
       requestedAt: new Date().toISOString(),
       age: Number.isInteger(Number(age)) ? Number(age) : null
     });
+    recordVerificationAttempt(member.id, {
+      pendingId: config.pendingVerifications[config.pendingVerifications.length - 1].id,
+      status: "submitted",
+      userTag: member.user?.tag || member.user?.username || member.id,
+      age: Number.isInteger(Number(age)) ? Number(age) : null
+    });
     saveConfig();
     return {
       ok: true,
@@ -1281,6 +1303,9 @@ function loadConfig() {
       verificationDenials: parsed.verificationDenials && typeof parsed.verificationDenials === "object"
         ? parsed.verificationDenials
         : {},
+      verificationAttempts: parsed.verificationAttempts && typeof parsed.verificationAttempts === "object"
+        ? parsed.verificationAttempts
+        : {},
       generalChatInactivityWarnings: parsed.generalChatInactivityWarnings && typeof parsed.generalChatInactivityWarnings === "object"
         ? parsed.generalChatInactivityWarnings
         : {},
@@ -1425,6 +1450,30 @@ function incrementVerificationDenialCount(userId) {
   const nextCount = getVerificationDenialCount(userId) + 1;
   config.verificationDenials[userId] = nextCount;
   return nextCount;
+}
+
+function getVerificationAttemptHistory(userId, limit = 5) {
+  const attemptsByUser = config.verificationAttempts && typeof config.verificationAttempts === "object"
+    ? config.verificationAttempts
+    : {};
+  const attempts = Array.isArray(attemptsByUser[userId]) ? attemptsByUser[userId] : [];
+  const safeLimit = Number.isFinite(Number(limit)) ? Math.max(1, Math.floor(Number(limit))) : 5;
+  return attempts.slice(-safeLimit).reverse();
+}
+
+function recordVerificationAttempt(userId, entry) {
+  if (!userId) return null;
+  if (!config.verificationAttempts || typeof config.verificationAttempts !== "object") {
+    config.verificationAttempts = {};
+  }
+  const attempts = Array.isArray(config.verificationAttempts[userId]) ? config.verificationAttempts[userId] : [];
+  const storedEntry = {
+    ...entry,
+    createdAt: entry?.createdAt || new Date().toISOString()
+  };
+  attempts.push(storedEntry);
+  config.verificationAttempts[userId] = attempts.slice(-20);
+  return storedEntry;
 }
 
 function isMessageArchiveEnabled() {
@@ -10404,6 +10453,7 @@ function serializeWebMember(member, user = null) {
   const cases = getCasesForUser(resolvedUser.id).slice(-20).reverse();
   const warnings = getWarnings(resolvedUser.id).map((warning, index) => ({ ...warning, index })).reverse();
   const notes = getNotes(resolvedUser.id).map((note, index) => ({ ...note, index })).reverse();
+  const verificationAttempts = getVerificationAttemptHistory(resolvedUser.id, 10);
 
   return {
     id: resolvedUser.id,
@@ -10428,11 +10478,13 @@ function serializeWebMember(member, user = null) {
     warnings,
     notes,
     cases,
+    verificationAttempts,
     counts: {
       warnings: warnings.length,
       notes: notes.length,
       cases: getCasesForUser(resolvedUser.id).length,
-      verificationDenials: getVerificationDenialCount(resolvedUser.id)
+      verificationDenials: getVerificationDenialCount(resolvedUser.id),
+      verificationAttempts: verificationAttempts.length
     },
     risk: calculateUserRisk(resolvedUser.id)
   };
@@ -13152,26 +13204,40 @@ client.on("interactionCreate", async interaction => {
             return interaction.reply({ content: "Select a user in the moderation panel first.", ephemeral: true });
           }
 
-          const user = await client.users.fetch(targetUserId).catch(() => null);
-          const entries = getCasesForUser(targetUserId).slice(-10);
-          return interaction.reply({
-            embeds: [
-              makeEmbed({
-                title: "Recent cases",
-                description: `Recent moderation cases for ${user ? user.tag : targetUserId}`,
-                color: COLORS.blue,
-                fields: [
-                  {
-                    name: "Cases",
-                    value: entries.length
-                      ? entries.map(entry => `#${entry.id} ${entry.action} - ${entry.reason} - ${entry.moderatorTag}`).join("\n").slice(0, 1024)
-                      : "No recorded cases."
-                  }
-                ]
-              })
-            ],
-            ephemeral: true
-          });
+  const user = await client.users.fetch(targetUserId).catch(() => null);
+  const entries = getCasesForUser(targetUserId).slice(-10);
+  const verificationAttempts = getVerificationAttemptHistory(targetUserId, 5);
+  return interaction.reply({
+    embeds: [
+      makeEmbed({
+        title: "Recent cases",
+        description: `Recent moderation cases for ${user ? user.tag : targetUserId}`,
+        color: COLORS.blue,
+        fields: [
+          {
+            name: "Cases",
+            value: entries.length
+              ? entries.map(entry => `#${entry.id} ${entry.action} - ${entry.reason} - ${entry.moderatorTag}`).join("\n").slice(0, 1024)
+              : "No recorded cases."
+          },
+          {
+            name: "Verification Attempts",
+            value: verificationAttempts.length
+              ? verificationAttempts.map(entry => {
+                  const status = String(entry.status || "attempt").replace(/^[a-z]/, ch => ch.toUpperCase());
+                  const pieces = [`${status} - ${entry.userTag || user?.tag || targetUserId}`];
+                  if (entry.age !== null && entry.age !== undefined) pieces.push(`Age ${entry.age}`);
+                  if (entry.moderatorTag) pieces.push(`By ${entry.moderatorTag}`);
+                  if (entry.reason) pieces.push(`Reason: ${entry.reason}`);
+                  return pieces.join(" - ");
+                }).join("\n").slice(0, 1024)
+              : "No verification attempts recorded."
+          }
+        ]
+      })
+    ],
+    ephemeral: true
+  });
         }
 
         if (action === "profile") {
@@ -13187,6 +13253,7 @@ client.on("interactionCreate", async interaction => {
           const warnings = getWarnings(targetUserId);
           const notes = getNotes(targetUserId);
           const cases = getCasesForUser(targetUserId);
+          const verificationAttempts = getVerificationAttemptHistory(targetUserId, 5);
 
           return interaction.reply({
             embeds: [
@@ -13202,6 +13269,20 @@ client.on("interactionCreate", async interaction => {
                   { name: "Notes", value: `${notes.length}`, inline: true },
                   { name: "Cases", value: `${cases.length}`, inline: true },
                   { name: "Verification Denials", value: `${getVerificationDenialCount(targetUserId)}`, inline: true },
+                  {
+                    name: "Verification Attempts",
+                    value: verificationAttempts.length
+                      ? verificationAttempts.map(entry => {
+                          const status = String(entry.status || "attempt").replace(/^[a-z]/, ch => ch.toUpperCase());
+                          const pieces = [`${status}`];
+                          if (entry.age !== null && entry.age !== undefined) pieces.push(`Age ${entry.age}`);
+                          if (entry.moderatorTag) pieces.push(`By ${entry.moderatorTag}`);
+                          if (entry.reason) pieces.push(`Reason: ${entry.reason}`);
+                          return pieces.join(" - ");
+                        }).join("\n").slice(0, 1024)
+                      : "No verification attempts recorded.",
+                    inline: false
+                  },
                   { name: "Permissions", value: buildMemberPermissionSnapshot(member), inline: false },
                   { name: "Roles", value: buildMemberRoleSummary(member), inline: false }
                 ],

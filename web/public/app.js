@@ -3799,6 +3799,7 @@ function renderMemberProfile() {
   const riskScore = Number(risk.score || 0);
   const riskWidth = Math.max(4, Math.min(100, riskScore));
   const templates = (state.ops?.templates || []).slice(0, 6);
+  const verificationAttempts = Array.isArray(member.verificationAttempts) ? member.verificationAttempts.slice(0, 5) : [];
 
   $("#memberProfile").innerHTML = `
     <article class="profile-card">
@@ -3828,6 +3829,26 @@ function renderMemberProfile() {
         <span class="badge">${member.counts.cases} cases</span>
         <span class="badge">${member.counts.verificationDenials || 0} verification denials</span>
         <span class="badge">Risk ${riskScore}</span>
+      </div>
+      <div class="template-strip" style="margin-top:12px;">
+        <div class="template-strip-head">
+          <strong>Verification Attempts</strong>
+          <span>${verificationAttempts.length ? `${verificationAttempts.length} recent` : "None logged"}</span>
+        </div>
+        <div class="event-list">
+          ${verificationAttempts.length ? verificationAttempts.map(entry => `
+            <article class="event">
+              <strong>${escapeHtml(String(entry.status || "attempt").replace(/^[a-z]/, ch => ch.toUpperCase()))}</strong>
+              <p>
+                ${escapeHtml(formatDate(entry.createdAt))}<br>
+                ${escapeHtml(entry.userTag || member.tag)}<br>
+                ${entry.age !== null && entry.age !== undefined ? `Age: ${escapeHtml(entry.age)}<br>` : ""}
+                ${entry.moderatorTag ? `By: ${escapeHtml(entry.moderatorTag)}<br>` : ""}
+                ${entry.reason ? `Reason: ${escapeHtml(entry.reason)}` : ""}
+              </p>
+            </article>
+          `).join("") : renderEmptyState("No verification attempts", "No verification attempts have been logged for this member yet.")}
+        </div>
       </div>
       <div class="button-row profile-actions">
         <button class="ghost-button" type="button" id="openMemberDrawerButton">Open Drawer</button>
