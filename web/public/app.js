@@ -2713,7 +2713,7 @@ function renderSettings() {
 
       return `
         <label>${label}
-          <input data-setting="${key}" value="${escapeHtml(settings[key] || "")}" placeholder="${key === "tiktokHandle" ? "Paste @yourhandle or tiktok.com/@yourhandle" : (key === "welcomeChannelId" || key === "generalChatChannelId" || key === "anonymousAffirmationsChannelId" ? "Channel ID" : "")}">
+          <input data-setting="${key}" value="${escapeHtml(settings[key] || "")}" placeholder="${key === "tiktokHandle" ? "Paste @yourhandle or tiktok.com/@yourhandle" : (key === "welcomeChannelId" || key === "anonymousAffirmationsChannelId" ? "Channel ID" : "")}">
         </label>
       `;
     }).join("");
