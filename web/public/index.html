@@ -117,7 +117,7 @@
 
         <section id="overviewView" class="view is-active">
           <div class="view-tabs" aria-label="Overview tabs">
-            <button class="view-tab is-active" type="button" data-subtab-view="overview" data-subtab="summary">Summary</button>
+            <button class="view-tab is-active" type="button" data-subtab-view="overview" data-subtab="summary">At a Glance</button>
             <button class="view-tab" type="button" data-subtab-view="overview" data-subtab="activity">Activity</button>
             <button class="view-tab" type="button" data-subtab-view="overview" data-subtab="security">Safety</button>
           </div>
@@ -126,7 +126,7 @@
             <div class="metric-grid" id="metricGrid"></div>
             <section class="panel">
               <div class="panel-header">
-                <h3>Moderation Triage</h3>
+                <h3>Priority Review</h3>
               </div>
               <p class="panel-note">High-severity hits surface first. Review-hint items are the ones most likely to be false positives or allowlist issues.</p>
               <div id="moderationTriageSummary" class="summary-grid"></div>
@@ -173,7 +173,7 @@
           <div class="view-stack hidden" data-view-subtab-group="overview" data-subtab="activity">
             <section class="panel">
               <div class="panel-header">
-                <h3>Panel Changes</h3>
+                <h3>Recent Changes</h3>
               </div>
               <div id="panelChangesList" class="event-list"></div>
             </section>
@@ -313,7 +313,7 @@
 
             <section class="panel">
               <div class="panel-header">
-                <h3>Member Timeline</h3>
+                <h3>Member Activity Log</h3>
                 <label class="inline-search">Search history<input id="timelineSearchInput" placeholder="action, reason, moderator, note"></label>
               </div>
               <div id="memberTimeline" class="event-list"></div>
@@ -521,10 +521,10 @@
                 <button class="ghost-button" type="button" data-view="staff">Open Staff Access</button>
               </article>
               <article class="summary-item admin-hub-card">
-                <span>Operations</span>
+                <span>Admin Tools</span>
                 <strong>Templates, workflow, and audit trail</strong>
                 <p>Work on saved templates, appeals, and the audit log without digging through extra menus.</p>
-                <button class="ghost-button" type="button" data-view="ops">Open Operations</button>
+                <button class="ghost-button" type="button" data-view="ops">Open Admin Tools</button>
               </article>
             </div>
           </div>
@@ -770,7 +770,7 @@
           <div class="view-tabs" aria-label="Staff tabs">
             <button class="view-tab is-active" type="button" data-subtab-view="staff" data-subtab="access">Access</button>
             <button class="view-tab" type="button" data-subtab-view="staff" data-subtab="inbox">Inbox</button>
-            <button class="view-tab" type="button" data-subtab-view="staff" data-subtab="summary">Summary</button>
+            <button class="view-tab" type="button" data-subtab-view="staff" data-subtab="summary">Overview</button>
           </div>
           <div class="view-stack" data-view-subtab-group="staff" data-subtab="access">
             <section class="panel">
@@ -822,7 +822,7 @@
           <div class="view-stack hidden" data-view-subtab-group="staff" data-subtab="summary">
             <section class="panel">
               <div class="panel-header">
-                <h3>Access Summary</h3>
+                <h3>Access Overview</h3>
               </div>
               <div id="staffSummary" class="summary-grid"></div>
             </section>
@@ -830,16 +830,16 @@
         </section>
 
         <section id="opsView" class="view">
-          <div class="view-tabs" aria-label="Ops tabs">
+          <div class="view-tabs" aria-label="Admin tools tabs">
             <button class="view-tab is-active" type="button" data-subtab-view="ops" data-subtab="templates">Templates</button>
             <button class="view-tab" type="button" data-subtab-view="ops" data-subtab="workflow">Workflow</button>
-            <button class="view-tab" type="button" data-subtab-view="ops" data-subtab="audit">Audit</button>
+            <button class="view-tab" type="button" data-subtab-view="ops" data-subtab="audit">Audit Log</button>
           </div>
 
           <div class="view-stack" data-view-subtab-group="ops" data-subtab="templates">
             <section class="panel">
               <div class="panel-header">
-                <h3>Moderator Operations <span class="header-status" id="opsDirtyStatus"></span></h3>
+                <h3>Admin Tools <span class="header-status" id="opsDirtyStatus"></span></h3>
                 <button class="save-button" id="saveOps" type="button">Save</button>
               </div>
               <div class="split">
@@ -934,7 +934,7 @@
           <div class="view-tabs" aria-label="Records tabs">
             <button class="view-tab is-active" type="button" data-subtab-view="records" data-subtab="cases">Cases</button>
             <button class="view-tab" type="button" data-subtab-view="records" data-subtab="warnings">Warnings</button>
-            <button class="view-tab" type="button" data-subtab-view="records" data-subtab="timeline">Timeline</button>
+            <button class="view-tab" type="button" data-subtab-view="records" data-subtab="timeline">Activity Log</button>
           </div>
 
           <div id="recordsSummary" class="summary-grid"></div>
@@ -950,7 +950,7 @@
               <label>Moderator<input id="caseFilterModerator" placeholder="moderator tag"></label>
             </div>
             <div class="form-grid">
-              <label>Timeline search<input id="timelineSearchInput" placeholder="search across cases, warnings, and notes"></label>
+              <label>Activity log search<input id="timelineSearchInput" placeholder="search across cases, warnings, and notes"></label>
             </div>
             <div class="button-row">
               <button class="ghost-button" id="saveCaseFilterButton" type="button">Save Filter</button>
@@ -989,7 +989,7 @@
           <div class="view-stack hidden" data-view-subtab-group="records" data-subtab="timeline">
             <section class="panel">
               <div class="panel-header">
-                <h3>Unified Timeline</h3>
+                <h3>Activity Log</h3>
               </div>
               <div id="timelineList" class="event-list"></div>
             </section>

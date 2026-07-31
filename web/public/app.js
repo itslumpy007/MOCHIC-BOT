@@ -108,7 +108,7 @@ const titles = {
   automod: "AutoMod Rules",
   settings: "Server Settings",
   staff: "Staff Access",
-  ops: "Operations"
+  ops: "Admin Tools"
 };
 
 const storageKeys = {
@@ -753,10 +753,10 @@ const commandPaletteEntries = [
   { kind: "view", label: "AutoMod Rules", value: "automod", adminOnly: true },
   { kind: "view", label: "Server Settings", value: "settings", adminOnly: true },
   { kind: "view", label: "Staff Access", value: "staff", adminOnly: true },
-  { kind: "view", label: "Operations", value: "ops", adminOnly: true },
+  { kind: "view", label: "Admin Tools", value: "ops", adminOnly: true },
   { kind: "action", label: "Raid cleanup", value: "bulk:raidCleanup" },
   { kind: "action", label: "Spam wave", value: "bulk:spamWave" },
-  { kind: "action", label: "Appeal review", value: "view:ops:workflow", advanced: true, adminOnly: true },
+  { kind: "action", label: "Appeal review", value: "view:ops:workflow", adminOnly: true },
   { kind: "action", label: "Open member drawer", value: "open-member-drawer" },
   { kind: "action", label: "Search member", value: "search-member:prompt" },
   { kind: "action", label: "Copy member ID", value: "copy-member-id" },
@@ -3890,7 +3890,7 @@ function renderMemberProfile() {
               <strong>${escapeHtml(item.label || `Template ${index + 1}`)}</strong>
               <span>${escapeHtml(item.category || "general")} - ${escapeHtml(item.action || "warn")} ${escapeHtml(item.duration || "")}</span>
             </button>
-          `).join("") : `<span class="badge">Use Ops to add templates.</span>`}
+          `).join("") : `<span class="badge">Use Admin Tools to add templates.</span>`}
         </div>
       </div>
       <div class="risk-meter" title="Member risk score">
