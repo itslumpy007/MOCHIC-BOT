@@ -5024,25 +5024,19 @@ async function repostRulesPanel() {
   setAlert(`Rules panel reposted in ${response.posted?.channelId ? `<#${response.posted.channelId}>` : "the configured channel"}.`);
 }
 
-async function repostAllCards() {
+async function repostTikTokPanel() {
   if (!hasPanelAccess("admin")) {
-    setAlert("Admin web access is required to repost cards.", "error");
+    setAlert("Admin web access is required to post the TikTok panel.", "error");
     return;
   }
 
-  const response = await api("/api/repost-all-panels", {
+  const response = await api("/api/tiktok-verify-setup", {
     method: "POST",
     body: JSON.stringify({})
   });
 
   await loadAll();
-  const summary = response.summary || {};
-  const parts = [
-    `${summary.posted || 0} reposted`,
-    `${summary.skipped || 0} skipped`,
-    `${summary.failed || 0} failed`
-  ];
-  setAlert(`Card repost complete. ${parts.join(", ")}.`);
+  setAlert(`TikTok panel reposted in ${response.posted?.channelId ? `<#${response.posted.channelId}>` : "the configured channel"}.`);
 }
 
 async function saveVerificationSettings(options = {}) {
@@ -5183,7 +5177,7 @@ async function repairVerifyPanel() {
   });
 
   await loadAll();
-  setAlert("Verify panel repaired.");
+  setAlert("Verify panel reposted.");
 }
 
 async function repairOnboarding() {
@@ -5208,7 +5202,7 @@ async function repairRolePanel() {
   }
 
   await repostRolePanel();
-  setAlert("Reaction role panel repaired.");
+  setAlert("Reaction role panel reposted.");
 }
 
 async function setVerifiedVisibility(locked, scope) {
@@ -5519,6 +5513,7 @@ function bindEvents() {
   $("#postAffirmationsPanel").addEventListener("click", () => postAffirmationsPanel().catch(error => setAlert(error.message, "error")));
   $("#saveVerificationSettings").addEventListener("click", () => saveVerificationSettings().catch(error => setAlert(error.message, "error")));
   $("#repostRulesPanel").addEventListener("click", () => repostRulesPanel().catch(error => setAlert(error.message, "error")));
+  $("#repostTikTokPanel").addEventListener("click", () => repostTikTokPanel().catch(error => setAlert(error.message, "error")));
   $("#saveBirthdaySettings").addEventListener("click", () => saveBirthdaySettings().catch(error => setAlert(error.message, "error")));
   $("#addReactionRoleRow").addEventListener("click", () => addReactionRoleRow());
   $("#saveReactionRoleSettings").addEventListener("click", () => saveReactionRoleSettings().catch(error => setAlert(error.message, "error")));
@@ -5538,7 +5533,6 @@ function bindEvents() {
   $("#postBirthdayPanel").addEventListener("click", () => postBirthdayPanel().catch(error => setAlert(error.message, "error")));
   $("#repairVerifyPanel").addEventListener("click", () => repairVerifyPanel().catch(error => setAlert(error.message, "error")));
   $("#repairRolePanel").addEventListener("click", () => repairRolePanel().catch(error => setAlert(error.message, "error")));
-  $("#repostAllCards").addEventListener("click", () => repostAllCards().catch(error => setAlert(error.message, "error")));
   $("#refreshPendingVerifications").addEventListener("click", () => loadAndRenderPendingVerifications().catch(error => setAlert(error.message, "error")));
   $("#runGeneralChatCheck").addEventListener("click", () => updateGeneralChatRule("run-now").catch(error => setAlert(error.message, "error")));
   $("#toggleGeneralChatRule").addEventListener("click", () => updateGeneralChatRule("toggle").catch(error => setAlert(error.message, "error")));

@@ -557,7 +557,7 @@
               <div class="panel-header">
                 <h3>Anonymous Affirmations <span class="header-status" id="affirmationsDirtyStatus"></span></h3>
                 <div class="button-row">
-                  <button class="ghost-button" id="postAffirmationsPanel" type="button">Post Panel</button>
+                  <button class="ghost-button" id="postAffirmationsPanel" type="button">Repost Affirmations</button>
                 </div>
               </div>
               <p class="panel-note">Control the little kindness corner: button, channel, and cooldown.</p>
@@ -683,6 +683,9 @@
                 <section class="panel verification-card">
                   <div class="panel-header">
                     <h3>TikTok Matching</h3>
+                    <div class="button-row">
+                      <button class="ghost-button" id="repostTikTokPanel" type="button">Repost TikTok Panel</button>
+                    </div>
                   </div>
                   <p class="panel-note">Optional matching path. Most members should use the rules button instead.</p>
                   <div class="form-grid" id="verificationBonusFields"></div>
@@ -695,7 +698,7 @@
                 <div class="button-row">
                   <button class="ghost-button" id="addReactionRoleRow" type="button">Add Role</button>
                   <button class="save-button" id="saveReactionRoleSettings" type="button">Save &amp; Post</button>
-                  <button class="ghost-button" id="repostRolePanel" type="button">Post Panel</button>
+                  <button class="ghost-button" id="repostRolePanel" type="button">Repost Reaction Roles</button>
                 </div>
               </div>
               <p class="panel-note">Edit the emoji-to-role mappings here. Use one line per role, like <code>🌸 | roleId</code> or <code>&lt;:name:id&gt; | roleId</code>. The bot will post the live panel from these saved rules.</p>
@@ -705,12 +708,11 @@
               <div class="panel-header">
                 <h3>Panel Repair</h3>
               </div>
-              <p class="panel-note">Use these if the verify panel, rules card, reaction-role panel, or other cards are missing, stale, or missing reactions.</p>
+              <p class="panel-note">Use these if a specific card is missing or stale. Each button reposts one panel at a time.</p>
               <div class="button-row">
                 <button class="ghost-button" id="repairOnboardingButton" type="button">Repair Onboarding</button>
-                <button class="ghost-button" id="repairVerifyPanel" type="button">Repair Verify Panel</button>
-                <button class="ghost-button" id="repairRolePanel" type="button">Repair Reaction Roles</button>
-                <button class="save-button" id="repostAllCards" type="button">Repost All Cards</button>
+                <button class="ghost-button" id="repairVerifyPanel" type="button">Repost Verify Panel</button>
+                <button class="ghost-button" id="repairRolePanel" type="button">Repost Reaction Roles</button>
               </div>
             </section>
             <section class="panel">
@@ -728,7 +730,7 @@
               <div class="panel-header">
                 <h3>Birthday Settings <span class="header-status" id="birthdaysDirtyStatus"></span></h3>
                 <div class="button-row">
-                  <button class="ghost-button" id="postBirthdayPanel" type="button">Post Panel</button>
+                  <button class="ghost-button" id="postBirthdayPanel" type="button">Repost Birthday Panel</button>
                   <button class="save-button" id="saveBirthdaySettings" type="button">Save</button>
                 </div>
               </div>
