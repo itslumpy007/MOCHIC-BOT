@@ -1388,6 +1388,79 @@ body.drawer-open .sidebar-backdrop {
   overflow-wrap: anywhere;
 }
 
+.verification-timeline {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.verification-timeline-item {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid rgba(113, 126, 170, 0.16);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.verification-timeline-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.verification-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text);
+  background: var(--surface-soft);
+  border: 1px solid rgba(113, 126, 170, 0.18);
+}
+
+.verification-status-chip::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.verification-status-chip.submitted {
+  background: rgba(101, 115, 255, 0.14);
+  border-color: rgba(101, 115, 255, 0.28);
+}
+
+.verification-status-chip.submitted::before {
+  background: var(--accent);
+}
+
+.verification-status-chip.approved {
+  background: rgba(72, 209, 171, 0.14);
+  border-color: rgba(72, 209, 171, 0.28);
+}
+
+.verification-status-chip.approved::before {
+  background: var(--mint);
+}
+
+.verification-status-chip.denied {
+  background: rgba(239, 127, 141, 0.14);
+  border-color: rgba(239, 127, 141, 0.28);
+}
+
+.verification-status-chip.denied::before {
+  background: var(--red);
+}
+
 .dirty-badge,
 .header-status .badge {
   background: rgba(101, 115, 255, 0.16);

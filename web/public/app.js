@@ -2829,20 +2829,34 @@ function renderPendingVerifications() {
         Age role: ${escapeHtml(entry.ageRolePreview?.summary || "Not calculated")}
         <br>
         Denied: ${Number.isInteger(Number(entry.denialCount)) && Number(entry.denialCount) > 0 ? `${escapeHtml(entry.denialCount)} time${Number(entry.denialCount) === 1 ? "" : "s"}` : "0 times"}
-        <br>
-        Recent attempts:
-        <br>
+      </p>
+      <div class="verification-timeline">
+        <div class="verification-timeline-item">
+          <strong>Recent attempts</strong>
+          <div class="verification-timeline-meta">
+            <span>${Array.isArray(entry.verificationAttempts) && entry.verificationAttempts.length ? `${escapeHtml(entry.verificationAttempts.length)} recent` : "None logged"}</span>
+          </div>
+        </div>
         ${Array.isArray(entry.verificationAttempts) && entry.verificationAttempts.length
           ? entry.verificationAttempts.map(attempt => {
-              const status = String(attempt.status || "attempt").replace(/^[a-z]/, ch => ch.toUpperCase());
-              const bits = [status];
-              if (attempt.age !== null && attempt.age !== undefined) bits.push(`Age ${attempt.age}`);
-              if (attempt.reason) bits.push(attempt.reason);
-              if (attempt.moderatorTag) bits.push(attempt.moderatorTag);
-              return `- ${escapeHtml(bits.join(" | "))}`;
-            }).join("<br>")
-          : "None logged"}
-      </p>
+              const statusKey = String(attempt.status || "attempt").toLowerCase();
+              const statusClass = ["submitted", "approved", "denied"].includes(statusKey) ? statusKey : "submitted";
+              const statusLabel = String(attempt.status || "attempt").replace(/^[a-z]/, ch => ch.toUpperCase());
+              const detailBits = [formatDate(attempt.createdAt)];
+              if (attempt.age !== null && attempt.age !== undefined) detailBits.push(`Age ${attempt.age}`);
+              if (attempt.moderatorTag) detailBits.push(attempt.moderatorTag);
+              if (attempt.reason) detailBits.push(attempt.reason);
+              return `
+                <div class="verification-timeline-item">
+                  <div class="verification-timeline-meta">
+                    <span class="verification-status-chip ${statusClass}">${escapeHtml(statusLabel)}</span>
+                    <span>${escapeHtml(detailBits.join(" | "))}</span>
+                  </div>
+                </div>
+              `;
+            }).join("")
+          : ""}
+      </div>
       <div class="button-row" style="margin-top:6px;">
         <button class="save-button verify-approve-btn" data-pending-id="${escapeHtml(entry.id)}" type="button">Approve</button>
         <button class="ghost-button verify-deny-btn" data-pending-id="${escapeHtml(entry.id)}" type="button">Deny</button>
