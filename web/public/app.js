@@ -426,8 +426,7 @@ const settingLabels = {
   verifyChannelId: "Verify channel ID",
   rulesChannelId: "Rules channel ID",
   welcomeChannelId: "Welcome channel ID",
-  generalChatChannelId: "General chat channel ID",
-  generalChatInactivityEnabled: "General chat inactivity",
+  generalChatInactivityEnabled: "Server activity inactivity",
   logChannelId: "Log channel ID",
   automodLogChannelId: "AutoMod log channel ID",
   mutedRoleId: "Muted role ID"
@@ -2112,18 +2111,17 @@ function renderAttentionBoard() {
   const reactionRoles = state.dashboard?.reactionRoles || {};
   const googleError = state.config?.automod?.googleBlockListLastError;
   const automationIssues = Array.isArray(reactionRoles.issues) ? reactionRoles.issues : [];
-  const generalChatChannelId = state.config?.settings?.generalChatChannelId || "";
   const generalRuleEnabled = state.config?.settings?.generalChatInactivityEnabled !== false;
 
-  if (!generalChatChannelId) {
+  if (!generalRuleEnabled) {
     alerts.push({
-      title: "General chat activity check",
-      detail: "Set a General chat channel ID in Settings so the two-month inactivity kick rule can run."
-    });
-  } else if (!generalRuleEnabled) {
-    alerts.push({
-      title: "General chat inactivity rule paused",
+      title: "Server activity rule paused",
       detail: "The inactivity kick rule is temporarily disabled. Re-enable it when you're ready."
+    });
+  } else {
+    alerts.push({
+      title: "Server activity check",
+      detail: "Members need to stay active in any server chat to avoid the two-month inactivity kick rule."
     });
   }
 
@@ -2186,12 +2184,11 @@ function renderAttentionBoard() {
 function renderGeneralChatRulePanel() {
   const rule = state.dashboard?.generalChatRule || {};
   const enabled = rule.enabled !== false;
-  const channelLabel = rule.channelId ? (rule.channelName ? `#${rule.channelName}` : rule.channelId) : "Not set";
   const membersAtRisk = Array.isArray(rule.membersAtRisk) ? rule.membersAtRisk : [];
 
   $("#generalChatRuleSummary").innerHTML = [
     ["Status", enabled ? "Enabled" : "Disabled"],
-    ["Channel", channelLabel],
+    ["Scope", rule.scope || "Any server chat"],
     ["Notice", `Gentle reminder at ${rule.warningDays || 53} days, kick at ${rule.thresholdDays || 60} days`],
     ["At Risk", rule.atRiskCount ?? membersAtRisk.length ?? 0],
     ["Warnings Due", rule.warningDueCount ?? membersAtRisk.filter(member => member.warningDue).length ?? 0],
@@ -2203,13 +2200,8 @@ function renderGeneralChatRulePanel() {
   ].map(([label, value], index) => `<article class="summary-item" ${revealStyle(index)}><span>${label}</span><strong>${escapeHtml(value)}</strong></article>`).join("");
 
   $("#toggleGeneralChatRule").textContent = enabled ? "Disable Rule Temporarily" : "Enable Rule";
-  $("#runGeneralChatCheck").disabled = !rule.channelId;
+  $("#runGeneralChatCheck").disabled = false;
   $("#refreshGeneralChatWatchlist").disabled = false;
-
-  if (!rule.channelId) {
-    $("#generalChatRiskList").innerHTML = renderEmptyState("No general chat channel", "Set the channel first to see the at-risk list and run the inactivity check.");
-    return;
-  }
 
   if (!enabled) {
     $("#generalChatRiskList").innerHTML = renderEmptyState("Rule paused", "Turn the inactivity rule back on to refresh the watchlist and resume kicking inactive members.");

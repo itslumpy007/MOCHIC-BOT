@@ -334,13 +334,12 @@ function createDefaultConfig() {
         "Please keep spam, harassment, and drama out of the chat.",
         "Follow Discord's Terms of Service and community rules.",
         "Use each channel for its intended purpose.",
-        "Stay active in general chat within two months, or you may be kicked from the server.",
+        "Stay active in any server chat within two months, or you may be kicked from the server.",
         "Please use the verify button in {verify} so you can fully access the server."
       ].join("\n"),
       welcomeChannelId: null,
       reactionRoleChannelId: null,
       reactionRoleRules: buildDefaultReactionRoleRulesText(),
-      generalChatChannelId: null,
       generalChatInactivityEnabled: true,
       generalChatInactivityWarnings: {},
       anonymousAffirmationsEnabled: true,
@@ -1493,55 +1492,64 @@ function isGeneralChatKickExempt(member) {
   return member.roles?.cache?.some(role => config.automod?.exemptRoleIds?.includes(role.id)) || false;
 }
 
-async function resolveGeneralChatChannel(guild) {
-  const configuredId = getGeneralChatChannelId();
-  if (configuredId) {
-    const channel = await guild.channels.fetch(configuredId).catch(() => null);
-    if (channel) return channel;
-  }
-
-  const fallbackNames = new Set(["general", "general-chat", "main-chat", "chat"]);
-  const channel = [...guild.channels.cache.values()].find(item => {
-    if (!item || !item.isTextBased?.()) return false;
-    const name = String(item.name || "").toLowerCase();
-    return fallbackNames.has(name);
-  }) || null;
-
-  return channel;
-}
-
-async function buildGeneralChatActivityMap(channel, cutoffTimestamp) {
-  if (!channel?.messages?.fetch) return new Map();
-
+async function buildServerActivityMap(guild, cutoffTimestamp) {
   const latestByUser = new Map();
-  let before = null;
-
-  for (let page = 0; page < 25; page += 1) {
-    const messages = await channel.messages.fetch({
-      limit: 100,
-      ...(before ? { before } : {})
-    }).catch(() => null);
-
-    if (!messages?.size) break;
-
-    for (const message of messages.values()) {
-      if (message.author?.bot) continue;
-      const timestamp = message.createdTimestamp || Date.now();
-      if (timestamp < cutoffTimestamp) continue;
-      const current = latestByUser.get(message.author.id) || 0;
-      if (timestamp > current) {
-        latestByUser.set(message.author.id, timestamp);
+  if (guild?.id) {
+    for (const [userId, timestamp] of generalChatActivityCache.entries()) {
+      if (Number(timestamp || 0) >= cutoffTimestamp) {
+        latestByUser.set(userId, Number(timestamp));
       }
     }
 
-    const oldest = [...messages.values()].reduce((min, message) => {
-      if (!min) return message;
-      return message.createdTimestamp < min.createdTimestamp ? message : min;
-    }, null);
+    for (const archived of readMessageArchiveEntries()) {
+      if (archived.guildId !== guild.id) continue;
+      const timestamp = Number(archived.createdTimestamp || 0);
+      if (timestamp < cutoffTimestamp) continue;
+      const current = latestByUser.get(archived.userId) || 0;
+      if (timestamp > current) {
+        latestByUser.set(archived.userId, timestamp);
+      }
+    }
+  }
 
-    before = oldest?.id || null;
-    if (!before || (oldest?.createdTimestamp || 0) < cutoffTimestamp || messages.size < 100) {
-      break;
+  const botMember = guild?.members?.me || (guild?.members?.fetchMe ? await guild.members.fetchMe().catch(() => null) : null);
+  const channels = [...(guild?.channels?.cache?.values?.() || [])].filter(channel => {
+    if (!channel?.isTextBased?.() || typeof channel.messages?.fetch !== "function") return false;
+    if (!botMember || typeof channel.permissionsFor !== "function") return true;
+    const permissions = channel.permissionsFor(botMember);
+    return Boolean(permissions?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory]));
+  });
+
+  for (const channel of channels) {
+    let before = null;
+
+    for (let page = 0; page < 25; page += 1) {
+      const messages = await channel.messages.fetch({
+        limit: 100,
+        ...(before ? { before } : {})
+      }).catch(() => null);
+
+      if (!messages?.size) break;
+
+      for (const message of messages.values()) {
+        if (message.author?.bot) continue;
+        const timestamp = message.createdTimestamp || Date.now();
+        if (timestamp < cutoffTimestamp) continue;
+        const current = latestByUser.get(message.author.id) || 0;
+        if (timestamp > current) {
+          latestByUser.set(message.author.id, timestamp);
+        }
+      }
+
+      const oldest = [...messages.values()].reduce((min, message) => {
+        if (!min) return message;
+        return message.createdTimestamp < min.createdTimestamp ? message : min;
+      }, null);
+
+      before = oldest?.id || null;
+      if (!before || (oldest?.createdTimestamp || 0) < cutoffTimestamp || messages.size < 100) {
+        break;
+      }
     }
   }
 
@@ -1553,8 +1561,7 @@ async function buildGeneralChatRuleStatus(guild = null, limit = 10) {
   if (!targetGuild) {
     return {
       enabled: isGeneralChatInactivityEnabled(),
-      channelId: getGeneralChatChannelId(),
-      channelName: null,
+      scope: "Server-wide",
       thresholdDays: 60,
       checkedAt: new Date().toISOString(),
       skipped: "guild-missing",
@@ -1564,40 +1571,9 @@ async function buildGeneralChatRuleStatus(guild = null, limit = 10) {
     };
   }
 
-  const generalChannel = await resolveGeneralChatChannel(targetGuild);
-  if (!generalChannel) {
-    return {
-      enabled: isGeneralChatInactivityEnabled(),
-      channelId: getGeneralChatChannelId(),
-      channelName: null,
-      thresholdDays: 60,
-      checkedAt: new Date().toISOString(),
-      skipped: "general-channel-missing",
-      membersAtRisk: [],
-      atRiskCount: 0,
-      lastRun: null
-    };
-  }
-
-  const botMember = targetGuild.members.me || await targetGuild.members.fetchMe().catch(() => null);
-  const permissions = typeof generalChannel.permissionsFor === "function" ? generalChannel.permissionsFor(botMember) : null;
-  if (!permissions?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory])) {
-    return {
-      enabled: isGeneralChatInactivityEnabled(),
-      channelId: getGeneralChatChannelId() || null,
-      channelName: generalChannel.name || null,
-      thresholdDays: 60,
-      checkedAt: new Date().toISOString(),
-      skipped: "missing-channel-permissions",
-      membersAtRisk: [],
-      atRiskCount: 0,
-      lastRun: null
-    };
-  }
-
   const cutoffTimestamp = Date.now() - getGeneralChatInactiveThresholdMs();
   const warningTimestamp = Date.now() - (53 * 24 * 60 * 60 * 1000);
-  const recentActivity = await buildGeneralChatActivityMap(generalChannel, cutoffTimestamp);
+  const recentActivity = await buildServerActivityMap(targetGuild, cutoffTimestamp);
   const members = await targetGuild.members.fetch().catch(() => targetGuild.members.cache);
   const membersAtRisk = [];
 
@@ -1626,8 +1602,7 @@ async function buildGeneralChatRuleStatus(guild = null, limit = 10) {
 
   return {
     enabled: isGeneralChatInactivityEnabled(),
-    channelId: generalChannel.id,
-    channelName: generalChannel.name || null,
+    scope: "Server-wide",
     thresholdDays: 60,
     warningDays: 53,
     checkedAt: new Date().toISOString(),
@@ -1649,18 +1624,9 @@ async function enforceGeneralChatActivity(guild = null, options = {}) {
   const targetGuild = guild || await client.guilds.fetch(GUILD_ID).catch(() => client.guilds.cache.get(GUILD_ID) || null);
   if (!targetGuild) return { checked: 0, kicked: 0, skipped: "guild-missing" };
 
-  const generalChannel = await resolveGeneralChatChannel(targetGuild);
-  if (!generalChannel) return { checked: 0, kicked: 0, skipped: "general-channel-missing" };
-
-  const botMember = targetGuild.members.me || await targetGuild.members.fetchMe().catch(() => null);
-  const permissions = typeof generalChannel.permissionsFor === "function" ? generalChannel.permissionsFor(botMember) : null;
-  if (!permissions?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory])) {
-    return { checked: 0, kicked: 0, skipped: "missing-channel-permissions" };
-  }
-
   const cutoffTimestamp = Date.now() - getGeneralChatInactiveThresholdMs();
   const warningTimestamp = Date.now() - (53 * 24 * 60 * 60 * 1000);
-  const recentActivity = await buildGeneralChatActivityMap(generalChannel, cutoffTimestamp);
+  const recentActivity = await buildServerActivityMap(targetGuild, cutoffTimestamp);
   const members = await targetGuild.members.fetch().catch(() => targetGuild.members.cache);
   let checked = 0;
   let warned = 0;
@@ -1678,7 +1644,7 @@ async function enforceGeneralChatActivity(guild = null, options = {}) {
     const warningAlreadySent = wasGeneralChatWarningSent(member.id, lastChatAt);
 
     if (shouldWarn && !warningAlreadySent) {
-      const warningReason = `No activity in ${generalChannel.name || "general chat"} for nearly 2 months. Last activity: ${lastActiveText}.`;
+      const warningReason = `No activity in the server for nearly 2 months. Last activity: ${lastActiveText}.`;
       const warningEntry = addCase({
         action: "automod:inactive-general-chat-warning",
         targetId: member.user.id,
@@ -1686,9 +1652,9 @@ async function enforceGeneralChatActivity(guild = null, options = {}) {
         moderatorTag: "AutoMod",
         reason: warningReason,
         details: [
-          { name: "Channel", value: `#${generalChannel.name || generalChannel.id}`, inline: true },
+          { name: "Scope", value: "Any server chat", inline: true },
           { name: "Last activity", value: lastActiveText, inline: true },
-          { name: "Follow-up", value: "Kick in about one week if there is still no activity.", inline: false }
+          { name: "Follow-up", value: "Kick in about one week if there is still no activity anywhere in the server.", inline: false }
         ]
       });
 
@@ -1696,12 +1662,12 @@ async function enforceGeneralChatActivity(guild = null, options = {}) {
         embeds: [
           makeEmbed({
             title: "A gentle reminder",
-            description: `You have about one week before you may be kicked from **${targetGuild.name}** for not chatting in ${generalChannel}.`,
+            description: `You have about one week before you may be kicked from **${targetGuild.name}** for not chatting anywhere in the server.`,
             color: COLORS.yellow,
             fields: [
               { name: "Last activity", value: lastActiveText, inline: true },
-              { name: "Channel", value: `${generalChannel}`, inline: true },
-              { name: "What to do", value: "Send a message in general chat to keep your spot.", inline: false }
+              { name: "Scope", value: "Any server chat", inline: true },
+              { name: "What to do", value: "Send a message in any server channel to keep your spot.", inline: false }
             ]
           })
         ]
@@ -1714,7 +1680,7 @@ async function enforceGeneralChatActivity(guild = null, options = {}) {
       await logAutoModEmbed(
         makeEmbed({
           title: `Auto mod case #${warningEntry.id}`,
-          description: `${member.user.tag} was warned about general chat inactivity.`,
+          description: `${member.user.tag} was warned about server-wide inactivity.`,
           color: COLORS.yellow,
           fields: buildCaseFields(warningEntry)
         })
@@ -1722,7 +1688,7 @@ async function enforceGeneralChatActivity(guild = null, options = {}) {
     }
 
     if (!member.kickable) continue;
-    const reason = `No activity in ${generalChannel.name || "general chat"} for 2 months. Last activity: ${lastActiveText}.`;
+    const reason = `No activity in the server for 2 months. Last activity: ${lastActiveText}.`;
     const entry = addCase({
       action: "automod:inactive-general-chat",
       targetId: member.user.id,
@@ -1730,19 +1696,19 @@ async function enforceGeneralChatActivity(guild = null, options = {}) {
       moderatorTag: "AutoMod",
       reason,
       details: [
-        { name: "Channel", value: `#${generalChannel.name || generalChannel.id}`, inline: true },
+        { name: "Scope", value: "Any server chat", inline: true },
         { name: "Last activity", value: lastActiveText, inline: true }
       ]
       });
 
-    await member.user.send({
-      embeds: [
-        makeEmbed({
-          title: "A gentle goodbye",
-          description: `You were removed from **${targetGuild.name}** because there was no activity in ${generalChannel} for more than two months.`,
-          color: COLORS.purple
-        })
-      ]
+      await member.user.send({
+        embeds: [
+          makeEmbed({
+            title: "A gentle goodbye",
+            description: `You were removed from **${targetGuild.name}** because there was no activity anywhere in the server for more than two months.`,
+            color: COLORS.purple
+          })
+        ]
     }).catch(() => {});
 
     await member.kick(reason).catch(() => {});
@@ -1753,7 +1719,7 @@ async function enforceGeneralChatActivity(guild = null, options = {}) {
     await logAutoModEmbed(
       makeEmbed({
         title: `Auto mod case #${entry.id}`,
-        description: `${member.user.tag} was kicked for inactivity in ${generalChannel.name || "general chat"}.`,
+        description: `${member.user.tag} was kicked for server-wide inactivity.`,
         color: COLORS.red,
         fields: buildCaseFields(entry)
       })
@@ -1767,7 +1733,7 @@ function startGeneralChatSweep() {
   if (generalChatSweepInterval) clearInterval(generalChatSweepInterval);
   generalChatSweepInterval = setInterval(() => {
     enforceGeneralChatActivity().catch(error => {
-      log.error("General chat sweep error.", error);
+      log.error("Server activity sweep error.", error);
     });
   }, 6 * 60 * 60 * 1000);
 }
@@ -1810,7 +1776,7 @@ function getRulesCardLines() {
     "Please keep spam, harassment, and drama out of the chat.",
     "Follow Discord's Terms of Service and community rules.",
     "Use each channel for its intended purpose.",
-    "Stay active in general chat within two months, or you may be kicked from the server.",
+    "Stay active in any server chat within two months, or you may be kicked from the server.",
     "Please use the verify button in the verify channel so you can fully access the server."
   ];
 }
@@ -6627,9 +6593,9 @@ function buildSettingsSummary() {
     `Verify channel: ${getVerifyChannelId() ? `<#${getVerifyChannelId()}>` : "Not set"}`,
     `Verification CAPTCHA: ${isVerificationCaptchaEnabled() ? "Enabled" : "Disabled"}`,
     `Rules channel: ${getRulesChannelId() ? `<#${getRulesChannelId()}>` : "Not set"}`,
-    `General chat: ${getGeneralChatChannelId() ? `<#${getGeneralChatChannelId()}>` : "Not set"}`,
+    `Server activity: Any server chat`,
     `Reaction roles: ${getReactionRoleChannelId() ? `<#${getReactionRoleChannelId()}>` : "Not set"}`,
-    `General chat inactivity: ${isGeneralChatInactivityEnabled() ? "Enabled" : "Disabled"}`,
+    `Server activity inactivity: ${isGeneralChatInactivityEnabled() ? "Enabled" : "Disabled"}`,
     `Anonymous affirmations: ${isAnonymousAffirmationsEnabled() ? "Enabled" : "Disabled"} (${getAnonymousAffirmationsChannelId() ? `<#${getAnonymousAffirmationsChannelId()}>` : "Not set"})`,
     `Muted role: ${getMutedRoleId() ? `<@&${getMutedRoleId()}>` : "Not set"}`,
     buildBirthdaySummary(),
@@ -7676,7 +7642,6 @@ function buildStatusEmbed() {
   const uptimeSeconds = Math.floor(startedAt / 1000);
   const verifyChannelId = getVerifyChannelId();
   const rulesChannelId = getRulesChannelId();
-  const generalChatChannelId = getGeneralChatChannelId();
   const logChannelId = getLogChannelId();
 
   return makeEmbed({
@@ -7689,9 +7654,9 @@ function buildStatusEmbed() {
       { name: "Ping", value: `${Math.round(client.ws.ping)}ms`, inline: true },
       { name: "Verify Channel", value: verifyChannelId ? `<#${verifyChannelId}>` : "Not set", inline: true },
       { name: "Rules Channel", value: rulesChannelId ? `<#${rulesChannelId}>` : "Not set", inline: true },
-      { name: "General Chat", value: generalChatChannelId ? `<#${generalChatChannelId}>` : "Not set", inline: true },
+      { name: "Server Activity", value: "Any server chat", inline: true },
       { name: "Reaction Roles", value: getReactionRoleChannelId() ? `<#${getReactionRoleChannelId()}>` : "Not set", inline: true },
-      { name: "General Chat Rule", value: `Gentle reminder at 53 days, kick at 60 days.`, inline: false },
+      { name: "Server Activity Rule", value: `Gentle reminder at 53 days, kick at 60 days.`, inline: false },
       { name: "Log Channel", value: logChannelId ? `<#${logChannelId}>` : "Not set", inline: true },
       { name: "AutoMod Log Channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
       { name: "TikTok Bonus", value: isTikTokVerificationEnabled() ? `@${getTikTokHandle()}` : "Disabled", inline: true },
@@ -11402,9 +11367,9 @@ async function handleWebApi(req, res, pathname) {
       config.settings.generalChatInactivityEnabled = !isGeneralChatInactivityEnabled();
       saveConfig();
       recordAuditLog(getWebModeratorTag(auth), config.settings.generalChatInactivityEnabled
-        ? "general-chat-inactivity-enabled"
-        : "general-chat-inactivity-disabled", {
-        generalChatChannelId: getGeneralChatChannelId(),
+        ? "server-activity-inactivity-enabled"
+        : "server-activity-inactivity-disabled", {
+        scope: "Any server chat",
         enabled: config.settings.generalChatInactivityEnabled
       });
       return sendWebJson(res, 200, {
@@ -11421,9 +11386,9 @@ async function handleWebApi(req, res, pathname) {
         ranAt: new Date().toISOString(),
         forced: true
       };
-      recordAuditLog(getWebModeratorTag(auth), "general-chat-inactivity-ran", {
+      recordAuditLog(getWebModeratorTag(auth), "server-activity-inactivity-ran", {
         ...result,
-        generalChatChannelId: getGeneralChatChannelId(),
+        scope: "Any server chat",
         forced: true
       });
       return sendWebJson(res, 200, {
@@ -11433,7 +11398,7 @@ async function handleWebApi(req, res, pathname) {
       });
     }
 
-    return sendWebJson(res, 400, { error: "Choose a valid general chat action." });
+    return sendWebJson(res, 400, { error: "Choose a valid server activity action." });
   }
 
   if (req.method === "POST" && pathname === "/api/affirmations-panel") {
@@ -12009,7 +11974,7 @@ client.once("clientReady", async () => {
         log.error("Birthday startup sweep error.", error);
       });
       await enforceGeneralChatActivity().catch(error => {
-        log.error("General chat startup sweep error.", error);
+        log.error("Server activity startup sweep error.", error);
       });
       await syncGoogleBlockList("startup").catch(error => {
         log.error("Google block list startup sync error.", error);
@@ -16007,15 +15972,12 @@ client.on("interactionCreate", async interaction => {
   }
 });
 
-client.on("messageCreate", async message => {
+  client.on("messageCreate", async message => {
   try {
     if (!ENABLE_CORE_BOT) return;
     if (!message.guild || message.author.bot || !message.member) return;
     recordMessageArchive(message);
-    const generalChatChannelId = getGeneralChatChannelId();
-    if (generalChatChannelId && message.channel.id === generalChatChannelId) {
-      generalChatActivityCache.set(message.author.id, message.createdTimestamp || Date.now());
-    }
+    generalChatActivityCache.set(message.author.id, message.createdTimestamp || Date.now());
     if (isAutoModExempt(message)) return;
     const policy = resolveAutoModPolicy(message);
     const messageDomains = extractMessageDomains(message.content);
