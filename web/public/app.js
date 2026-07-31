@@ -101,13 +101,14 @@ function syncSupportPortalLinks() {
 }
 
 const titles = {
-  overview: "Overview",
+  overview: "Dashboard",
   members: "Members",
-  automod: "AutoMod + AI",
-  settings: "Settings",
-  staff: "Staff",
-  ops: "Ops",
-  records: "Records"
+  records: "Records",
+  admin: "Admin Center",
+  automod: "AutoMod Rules",
+  settings: "Server Settings",
+  staff: "Staff Access",
+  ops: "Operations"
 };
 
 const storageKeys = {
@@ -143,7 +144,6 @@ const storageKeys = {
   commandPaletteOpen: "mochiCommandPaletteOpen"
 };
 
-const advancedViews = new Set(["automod", "settings", "staff", "ops"]);
 const subtabDefaults = {
   overview: "summary",
   members: "profile",
@@ -151,6 +151,7 @@ const subtabDefaults = {
   settings: "general",
   staff: "access",
   ops: "templates",
+  admin: "hub",
   records: "cases"
 };
 
@@ -727,8 +728,8 @@ const quickActions = [
   },
   {
     id: "open-settings",
-    title: "Open settings",
-    description: "Edit channels, roles, and verification.",
+    title: "Open server settings",
+    description: "Edit channels, roles, verification, and birthdays.",
     view: "settings",
     advanced: true,
     adminOnly: true
@@ -745,13 +746,14 @@ const templateCategories = [
 ];
 
 const commandPaletteEntries = [
-  { kind: "view", label: "Overview", value: "overview" },
+  { kind: "view", label: "Dashboard", value: "overview" },
   { kind: "view", label: "Members", value: "members" },
   { kind: "view", label: "Records", value: "records" },
-  { kind: "view", label: "AutoMod", value: "automod", advanced: true },
-  { kind: "view", label: "Settings", value: "settings", advanced: true, adminOnly: true },
-  { kind: "view", label: "Staff", value: "staff", advanced: true, adminOnly: true },
-  { kind: "view", label: "Ops", value: "ops", advanced: true, adminOnly: true },
+  { kind: "view", label: "Admin Center", value: "admin", adminOnly: true },
+  { kind: "view", label: "AutoMod Rules", value: "automod", adminOnly: true },
+  { kind: "view", label: "Server Settings", value: "settings", adminOnly: true },
+  { kind: "view", label: "Staff Access", value: "staff", adminOnly: true },
+  { kind: "view", label: "Operations", value: "ops", adminOnly: true },
   { kind: "action", label: "Raid cleanup", value: "bulk:raidCleanup" },
   { kind: "action", label: "Spam wave", value: "bulk:spamWave" },
   { kind: "action", label: "Appeal review", value: "view:ops:workflow", advanced: true, adminOnly: true },
@@ -759,7 +761,7 @@ const commandPaletteEntries = [
   { kind: "action", label: "Search member", value: "search-member:prompt" },
   { kind: "action", label: "Copy member ID", value: "copy-member-id" },
   { kind: "action", label: "Undo last delete", value: "undo-last-member-delete" },
-  { kind: "action", label: "New template", value: "new-template", advanced: true, adminOnly: true },
+  { kind: "action", label: "New template", value: "new-template", adminOnly: true },
   { kind: "action", label: "Save filter", value: "save-filter" },
   { kind: "action", label: "Clear recent actions", value: "clear-recent-actions" },
   { kind: "action", label: "Open quick action: First offense", value: "preset:firstOffense" },
@@ -1249,8 +1251,7 @@ function syncWorkspacePreset(preset) {
     setActiveView("members");
     setActiveSubtab("members", "moderation");
   } else if (selected === "admin") {
-    setActiveView("settings");
-    setActiveSubtab("settings", "accounts");
+    setActiveView("admin");
   } else if (selected === "audit") {
     setActiveView("ops");
     setActiveSubtab("ops", "audit");
@@ -1272,8 +1273,7 @@ function applyRoleAwareWorkspace() {
     workspaceSelect.value = "auto";
   }
   if (next === "admin") {
-    setActiveView("settings");
-    setActiveSubtab("settings", "accounts");
+    setActiveView("admin");
   } else {
     setActiveView("members");
     setActiveSubtab("members", "profile");
@@ -1393,7 +1393,7 @@ function getDefaultView() {
 }
 
 function isViewAllowed(view) {
-  if (["settings", "staff", "ops"].includes(view)) {
+  if (["admin", "automod", "settings", "staff", "ops"].includes(view)) {
     return hasPanelAccess("admin");
   }
   return hasPanelAccess("mod");
@@ -1406,10 +1406,6 @@ function isAdvancedToolsVisible() {
 function setAdvancedToolsVisible(visible) {
   localStorage.setItem(storageKeys.advancedToolsVisible, visible ? "true" : "false");
   updateAdvancedToolsVisibility();
-
-  if (!visible && advancedViews.has(localStorage.getItem(storageKeys.activeView))) {
-    setActiveView(getDefaultView());
-  }
 }
 
 function updateAdvancedToolsVisibility() {
@@ -1425,10 +1421,7 @@ function updateAdvancedToolsVisibility() {
 
 function setActiveView(view) {
   const requestedView = titles[view] ? view : getDefaultView();
-  const advancedVisible = isAdvancedToolsVisible();
-  const nextView = isViewAllowed(requestedView) && (!advancedViews.has(requestedView) || advancedVisible)
-    ? requestedView
-    : getDefaultView();
+  const nextView = isViewAllowed(requestedView) ? requestedView : getDefaultView();
   document.querySelectorAll(".tab").forEach(tab => {
     tab.classList.toggle("is-active", tab.dataset.view === nextView);
   });
@@ -1489,7 +1482,6 @@ function updateViewSubtabs(view = localStorage.getItem(storageKeys.activeView) |
 function applyAccessRestrictions() {
   const isAdmin = hasPanelAccess("admin");
   const isMod = hasPanelAccess("mod");
-  const advancedVisible = isAdvancedToolsVisible();
 
   document.querySelectorAll("[data-required-access]").forEach(element => {
     const allowed = hasPanelAccess(element.dataset.requiredAccess);
@@ -1500,19 +1492,14 @@ function applyAccessRestrictions() {
   });
 
   document.querySelectorAll(".tab").forEach(tab => {
-    const advancedAllowed = tab.dataset.advanced !== "true" || advancedVisible;
-    const allowed = (tab.dataset.requiredAccess ? hasPanelAccess(tab.dataset.requiredAccess) : isMod) && advancedAllowed;
+    const allowed = tab.dataset.requiredAccess ? hasPanelAccess(tab.dataset.requiredAccess) : isMod;
     tab.classList.toggle("hidden", !allowed);
     tab.disabled = !allowed;
   });
 
   updateAdvancedToolsVisibility();
 
-  if (!isAdmin && ["settings", "staff", "ops"].includes(localStorage.getItem(storageKeys.activeView))) {
-    localStorage.setItem(storageKeys.activeView, getDefaultView());
-  }
-
-  if (!advancedVisible && advancedViews.has(localStorage.getItem(storageKeys.activeView))) {
+  if (!isAdmin && ["admin", "settings", "staff", "ops", "automod"].includes(localStorage.getItem(storageKeys.activeView))) {
     localStorage.setItem(storageKeys.activeView, getDefaultView());
   }
 
@@ -1798,7 +1785,6 @@ function renderRecentViolations() {
 function renderQuickActions() {
   const visibleActions = quickActions.filter(action => {
     if (action.adminOnly && !hasPanelAccess("admin")) return false;
-    if (action.advanced && !isAdvancedToolsVisible()) return false;
     return true;
   });
 
@@ -2316,7 +2302,6 @@ function renderCommandPaletteList(query = "") {
 
   const items = [...searchAction, ...commandPaletteEntries, ...templates, ...savedFilters, ...recentMemberSearches, ...recentActions].filter(entry => {
     if (entry.adminOnly && !hasPanelAccess("admin")) return false;
-    if (entry.advanced && !isAdvancedToolsVisible()) return false;
     if (!term) return true;
     return [entry.label, entry.kind, entry.value].join(" ").toLowerCase().includes(term);
   });
@@ -5813,12 +5798,15 @@ function bindEvents() {
     runPaletteCommand(button.dataset.commandKind, button.dataset.commandValue);
   });
   $("#commandPaletteButton").addEventListener("click", () => openCommandPalette($("#globalSearchInput").value.trim()));
-  $("#advancedToggle").addEventListener("click", () => {
-    setAdvancedToolsVisible(!isAdvancedToolsVisible());
-  });
-  document.querySelectorAll("[data-subtab-view]").forEach(button => {
+  document.querySelectorAll("[data-view], [data-subtab-view]").forEach(button => {
+    if (button.hasAttribute("data-subtab-view")) {
+      button.addEventListener("click", () => {
+        setActiveSubtab(button.dataset.subtabView, button.dataset.subtab);
+      });
+      return;
+    }
     button.addEventListener("click", () => {
-      setActiveSubtab(button.dataset.subtabView, button.dataset.subtab);
+      setActiveView(button.dataset.view);
     });
   });
   $("#quickActions").addEventListener("click", event => {

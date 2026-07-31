@@ -61,24 +61,17 @@
 
         <button id="sidebarClose" class="icon-button mobile-only sidebar-close-button" type="button" title="Close sidebar" aria-label="Close sidebar">✕</button>
 
-        <p class="sidebar-note">Core tools stay up front. Everything else is one click away when you need it.</p>
+        <p class="sidebar-note">Core tools stay up front. Open Admin Center for settings, access, and automation.</p>
 
-        <p class="sidebar-section">Moderation</p>
+        <p class="sidebar-section">Quick access</p>
         <nav class="tabs" aria-label="Dashboard sections">
-          <button class="tab is-active" data-view="overview" type="button">Overview</button>
+          <button class="tab is-active" data-view="overview" type="button">Dashboard</button>
           <button class="tab" data-view="members" type="button">Members</button>
           <button class="tab" data-view="records" type="button">Records</button>
         </nav>
 
-        <p class="sidebar-section">Admin tools</p>
-        <button class="advanced-toggle" id="advancedToggle" type="button" aria-expanded="false">Show advanced tools</button>
-
-        <nav class="tabs hidden" id="advancedTabs" aria-label="Advanced dashboard sections">
-          <button class="tab" data-view="automod" data-advanced="true" type="button">AutoMod</button>
-          <button class="tab" data-view="settings" data-required-access="admin" data-advanced="true" type="button">Settings</button>
-          <button class="tab" data-view="staff" data-required-access="admin" data-advanced="true" type="button">Staff</button>
-          <button class="tab" data-view="ops" data-required-access="admin" data-advanced="true" type="button">Ops</button>
-        </nav>
+        <p class="sidebar-section">Admin center</p>
+        <button class="tab" data-view="admin" data-required-access="admin" type="button">Admin Center</button>
 
         <div class="auth-panel" id="authPanel">
           <p class="auth-copy" id="signedInUser">Not signed in</p>
@@ -90,7 +83,7 @@
         <header class="topbar">
           <div>
             <p class="eyebrow">Command center</p>
-            <h2 id="viewTitle">Overview</h2>
+            <h2 id="viewTitle">Dashboard</h2>
             <p class="topbar-copy">Live moderation, records, and admin controls in one place.</p>
           </div>
           <div class="topbar-actions">
@@ -99,7 +92,7 @@
               <option value="auto">Workspace</option>
               <option value="home">Home focus</option>
               <option value="moderation">Moderation focus</option>
-              <option value="admin">Admin focus</option>
+              <option value="admin">Admin center</option>
               <option value="audit">Audit focus</option>
             </select>
             <select id="themeSelect" class="workspace-select" aria-label="Theme">
@@ -502,13 +495,48 @@
           </div>
         </section>
 
+        <section id="adminView" class="view" data-required-access="admin">
+          <div class="panel">
+            <div class="panel-header">
+              <h3>Admin Center</h3>
+            </div>
+            <p class="panel-note">Choose the focused panel you need. Each card opens one clear task area so the sidebar can stay small.</p>
+            <div class="summary-grid admin-hub-grid">
+              <article class="summary-item admin-hub-card">
+                <span>AutoMod Rules</span>
+                <strong>Filters, AI review, and safety tuning</strong>
+                <p>Manage banned words, scam detection, link checks, and the AI moderation settings.</p>
+                <button class="ghost-button" type="button" data-view="automod">Open AutoMod</button>
+              </article>
+              <article class="summary-item admin-hub-card">
+                <span>Server Settings</span>
+                <strong>Channels, verification, birthdays, and archive</strong>
+                <p>Update the server-wide settings, verification flow, and retention rules from one place.</p>
+                <button class="ghost-button" type="button" data-view="settings">Open Server Settings</button>
+              </article>
+              <article class="summary-item admin-hub-card">
+                <span>Staff Access</span>
+                <strong>Moderator and admin permissions</strong>
+                <p>Control who can access the panel and review staff tickets, access lists, and support inbox items.</p>
+                <button class="ghost-button" type="button" data-view="staff">Open Staff Access</button>
+              </article>
+              <article class="summary-item admin-hub-card">
+                <span>Operations</span>
+                <strong>Templates, workflow, and audit trail</strong>
+                <p>Work on saved templates, appeals, and the audit log without digging through extra menus.</p>
+                <button class="ghost-button" type="button" data-view="ops">Open Operations</button>
+              </article>
+            </div>
+          </div>
+        </section>
+
         <section id="settingsView" class="view">
           <div class="view-tabs" aria-label="Settings tabs">
-            <button class="view-tab is-active" type="button" data-subtab-view="settings" data-subtab="general">General</button>
-            <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="accounts">Accounts</button>
+            <button class="view-tab is-active" type="button" data-subtab-view="settings" data-subtab="general">Server</button>
+            <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="accounts">Web Access</button>
             <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="verification">Verification</button>
-            <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="birthdays">Birthdays</button>
-            <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="safety">Safety</button>
+            <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="birthdays">Birthday Roles</button>
+            <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="safety">Exemptions</button>
           </div>
           <div class="button-row" style="margin: 0 0 14px;">
             <button class="save-button" id="saveAllSettings" type="button">Save All Settings</button>
