@@ -11869,7 +11869,8 @@ async function handleWebApi(req, res, pathname) {
       pendingVerifications: (Array.isArray(config.pendingVerifications) ? config.pendingVerifications : []).map(entry => ({
         ...entry,
         ageRolePreview: describeAgeRoleMatch(entry.age),
-        denialCount: getVerificationDenialCount(entry.userId)
+        denialCount: getVerificationDenialCount(entry.userId),
+        verificationAttempts: getVerificationAttemptHistory(entry.userId, 3)
       }))
     });
   }
@@ -11892,7 +11893,8 @@ async function handleWebApi(req, res, pathname) {
         pendingVerifications: (Array.isArray(config.pendingVerifications) ? config.pendingVerifications : []).map(entry => ({
           ...entry,
           ageRolePreview: describeAgeRoleMatch(entry.age),
-          denialCount: getVerificationDenialCount(entry.userId)
+          denialCount: getVerificationDenialCount(entry.userId),
+          verificationAttempts: getVerificationAttemptHistory(entry.userId, 3)
         }))
       });
     }
@@ -11906,7 +11908,8 @@ async function handleWebApi(req, res, pathname) {
         pendingVerifications: (Array.isArray(config.pendingVerifications) ? config.pendingVerifications : []).map(entry => ({
           ...entry,
           ageRolePreview: describeAgeRoleMatch(entry.age),
-          denialCount: getVerificationDenialCount(entry.userId)
+          denialCount: getVerificationDenialCount(entry.userId),
+          verificationAttempts: getVerificationAttemptHistory(entry.userId, 3)
         }))
       });
     }

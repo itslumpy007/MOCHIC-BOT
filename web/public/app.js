@@ -2829,6 +2829,19 @@ function renderPendingVerifications() {
         Age role: ${escapeHtml(entry.ageRolePreview?.summary || "Not calculated")}
         <br>
         Denied: ${Number.isInteger(Number(entry.denialCount)) && Number(entry.denialCount) > 0 ? `${escapeHtml(entry.denialCount)} time${Number(entry.denialCount) === 1 ? "" : "s"}` : "0 times"}
+        <br>
+        Recent attempts:
+        <br>
+        ${Array.isArray(entry.verificationAttempts) && entry.verificationAttempts.length
+          ? entry.verificationAttempts.map(attempt => {
+              const status = String(attempt.status || "attempt").replace(/^[a-z]/, ch => ch.toUpperCase());
+              const bits = [status];
+              if (attempt.age !== null && attempt.age !== undefined) bits.push(`Age ${attempt.age}`);
+              if (attempt.reason) bits.push(attempt.reason);
+              if (attempt.moderatorTag) bits.push(attempt.moderatorTag);
+              return `- ${escapeHtml(bits.join(" | "))}`;
+            }).join("<br>")
+          : "None logged"}
       </p>
       <div class="button-row" style="margin-top:6px;">
         <button class="save-button verify-approve-btn" data-pending-id="${escapeHtml(entry.id)}" type="button">Approve</button>
