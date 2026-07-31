@@ -987,7 +987,7 @@ function buildRuleVerifyComponents() {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId("verify:rules-check")
-        .setLabel("I Read the Rules")
+        .setLabel("I've Read the Rules")
         .setEmoji("📜")
         .setStyle(ButtonStyle.Primary)
     )
@@ -14537,7 +14537,7 @@ client.on("interactionCreate", async interaction => {
       }
 
       return interaction.reply({
-        content: `Head to <#${verifyChannelId}> and click **I Read the Rules** to verify.${isTikTokVerificationEnabled() ? ` TikTok matching is available in the verify flow.` : ""}`,
+        content: `Head to <#${verifyChannelId}> and click **I've Read the Rules** to verify.${isTikTokVerificationEnabled() ? ` TikTok matching is available in the verify flow.` : ""}`,
         ephemeral: true
       });
     }
@@ -16245,8 +16245,8 @@ client.on("guildMemberAdd", async member => {
           `Hi ${member.user.username}.\n\n` +
           `We are happy you joined.\n` +
           (isTikTokVerificationEnabled()
-            ? `Please head to ${getVerifyChannelMention()} and click **I Read the Rules** to verify. TikTok matching is available in the same verify flow.\n\n`
-            : `Please head to ${getVerifyChannelMention()} and click **I Read the Rules** to verify and unlock the garden.\n\n`) +
+            ? `Please head to ${getVerifyChannelMention()} and click **I've Read the Rules** to verify. TikTok matching is available in the same verify flow.\n\n`
+            : `Please head to ${getVerifyChannelMention()} and click **I've Read the Rules** to verify and unlock the garden.\n\n`) +
           "Have fun and enjoy your stay.",
         color: COLORS.pink,
         thumbnail: member.user.displayAvatarURL({ dynamic: true })
