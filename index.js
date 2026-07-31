@@ -10431,7 +10431,8 @@ function serializeWebMember(member, user = null) {
     counts: {
       warnings: warnings.length,
       notes: notes.length,
-      cases: getCasesForUser(resolvedUser.id).length
+      cases: getCasesForUser(resolvedUser.id).length,
+      verificationDenials: getVerificationDenialCount(resolvedUser.id)
     },
     risk: calculateUserRisk(resolvedUser.id)
   };
@@ -13200,6 +13201,7 @@ client.on("interactionCreate", async interaction => {
                   { name: "Warnings", value: `${warnings.length}`, inline: true },
                   { name: "Notes", value: `${notes.length}`, inline: true },
                   { name: "Cases", value: `${cases.length}`, inline: true },
+                  { name: "Verification Denials", value: `${getVerificationDenialCount(targetUserId)}`, inline: true },
                   { name: "Permissions", value: buildMemberPermissionSnapshot(member), inline: false },
                   { name: "Roles", value: buildMemberRoleSummary(member), inline: false }
                 ],
@@ -15232,17 +15234,20 @@ client.on("interactionCreate", async interaction => {
         `#${entry.id} ${entry.action} - ${entry.reason} - ${entry.moderatorTag} - <t:${Math.floor(new Date(entry.createdAt).getTime() / 1000)}:R>`
       );
 
-      return interaction.reply({
-        embeds: [
-          makeEmbed({
-            title: "Recent cases",
-            description: `Recent moderation cases for ${user.tag}`,
-            color: COLORS.blue,
-            fields: [{ name: "Cases", value: lines.join("\n").slice(0, 1024), inline: false }]
-          })
-        ],
-        ephemeral: true
-      });
+          return interaction.reply({
+            embeds: [
+              makeEmbed({
+                title: "Recent cases",
+                description: `Recent moderation cases for ${user.tag}`,
+                color: COLORS.blue,
+                fields: [
+                  { name: "Cases", value: lines.join("\n").slice(0, 1024), inline: false },
+                  { name: "Verification Denials", value: `${getVerificationDenialCount(user.id)}`, inline: true }
+                ]
+              })
+            ],
+            ephemeral: true
+          });
     }
 
     if (interaction.commandName === "editcase") {

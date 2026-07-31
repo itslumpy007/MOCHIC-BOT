@@ -3820,11 +3820,13 @@ function renderMemberProfile() {
         <dt>Timeout</dt><dd>${escapeHtml(member.timeoutUntil ? formatDate(member.timeoutUntil) : "No active timeout")}</dd>
         <dt>Risk</dt><dd>${escapeHtml(member.risk ? `${member.risk.level} (${member.risk.score}) - ${member.risk.strikes} strikes` : "Clear")}</dd>
         <dt>Exempt</dt><dd>${isExempt ? "AutoMod exempt" : "Not exempt"}</dd>
+        <dt>Verification Denials</dt><dd>${escapeHtml(member.counts.verificationDenials || 0)}</dd>
       </dl>
       <div class="badge-row">
         <span class="badge">${member.counts.warnings} warnings</span>
         <span class="badge">${member.counts.notes} notes</span>
         <span class="badge">${member.counts.cases} cases</span>
+        <span class="badge">${member.counts.verificationDenials || 0} verification denials</span>
         <span class="badge">Risk ${riskScore}</span>
       </div>
       <div class="button-row profile-actions">
