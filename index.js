@@ -217,6 +217,7 @@ function createDefaultConfig() {
     verifyMessageId: null,
     bonusVerifyMessageId: null,
     reactionRoleMessageId: null,
+    verificationDenials: {},
     birthdays: {},
     warnings: {},
     notes: {},
@@ -725,6 +726,7 @@ async function denyVerification(pendingId, reason, moderatorTag) {
   if (idx === -1) return { ok: false, error: "Pending verification not found." };
   const entry = config.pendingVerifications[idx];
   config.pendingVerifications.splice(idx, 1);
+  const denialCount = incrementVerificationDenialCount(entry.userId);
 
   const guild = client.guilds.cache.get(GUILD_ID) || await client.guilds.fetch(GUILD_ID).catch(() => null);
   const member = guild ? await guild.members.fetch(entry.userId).catch(() => null) : null;
@@ -736,8 +738,13 @@ async function denyVerification(pendingId, reason, moderatorTag) {
   }
 
   saveConfig();
-  recordAuditLog(moderatorTag, "verification-denied", { userId: entry.userId, userTag: entry.userTag, reason: reason || "" });
-  return { ok: true, entry };
+  recordAuditLog(moderatorTag, "verification-denied", {
+    userId: entry.userId,
+    userTag: entry.userTag,
+    reason: reason || "",
+    denialCount
+  });
+  return { ok: true, entry, denialCount };
 }
 
 function normalizeVerificationCaptchaInput(value) {
@@ -1271,6 +1278,9 @@ function loadConfig() {
       cases: Array.isArray(parsed.cases) ? parsed.cases : [],
       appeals: Array.isArray(parsed.appeals) ? parsed.appeals : [],
       reactionRoleMessageId: typeof parsed.reactionRoleMessageId === "string" ? parsed.reactionRoleMessageId : defaults.reactionRoleMessageId,
+      verificationDenials: parsed.verificationDenials && typeof parsed.verificationDenials === "object"
+        ? parsed.verificationDenials
+        : {},
       generalChatInactivityWarnings: parsed.generalChatInactivityWarnings && typeof parsed.generalChatInactivityWarnings === "object"
         ? parsed.generalChatInactivityWarnings
         : {},
@@ -1400,6 +1410,21 @@ function recordAuditLog(actorTag, action, details = {}) {
   });
   config.auditLog = config.auditLog.slice(-200);
   saveConfig();
+}
+
+function getVerificationDenialCount(userId) {
+  if (!config.verificationDenials || typeof config.verificationDenials !== "object") return 0;
+  const count = Number(config.verificationDenials[userId] || 0);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+}
+
+function incrementVerificationDenialCount(userId) {
+  if (!config.verificationDenials || typeof config.verificationDenials !== "object") {
+    config.verificationDenials = {};
+  }
+  const nextCount = getVerificationDenialCount(userId) + 1;
+  config.verificationDenials[userId] = nextCount;
+  return nextCount;
 }
 
 function isMessageArchiveEnabled() {
@@ -11790,7 +11815,8 @@ async function handleWebApi(req, res, pathname) {
     return sendWebJson(res, 200, {
       pendingVerifications: (Array.isArray(config.pendingVerifications) ? config.pendingVerifications : []).map(entry => ({
         ...entry,
-        ageRolePreview: describeAgeRoleMatch(entry.age)
+        ageRolePreview: describeAgeRoleMatch(entry.age),
+        denialCount: getVerificationDenialCount(entry.userId)
       }))
     });
   }
@@ -11812,7 +11838,8 @@ async function handleWebApi(req, res, pathname) {
         ok: true,
         pendingVerifications: (Array.isArray(config.pendingVerifications) ? config.pendingVerifications : []).map(entry => ({
           ...entry,
-          ageRolePreview: describeAgeRoleMatch(entry.age)
+          ageRolePreview: describeAgeRoleMatch(entry.age),
+          denialCount: getVerificationDenialCount(entry.userId)
         }))
       });
     }
@@ -11825,7 +11852,8 @@ async function handleWebApi(req, res, pathname) {
         ok: true,
         pendingVerifications: (Array.isArray(config.pendingVerifications) ? config.pendingVerifications : []).map(entry => ({
           ...entry,
-          ageRolePreview: describeAgeRoleMatch(entry.age)
+          ageRolePreview: describeAgeRoleMatch(entry.age),
+          denialCount: getVerificationDenialCount(entry.userId)
         }))
       });
     }
