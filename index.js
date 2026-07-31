@@ -7361,6 +7361,91 @@ async function postAnonymousAffirmationsPanel(source = "manual") {
   return message;
 }
 
+async function repostAllCards(source = "manual") {
+  const jobs = [
+    {
+      key: "rules",
+      label: "Rules card",
+      shouldRun: () => Boolean(getRulesChannelId()),
+      run: () => postRulesMessage(source)
+    },
+    {
+      key: "verification",
+      label: "Verification panel",
+      shouldRun: () => Boolean(getVerifyChannelId()),
+      run: () => postRuleVerifyPanel(source)
+    },
+    {
+      key: "tiktok",
+      label: "TikTok verification panel",
+      shouldRun: () => Boolean(getVerifyChannelId()) && getTikTokVerificationSetupIssues().length === 0,
+      run: () => postTikTokVerifyPanel(source)
+    },
+    {
+      key: "reactionRoles",
+      label: "Reaction role panel",
+      shouldRun: () => Boolean(getReactionRoleDefinitions().length && (getReactionRoleChannelId() || getVerifyChannelId())),
+      run: () => postReactionRolePanel(source)
+    },
+    {
+      key: "birthday",
+      label: "Birthday panel",
+      shouldRun: () => Boolean(getBirthdayAnnouncementChannelId()),
+      run: () => postBirthdayPanel(source)
+    },
+    {
+      key: "affirmations",
+      label: "Anonymous affirmations panel",
+      shouldRun: () => Boolean(getAnonymousAffirmationsChannelId()),
+      run: () => postAnonymousAffirmationsPanel(source)
+    }
+  ];
+
+  const posted = [];
+  const skipped = [];
+  const failed = [];
+
+  for (const job of jobs) {
+    if (!job.shouldRun()) {
+      skipped.push({ key: job.key, label: job.label, reason: "Not configured yet." });
+      continue;
+    }
+
+    try {
+      const result = await job.run();
+      posted.push({
+        key: job.key,
+        label: job.label,
+        channelId: result?.channelId || result?.posted?.channelId || null,
+        messageId: result?.messageId || result?.posted?.messageId || result?.id || null
+      });
+    } catch (error) {
+      failed.push({
+        key: job.key,
+        label: job.label,
+        error: error.message || String(error)
+      });
+    }
+  }
+
+  recordAuditLog(source, "cards-reposted", {
+    posted,
+    skipped,
+    failed
+  });
+
+  return {
+    posted,
+    skipped,
+    failed,
+    summary: {
+      posted: posted.length,
+      skipped: skipped.length,
+      failed: failed.length
+    }
+  };
+}
+
 function getVerifiedVisibilityRoots(guild, scope, referenceChannel) {
   const normalizedScope = String(scope || "current").toLowerCase();
   if (normalizedScope === "all") {
@@ -11671,6 +11756,15 @@ async function handleWebApi(req, res, pathname) {
         messageId: posted.messageId
       });
       return sendWebJson(res, 200, { ok: true, posted });
+    }
+
+    if (req.method === "POST" && pathname === "/api/repost-all-panels") {
+      if (!hasWebAccess(auth, "admin")) {
+        return sendWebJson(res, 403, { error: "Admin web access is required." });
+      }
+      await readWebJsonBody(req).catch(() => null);
+      const result = await repostAllCards("web");
+      return sendWebJson(res, 200, { ok: true, ...result });
     }
 
     if (req.method === "POST" && pathname === "/api/onboarding-repair") {

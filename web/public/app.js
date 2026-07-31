@@ -5024,6 +5024,27 @@ async function repostRulesPanel() {
   setAlert(`Rules panel reposted in ${response.posted?.channelId ? `<#${response.posted.channelId}>` : "the configured channel"}.`);
 }
 
+async function repostAllCards() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to repost cards.", "error");
+    return;
+  }
+
+  const response = await api("/api/repost-all-panels", {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+
+  await loadAll();
+  const summary = response.summary || {};
+  const parts = [
+    `${summary.posted || 0} reposted`,
+    `${summary.skipped || 0} skipped`,
+    `${summary.failed || 0} failed`
+  ];
+  setAlert(`Card repost complete. ${parts.join(", ")}.`);
+}
+
 async function saveVerificationSettings(options = {}) {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change server settings.", "error");
@@ -5517,6 +5538,7 @@ function bindEvents() {
   $("#postBirthdayPanel").addEventListener("click", () => postBirthdayPanel().catch(error => setAlert(error.message, "error")));
   $("#repairVerifyPanel").addEventListener("click", () => repairVerifyPanel().catch(error => setAlert(error.message, "error")));
   $("#repairRolePanel").addEventListener("click", () => repairRolePanel().catch(error => setAlert(error.message, "error")));
+  $("#repostAllCards").addEventListener("click", () => repostAllCards().catch(error => setAlert(error.message, "error")));
   $("#refreshPendingVerifications").addEventListener("click", () => loadAndRenderPendingVerifications().catch(error => setAlert(error.message, "error")));
   $("#runGeneralChatCheck").addEventListener("click", () => updateGeneralChatRule("run-now").catch(error => setAlert(error.message, "error")));
   $("#toggleGeneralChatRule").addEventListener("click", () => updateGeneralChatRule("toggle").catch(error => setAlert(error.message, "error")));
