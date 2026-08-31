@@ -428,10 +428,23 @@ const settingLabels = {
   rulesChannelId: "Rules channel ID",
   welcomeChannelId: "Welcome channel ID",
   generalChatInactivityEnabled: "Server activity inactivity",
+  nobilityEnabled: "Nobility leveling enabled",
   logChannelId: "Log channel ID",
   automodLogChannelId: "AutoMod log channel ID",
   mutedRoleId: "Muted role ID"
 };
+
+const nobilityTierLabels = [
+  ["commoner", "Commoner"],
+  ["page", "Page"],
+  ["squire", "Squire"],
+  ["knight", "Knight"],
+  ["baron", "Baron"],
+  ["count", "Count"],
+  ["duke", "Duke"],
+  ["archduke", "Archduke"],
+  ["sovereign", "Sovereign"]
+];
 
 const privacySettingLabels = {
   messageArchiveEnabled: "Archive member chat logs",
@@ -2682,10 +2695,43 @@ function renderAutomodPreview() {
 function renderSettings() {
   const settings = state.config?.settings || {};
   const automod = state.config?.automod || {};
+  const nobilityRoleIds = settings.nobilityRoleIds && typeof settings.nobilityRoleIds === "object" ? settings.nobilityRoleIds : {};
+  const mappedNobilityRoles = Object.values(nobilityRoleIds).filter(Boolean).length;
+  const autoProvisionedAt = settings.nobilityRoleAutoProvisionedAt ? formatDate(settings.nobilityRoleAutoProvisionedAt) : "Pending";
+
+  $("#nobilityProvisionSummary").innerHTML = [
+    ["Nobility", settings.nobilityEnabled === false ? "Disabled" : "Enabled"],
+    ["Mapped roles", `${mappedNobilityRoles}`],
+    ["Auto-provision", autoProvisionedAt],
+    ["Role map", `${Object.keys(nobilityRoleIds).length} tiers`]
+  ].map(([label, value]) => `<article class="summary-item"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>`).join("");
+
+  $("#nobilityRoleMapDetails").innerHTML = nobilityTierLabels
+    .map(([tierKey, tierLabel]) => {
+      const roleId = nobilityRoleIds[tierKey];
+      return `
+        <article class="summary-item">
+          <span>${escapeHtml(tierLabel)}</span>
+          <strong>${roleId ? `<@&${escapeHtml(roleId)}>` : "Not set"}</strong>
+        </article>
+      `;
+    })
+    .join("");
 
   $("#generalSettingsFields").innerHTML = Object.entries(settingLabels)
     .map(([key, label]) => {
       if (key === "generalChatInactivityEnabled") {
+        return `
+          <label>${label}
+            <select data-setting="${key}">
+              <option value="true" ${String(settings[key] ?? true) === "true" ? "selected" : ""}>On</option>
+              <option value="false" ${String(settings[key] ?? true) === "false" ? "selected" : ""}>Off</option>
+            </select>
+          </label>
+        `;
+      }
+
+      if (key === "nobilityEnabled") {
         return `
           <label>${label}
             <select data-setting="${key}">
@@ -4764,6 +4810,32 @@ async function saveSettings(options = {}) {
   }
 }
 
+async function autoCreateNobilityRoles(force = true) {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to create nobility roles.", "error");
+    return;
+  }
+
+  const result = await api("/api/nobility/autocreate", {
+    method: "POST",
+    body: JSON.stringify({ force })
+  });
+
+  if (result.settings) {
+    state.config.settings = result.settings;
+  }
+  renderAll();
+
+  const createdCount = Array.isArray(result.result?.created) ? result.result.created.length : 0;
+  const reusedCount = Array.isArray(result.result?.reused) ? result.result.reused.length : 0;
+  const skippedCount = Array.isArray(result.result?.skipped) ? result.result.skipped.length : 0;
+  setAlert(`Nobility roles processed. Created ${createdCount}, reused ${reusedCount}, skipped ${skippedCount}.`);
+}
+
+async function reprovisionMissingNobilityRoles() {
+  return autoCreateNobilityRoles(false);
+}
+
 async function savePrivacySettings(options = {}) {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change privacy settings.", "error");
@@ -5477,6 +5549,8 @@ function bindEvents() {
   $("#syncGoogleBlockListButton").addEventListener("click", () => syncGoogleBlockList().catch(error => setAlert(error.message, "error")));
   $("#saveAllSettings").addEventListener("click", () => saveAllSettings().catch(error => setAlert(error.message, "error")));
   $("#saveSettings").addEventListener("click", () => saveSettings().catch(error => setAlert(error.message, "error")));
+  $("#autocreateNobilityRolesButton").addEventListener("click", () => autoCreateNobilityRoles().catch(error => setAlert(error.message, "error")));
+  $("#reprovisionNobilityRolesButton").addEventListener("click", () => reprovisionMissingNobilityRoles().catch(error => setAlert(error.message, "error")));
   $("#savePrivacySettings").addEventListener("click", () => savePrivacySettings().catch(error => setAlert(error.message, "error")));
   $("#saveWebAccountButton").addEventListener("click", () => saveWebAccount().catch(error => setAlert(error.message, "error")));
   $("#deleteWebAccountButton").addEventListener("click", () => deleteWebAccount().catch(error => setAlert(error.message, "error")));

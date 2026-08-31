@@ -28,6 +28,21 @@ const {
 } = require("discord.js");
 const { createCanvas } = require("@napi-rs/canvas");
 const { createLogger } = require("./lib/logger");
+const {
+  createNobilityStore,
+  formatNobilityLadder,
+  getNobilityProgress,
+  normalizeNobilityTiers,
+  NOBILITY_TIERS
+} = require("./lib/nobility");
+const {
+  createDailyChallengeStore,
+  formatChallengeSummary,
+  formatChallengeProgress,
+  DAILY_CHALLENGE_TYPES
+} = require("./lib/daily-challenges");
+
+const NOBILITY_DIFFICULTY_MULTIPLIER = 1.06;
 
 const {
   TOKEN,
@@ -89,7 +104,8 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildMessageReactions,
-    GatewayIntentBits.MessageContent
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildVoiceStates
   ],
   partials: [Partials.Message, Partials.Channel, Partials.Reaction]
 });
@@ -198,6 +214,8 @@ let scheduledReportInterval = null;
 let googleBlockListInterval = null;
 let generalChatSweepInterval = null;
 let birthdaySweepInterval = null;
+let dailyChallengeVoiceInterval = null;
+const dailyChallengeVoiceSessions = new Map();
 
 const dataDir = resolveDataDir(
   process.env.MOCHI_DATA_DIR || process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH,
@@ -329,6 +347,21 @@ function createDefaultConfig() {
     settings: {
       verifyChannelId: null,
       rulesChannelId: null,
+      nobilityEnabled: true,
+      nobilityXpPerMessage: 5,
+      nobilityCooldownMs: 60 * 1000,
+      nobilityRoleAutoProvisionedAt: null,
+      dailyEnabled: true,
+      dailyXpReward: 25,
+      dailyStreakBonus: 5,
+      dailyCooldownMs: 24 * 60 * 60 * 1000,
+      dailyChallengeEnabled: true,
+      dailyChallengeRewardBonus: 0,
+      dailyChallengeTypeEnabled: Object.fromEntries(DAILY_CHALLENGE_TYPES.map(type => [type.key, true])),
+      dailyChallengeTypeRewardAdjustments: Object.fromEntries(DAILY_CHALLENGE_TYPES.map(type => [type.key, 0])),
+      nobilityRoleIds: {},
+      nobilityAnnouncementChannelId: null,
+      nobilityTiers: NOBILITY_TIERS.map(tier => ({ ...tier })),
       rulesCardTitle: "Server rules ✿",
       rulesCardDescription: "A cozy little guide to keep the server kind, comfy, and fun for everyone. Thanks for helping keep Mochi sweet and safe.",
       rulesCardRules: [
@@ -959,21 +992,13 @@ function buildRuleVerifyEmbed() {
 
   return makeEmbed({
     title: "Rules check + verification",
-    description:
-      "Most members use this quick path.\n\n" +
-      "Read the rules, click the button once, and I’ll unlock the server for you.",
+    description: "Read the rules, click verify, and I’ll unlock the server for you.",
     color: COLORS.pink,
     fields: [
-      { name: "1. Read the rules", value: "Make sure you’ve looked over the rules card in this channel.", inline: false },
-      { name: "2. Click verify", value: "Press the button below to confirm you’ve read everything and get access.", inline: false },
-      ...(captchaStep
-        ? [{ name: captchaStep, value: "A quick human check appears only for newer or suspicious accounts.", inline: false }]
-        : []),
-      ...(ageStep
-        ? [{ name: ageStep, value: "Tell me your age so I can give you the right age-based role after verification.", inline: false }]
-        : []),
-      { name: "TikTok matching", value: handle ? `Enabled for @${handle}.` : "Disabled.", inline: false },
       { name: "How it works", value: howItWorks, inline: false },
+      ...(captchaStep ? [{ name: captchaStep, value: "Shown for newer or suspicious accounts.", inline: false }] : []),
+      ...(ageStep ? [{ name: ageStep, value: "Used to assign the correct age-based role.", inline: false }] : []),
+      { name: "TikTok", value: handle ? `Enabled for @${handle}.` : "Disabled.", inline: false },
       { name: "Verified role", value: verifiedRoleId ? `<@&${verifiedRoleId}>` : "Not set", inline: true },
       { name: "Unverified role", value: unverifiedRoleId ? `<@&${unverifiedRoleId}>` : "Optional", inline: true },
       { name: "Age roles", value: ageRoleCount ? `${ageRoleCount} rule${ageRoleCount === 1 ? "" : "s"} configured` : "Not configured", inline: true }
@@ -1370,6 +1395,67 @@ function loadConfig() {
       settings: {
         ...defaults.settings,
         ...(parsed.settings || {}),
+        nobilityEnabled: parsed.settings?.nobilityEnabled !== undefined
+          ? Boolean(parsed.settings.nobilityEnabled)
+          : defaults.settings.nobilityEnabled,
+        nobilityXpPerMessage: Number.isFinite(Number(parsed.settings?.nobilityXpPerMessage))
+          ? Math.max(1, Math.min(100, Number(parsed.settings.nobilityXpPerMessage)))
+          : defaults.settings.nobilityXpPerMessage,
+        nobilityCooldownMs: Number.isFinite(Number(parsed.settings?.nobilityCooldownMs))
+          ? Math.max(5000, Math.min(10 * 60 * 1000, Number(parsed.settings.nobilityCooldownMs)))
+          : defaults.settings.nobilityCooldownMs,
+        nobilityRoleAutoProvisionedAt: typeof parsed.settings?.nobilityRoleAutoProvisionedAt === "string"
+          ? parsed.settings.nobilityRoleAutoProvisionedAt
+          : defaults.settings.nobilityRoleAutoProvisionedAt,
+        dailyEnabled: parsed.settings?.dailyEnabled !== undefined
+          ? Boolean(parsed.settings.dailyEnabled)
+          : defaults.settings.dailyEnabled,
+        dailyXpReward: Number.isFinite(Number(parsed.settings?.dailyXpReward))
+          ? Math.max(1, Math.min(1000, Number(parsed.settings.dailyXpReward)))
+          : defaults.settings.dailyXpReward,
+        dailyStreakBonus: Number.isFinite(Number(parsed.settings?.dailyStreakBonus))
+          ? Math.max(0, Math.min(1000, Number(parsed.settings.dailyStreakBonus)))
+          : defaults.settings.dailyStreakBonus,
+        dailyCooldownMs: Number.isFinite(Number(parsed.settings?.dailyCooldownMs))
+          ? Math.max(60 * 60 * 1000, Math.min(7 * 24 * 60 * 60 * 1000, Number(parsed.settings.dailyCooldownMs)))
+          : defaults.settings.dailyCooldownMs,
+        dailyChallengeEnabled: parsed.settings?.dailyChallengeEnabled !== undefined
+          ? Boolean(parsed.settings.dailyChallengeEnabled)
+          : defaults.settings.dailyChallengeEnabled,
+        dailyChallengeRewardBonus: Number.isFinite(Number(parsed.settings?.dailyChallengeRewardBonus))
+          ? Math.max(0, Math.min(1000, Number(parsed.settings.dailyChallengeRewardBonus)))
+          : defaults.settings.dailyChallengeRewardBonus,
+        dailyChallengeTypeEnabled: parsed.settings?.dailyChallengeTypeEnabled && typeof parsed.settings.dailyChallengeTypeEnabled === "object"
+          ? Object.fromEntries(
+              DAILY_CHALLENGE_TYPES.map(type => [
+                type.key,
+                parsed.settings.dailyChallengeTypeEnabled[type.key] !== false
+              ])
+            )
+          : defaults.settings.dailyChallengeTypeEnabled,
+        dailyChallengeTypeRewardAdjustments: parsed.settings?.dailyChallengeTypeRewardAdjustments && typeof parsed.settings.dailyChallengeTypeRewardAdjustments === "object"
+          ? Object.fromEntries(
+              DAILY_CHALLENGE_TYPES.map(type => [
+                type.key,
+                Number.isFinite(Number(parsed.settings.dailyChallengeTypeRewardAdjustments[type.key]))
+                  ? Math.max(-1000, Math.min(1000, Number(parsed.settings.dailyChallengeTypeRewardAdjustments[type.key])))
+                  : 0
+              ])
+            )
+          : defaults.settings.dailyChallengeTypeRewardAdjustments,
+        nobilityRoleIds: parsed.settings?.nobilityRoleIds && typeof parsed.settings.nobilityRoleIds === "object"
+          ? Object.fromEntries(
+              Object.entries(parsed.settings.nobilityRoleIds)
+                .map(([key, value]) => [String(key).trim().toLowerCase(), String(value).trim()])
+                .filter(([key, value]) => key && value)
+            )
+          : {},
+        nobilityAnnouncementChannelId: typeof parsed.settings?.nobilityAnnouncementChannelId === "string"
+          ? parsed.settings.nobilityAnnouncementChannelId
+          : null,
+        nobilityTiers: Array.isArray(parsed.settings?.nobilityTiers)
+          ? normalizeNobilityTiers(parsed.settings.nobilityTiers)
+          : defaults.settings.nobilityTiers,
         ageRoleRules: typeof parsed.settings?.ageRoleRules === "string"
           ? parsed.settings.ageRoleRules
           : defaults.settings.ageRoleRules,
@@ -1397,6 +1483,8 @@ function loadConfig() {
 }
 
 let config = loadConfig();
+const nobilityStore = createNobilityStore({ dataDir, log });
+const dailyChallengeStore = createDailyChallengeStore({ dataDir, log });
 
 if (!config.automod.ruleActions?.["ai-review"] && !config.automod.alertOnlyRules.includes("ai-review")) {
   config.automod.alertOnlyRules.push("ai-review");
@@ -1867,6 +1955,125 @@ function getMutedRoleId() {
   return config.settings.mutedRoleId || null;
 }
 
+function getNobilityEnabled() {
+  return config.settings.nobilityEnabled !== false;
+}
+
+function getNobilityXpPerMessage() {
+  const xp = Number(config.settings.nobilityXpPerMessage);
+  return Number.isFinite(xp) && xp > 0 ? Math.min(100, Math.floor(xp)) : 5;
+}
+
+function getNobilityCooldownMs() {
+  const cooldown = Number(config.settings.nobilityCooldownMs);
+  return Number.isFinite(cooldown) && cooldown > 0 ? Math.max(5000, Math.min(10 * 60 * 1000, Math.floor(cooldown))) : 60 * 1000;
+}
+
+function getDailyEnabled() {
+  return config.settings.dailyEnabled !== false;
+}
+
+function getDailyXpReward() {
+  const xp = Number(config.settings.dailyXpReward);
+  return Number.isFinite(xp) && xp > 0 ? Math.min(1000, Math.floor(xp)) : 25;
+}
+
+function getDailyStreakBonus() {
+  const bonus = Number(config.settings.dailyStreakBonus);
+  return Number.isFinite(bonus) && bonus >= 0 ? Math.min(1000, Math.floor(bonus)) : 5;
+}
+
+function getDailyCooldownMs() {
+  const cooldown = Number(config.settings.dailyCooldownMs);
+  return Number.isFinite(cooldown) && cooldown > 0
+    ? Math.max(60 * 60 * 1000, Math.min(7 * 24 * 60 * 60 * 1000, Math.floor(cooldown)))
+    : 24 * 60 * 60 * 1000;
+}
+
+function getDailyChallengeEnabled() {
+  return config.settings.dailyChallengeEnabled !== false;
+}
+
+function getDailyChallengeRewardBonus() {
+  const bonus = Number(config.settings.dailyChallengeRewardBonus);
+  return Number.isFinite(bonus) && bonus >= 0 ? Math.min(1000, Math.floor(bonus)) : 0;
+}
+
+function getDailyChallengeTypeRewardBonus(typeKey) {
+  const adjustments = config.settings.dailyChallengeTypeRewardAdjustments && typeof config.settings.dailyChallengeTypeRewardAdjustments === "object"
+    ? config.settings.dailyChallengeTypeRewardAdjustments
+    : {};
+  const bonus = Number(adjustments[typeKey]);
+  return Number.isFinite(bonus) ? Math.max(-1000, Math.min(1000, Math.floor(bonus))) : 0;
+}
+
+function getDailyChallengeTypeEnabled(typeKey) {
+  const enabledMap = config.settings.dailyChallengeTypeEnabled && typeof config.settings.dailyChallengeTypeEnabled === "object"
+    ? config.settings.dailyChallengeTypeEnabled
+    : {};
+  return enabledMap[typeKey] !== false;
+}
+
+function getDailyChallengeDisabledTypeKeys() {
+  return DAILY_CHALLENGE_TYPES
+    .map(type => type.key)
+    .filter(typeKey => !getDailyChallengeTypeEnabled(typeKey));
+}
+
+function getNobilityRoleIds() {
+  return config.settings.nobilityRoleIds && typeof config.settings.nobilityRoleIds === "object"
+    ? config.settings.nobilityRoleIds
+    : {};
+}
+
+function getNobilityRoleAutoProvisionedAt() {
+  return typeof config.settings.nobilityRoleAutoProvisionedAt === "string" && config.settings.nobilityRoleAutoProvisionedAt
+    ? config.settings.nobilityRoleAutoProvisionedAt
+    : null;
+}
+
+function getNobilityRoleId(rankKey) {
+  return getNobilityRoleIds()[rankKey] || null;
+}
+
+function getNobilityAnnouncementChannelId() {
+  return config.settings.nobilityAnnouncementChannelId || null;
+}
+
+function getNobilityTiers() {
+  return applyNobilityDifficultyCurve(config.settings.nobilityTiers);
+}
+
+function applyNobilityDifficultyCurve(tiers, multiplier = NOBILITY_DIFFICULTY_MULTIPLIER) {
+  const ladder = normalizeNobilityTiers(tiers);
+  const growth = Number(multiplier);
+  if (!Number.isFinite(growth) || growth <= 1) {
+    return ladder;
+  }
+
+  const adjusted = [];
+  let previousBaseRequiredXp = 0;
+  let previousAdjustedRequiredXp = 0;
+
+  for (let index = 0; index < ladder.length; index += 1) {
+    const tier = ladder[index];
+    if (index === 0) {
+      adjusted.push({ ...tier, requiredXp: 0 });
+      previousBaseRequiredXp = tier.requiredXp;
+      previousAdjustedRequiredXp = 0;
+      continue;
+    }
+
+    const baseGap = Math.max(1, tier.requiredXp - previousBaseRequiredXp);
+    const scaledGap = Math.max(1, Math.round(baseGap * Math.pow(growth, index - 1)));
+    previousAdjustedRequiredXp += scaledGap;
+    adjusted.push({ ...tier, requiredXp: previousAdjustedRequiredXp });
+    previousBaseRequiredXp = tier.requiredXp;
+  }
+
+  return adjusted;
+}
+
 function getBirthdayRoleId() {
   return config.settings.birthdayRoleId || null;
 }
@@ -1997,14 +2204,12 @@ function buildBirthdayEmbed(user, entry) {
 function buildBirthdayPanelEmbed() {
   return makeEmbed({
     title: "Birthday giggle nook",
-    description:
-      "Tap the button below and tell me your month and day.\n\n" +
-      "I’ll tuck it into the birthday giggle nook, hand out the birthday role for 24 hours, and post a silly-sweet birthday cheer when your day comes around.",
+    description: "Tap the button below and add your month and day.",
     color: COLORS.pink,
     fields: [
-      { name: "Privacy", value: "Only month and day are stored. No year is saved.", inline: false },
+      { name: "Privacy", value: "Only month and day are stored.", inline: true },
       { name: "Reward", value: `Birthday role lasts ${formatDuration(BIRTHDAY_ROLE_DURATION_MS)}.`, inline: true },
-      { name: "Public", value: "Birthdays are visible to staff and can be listed publicly.", inline: true }
+      { name: "Public", value: "Staff can view birthday entries.", inline: true }
     ],
     image: { url: "attachment://birthday-card.png" }
   });
@@ -3911,6 +4116,165 @@ const allCommands = [
     .setDescription("Show the Mochi Bird leaderboard"),
 
   new SlashCommandBuilder()
+    .setName("rank")
+    .setDescription("Show your nobility rank and progress")
+    .addUserOption(option =>
+      option
+        .setName("user")
+        .setDescription("Optional user to inspect")
+        .setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("nobility")
+    .setDescription("Show the compact nobility summary"),
+
+  new SlashCommandBuilder()
+    .setName("daily")
+    .setDescription("Claim your daily XP reward"),
+
+  new SlashCommandBuilder()
+    .setName("dailychallenge")
+    .setDescription("View or claim today's daily XP challenge")
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("view")
+        .setDescription("View today's daily challenge and progress")
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("claim")
+        .setDescription("Claim the XP reward for today's challenge")
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("leaderboard")
+        .setDescription("View the daily challenge completion leaderboard")
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("stats")
+        .setDescription("View the daily challenge type stats")
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("preview")
+        .setDescription("Preview a user's daily challenge")
+        .addUserOption(option =>
+          option.setName("user").setDescription("Member to preview").setRequired(false)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("reroll")
+        .setDescription("Force-reroll today's challenge for a member")
+        .addUserOption(option =>
+          option.setName("user").setDescription("Member to reroll").setRequired(true)
+        )
+    ),
+
+  new SlashCommandBuilder()
+    .setName("nobilityleaderboard")
+    .setDescription("Show the nobility XP leaderboard"),
+
+  new SlashCommandBuilder()
+    .setName("nobilityrole")
+    .setDescription("Configure nobility role rewards")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("set")
+        .setDescription("Assign a role to a nobility tier")
+        .addStringOption(option =>
+          option
+            .setName("tier")
+            .setDescription("Nobility tier")
+            .setRequired(true)
+            .addChoices(...NOBILITY_TIERS.map(tier => ({ name: tier.title, value: tier.key })))
+        )
+        .addRoleOption(option =>
+          option.setName("role").setDescription("Role to grant at that tier").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("remove")
+        .setDescription("Remove a nobility tier role mapping")
+        .addStringOption(option =>
+          option
+            .setName("tier")
+            .setDescription("Nobility tier")
+            .setRequired(true)
+            .addChoices(...NOBILITY_TIERS.map(tier => ({ name: tier.title, value: tier.key })))
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("view")
+        .setDescription("View configured nobility role mappings")
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("autocreate")
+        .setDescription("Create any missing nobility roles and map them automatically")
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("reset")
+        .setDescription("Clear all nobility role mappings")
+    ),
+
+  new SlashCommandBuilder()
+    .setName("nobilitytier")
+    .setDescription("Edit the nobility XP thresholds")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("view")
+        .setDescription("View the current nobility thresholds")
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("set")
+        .setDescription("Set a threshold for one tier")
+        .addStringOption(option =>
+          option
+            .setName("tier")
+            .setDescription("Nobility tier")
+            .setRequired(true)
+            .addChoices(...NOBILITY_TIERS.map(tier => ({ name: tier.title, value: tier.key })))
+        )
+        .addIntegerOption(option =>
+          option
+            .setName("xp")
+            .setDescription("Required XP for this tier")
+            .setRequired(true)
+            .setMinValue(0)
+            .setMaxValue(1000000)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("reset")
+        .setDescription("Restore the default nobility thresholds")
+    ),
+
+  new SlashCommandBuilder()
+    .setName("nobilitysync")
+    .setDescription("Backfill nobility roles for members")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addStringOption(option =>
+      option
+        .setName("scope")
+        .setDescription("Which members to sync")
+        .setRequired(true)
+        .addChoices(
+          { name: "Tracked members only", value: "tracked" },
+          { name: "All guild members", value: "all" }
+        )
+    ),
+
+  new SlashCommandBuilder()
     .setName("adminpanel")
     .setDescription("Open the interactive Mochi admin panel")
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers),
@@ -4835,25 +5199,6 @@ const allCommands = [
     )
     .addSubcommand(subcommand =>
       subcommand
-        .setName("affirmenabled")
-        .setDescription("Enable or disable anonymous affirmations")
-        .addBooleanOption(option =>
-          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
-        .setName("affirmcooldown")
-        .setDescription("Set the anonymous affirmations cooldown")
-        .addStringOption(option =>
-          option
-            .setName("duration")
-            .setDescription("Duration like 10s, 1m, 5m")
-            .setRequired(true)
-        )
-    )
-    .addSubcommand(subcommand =>
-      subcommand
         .setName("tiktokhandle")
         .setDescription("Set the TikTok handle used for nickname verification")
         .addStringOption(option =>
@@ -4904,6 +5249,95 @@ const allCommands = [
     )
     .addSubcommand(subcommand =>
       subcommand
+        .setName("nobilityenabled")
+        .setDescription("Enable or disable nobility leveling")
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("dailyenabled")
+        .setDescription("Enable or disable daily XP claims")
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("dailyreward")
+        .setDescription("Set the base daily XP reward")
+        .addIntegerOption(option =>
+          option.setName("xp").setDescription("Base XP reward").setRequired(true).setMinValue(1).setMaxValue(1000)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("dailystreakbonus")
+        .setDescription("Set the per-day streak bonus")
+        .addIntegerOption(option =>
+          option.setName("xp").setDescription("Bonus XP per streak step").setRequired(true).setMinValue(0).setMaxValue(1000)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("dailycooldown")
+        .setDescription("Set the daily claim cooldown")
+        .addStringOption(option =>
+          option
+            .setName("duration")
+            .setDescription("Duration like 12h or 24h")
+            .setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("dailychallengeenabled")
+        .setDescription("Enable or disable daily challenges")
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("dailychallengebonus")
+        .setDescription("Set the bonus XP added to daily challenge rewards")
+        .addIntegerOption(option =>
+          option.setName("xp").setDescription("Bonus XP added to each challenge reward").setRequired(true).setMinValue(0).setMaxValue(1000)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("dailychallengereward")
+        .setDescription("Set a per-type reward adjustment for daily challenges")
+        .addStringOption(option =>
+          option
+            .setName("type")
+            .setDescription("Challenge type")
+            .setRequired(true)
+            .addChoices(...DAILY_CHALLENGE_TYPES.map(type => ({ name: type.title, value: type.key })))
+        )
+        .addIntegerOption(option =>
+          option.setName("xp").setDescription("Reward adjustment for this type").setRequired(true).setMinValue(-1000).setMaxValue(1000)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName("dailychallengetype")
+        .setDescription("Enable or disable a specific daily challenge type")
+        .addStringOption(option =>
+          option
+            .setName("type")
+            .setDescription("Challenge type")
+            .setRequired(true)
+            .addChoices(...DAILY_CHALLENGE_TYPES.map(type => ({ name: type.title, value: type.key })))
+        )
+        .addBooleanOption(option =>
+          option.setName("enabled").setDescription("Enable or disable this challenge type").setRequired(true)
+        )
+    )
+    .addSubcommand(subcommand =>
+      subcommand
         .setName("reset")
         .setDescription("Reset one saved setting back to its env default")
         .addStringOption(option =>
@@ -4921,15 +5355,22 @@ const allCommands = [
               { name: "verification captcha", value: "captcha" },
               { name: "welcome channel", value: "welcomechannel" },
               { name: "affirmations channel", value: "affirmchannel" },
-              { name: "affirmations enabled", value: "affirmenabled" },
-              { name: "affirmations cooldown", value: "affirmcooldown" },
               { name: "TikTok handle", value: "tiktokhandle" },
               { name: "TikTok aliases", value: "tiktokaliases" },
               { name: "verified role", value: "verifiedrole" },
               { name: "unverified role", value: "unverifiedrole" },
               { name: "birthday role", value: "birthdayrole" },
               { name: "birthday channel", value: "birthdaychannel" },
-              { name: "rules channel", value: "ruleschannel" }
+              { name: "rules channel", value: "ruleschannel" },
+              { name: "nobility enabled", value: "nobilityenabled" },
+              { name: "daily enabled", value: "dailyenabled" },
+              { name: "daily reward", value: "dailyreward" },
+              { name: "daily streak bonus", value: "dailystreakbonus" },
+              { name: "daily cooldown", value: "dailycooldown" },
+              { name: "daily challenge enabled", value: "dailychallengeenabled" },
+              { name: "daily challenge bonus", value: "dailychallengebonus" },
+              { name: "daily challenge reward", value: "dailychallengereward" },
+              { name: "daily challenge type", value: "dailychallengetype" }
             )
         )
     ),
@@ -6669,12 +7110,505 @@ function buildSettingsSummary() {
     `Rules channel: ${getRulesChannelId() ? `<#${getRulesChannelId()}>` : "Not set"}`,
     `Server activity: Any server chat`,
     `Reaction roles: ${getReactionRoleChannelId() ? `<#${getReactionRoleChannelId()}>` : "Not set"}`,
+    `Nobility: ${getNobilityEnabled() ? "Enabled" : "Disabled"} (${Object.values(getNobilityRoleIds()).filter(Boolean).length} roles set)`,
+    `Nobility auto-provision: ${getNobilityRoleAutoProvisionedAt() ? `Completed <t:${Math.floor(new Date(getNobilityRoleAutoProvisionedAt()).getTime() / 1000)}:R>` : "Pending"}`,
+    `Daily XP: ${getDailyEnabled() ? "Enabled" : "Disabled"} (${getDailyXpReward()} base, ${getDailyStreakBonus()} streak bonus)`,
+    `Daily Challenge: ${getDailyChallengeEnabled() ? "Enabled" : "Disabled"} (${getDailyChallengeRewardBonus()} bonus XP, ${DAILY_CHALLENGE_TYPES.filter(type => getDailyChallengeTypeEnabled(type.key)).length}/${DAILY_CHALLENGE_TYPES.length} types enabled)`,
     `Server activity inactivity: ${isGeneralChatInactivityEnabled() ? "Enabled" : "Disabled"}`,
     `Anonymous affirmations: ${isAnonymousAffirmationsEnabled() ? "Enabled" : "Disabled"} (${getAnonymousAffirmationsChannelId() ? `<#${getAnonymousAffirmationsChannelId()}>` : "Not set"})`,
     `Muted role: ${getMutedRoleId() ? `<@&${getMutedRoleId()}>` : "Not set"}`,
     buildBirthdaySummary(),
     buildTikTokVerificationSummary()
   ].join("\n");
+}
+
+function buildNobilityRoleSummary() {
+  return getNobilityTiers()
+    .map(tier => {
+      const roleId = getNobilityRoleId(tier.key);
+      return `${tier.title}: ${roleId ? `<@&${roleId}>` : "Not set"}`;
+    })
+    .join("\n");
+}
+
+function buildNobilityRoleMapDetails() {
+  return getNobilityTiers()
+    .map(tier => {
+      const roleId = getNobilityRoleId(tier.key);
+      return `${tier.title}: ${roleId ? `<@&${roleId}>` : "Not set"}`;
+    })
+    .join("\n");
+}
+
+function buildNobilitySummaryLine() {
+  const roleCount = Object.values(getNobilityRoleIds()).filter(Boolean).length;
+  return [
+    `Nobility: ${getNobilityEnabled() ? "Enabled" : "Disabled"}`,
+    `Nobility XP: ${getNobilityXpPerMessage()} per eligible message`,
+    `Nobility cooldown: ${formatDuration(getNobilityCooldownMs())}`,
+    `Difficulty curve: +${Math.round((NOBILITY_DIFFICULTY_MULTIPLIER - 1) * 100)}% per tier`,
+    `Daily XP: ${getDailyEnabled() ? `${getDailyXpReward()} base + ${getDailyStreakBonus()} streak bonus` : "Disabled"}`,
+    `Daily cooldown: ${formatDuration(getDailyCooldownMs())}`,
+    `Nobility roles: ${roleCount} configured`,
+    `Nobility tiers: ${getNobilityTiers().length} configured`
+  ].join("\n");
+}
+
+function buildDailyChallengeSummaryLine() {
+  const enabledTypeCount = DAILY_CHALLENGE_TYPES.filter(type => getDailyChallengeTypeEnabled(type.key)).length;
+  const tunedTypeCount = DAILY_CHALLENGE_TYPES.filter(type => getDailyChallengeTypeRewardBonus(type.key) !== 0).length;
+  return [
+    `Daily challenge: ${getDailyChallengeEnabled() ? "Enabled" : "Disabled"}`,
+    `Daily challenge types: ${enabledTypeCount}/${DAILY_CHALLENGE_TYPES.length} enabled`,
+    `Daily challenge reward bonus: ${getDailyChallengeRewardBonus()} XP`,
+    `Per-type tuning: ${tunedTypeCount} types adjusted`,
+    "Reset time: midnight America/New_York",
+    "Claim reward: based on the generated task"
+  ].join("\n");
+}
+
+function buildNobilityTierEmbed(profile, targetUser) {
+  const tiers = getNobilityTiers();
+  const progress = getNobilityProgress(profile?.totalXp || 0, tiers);
+  const nextText = progress.next
+    ? `${progress.xpToNext} XP until **${progress.next.title}**.`
+    : "You have reached the highest nobility tier.";
+  const roleId = getNobilityRoleId(progress.current.key);
+
+  return makeEmbed({
+    title: targetUser ? `${targetUser.username}'s Nobility` : "Your Nobility Rank",
+    description: [
+      `Current title: **${progress.current.title}**`,
+      `XP: **${progress.totalXp}**`,
+      `Progress: **${progress.xpIntoLevel}** XP into this tier.`,
+      nextText,
+      roleId ? `Role reward: <@&${roleId}>` : "Role reward: not configured."
+    ].join("\n"),
+    color: COLORS.purple,
+    fields: [
+      { name: "Messages counted", value: String(profile?.totalMessages || 0), inline: true },
+      { name: "Rank level", value: `${progress.level}/${tiers.length}`, inline: true },
+      { name: "Cooldown", value: formatDuration(getNobilityCooldownMs()), inline: true }
+    ]
+  });
+}
+
+function buildDailyChallengeEmbed(challenge, title = "Today's Daily Challenge") {
+  if (!challenge) {
+    return makeEmbed({
+      title,
+      description: "No daily challenge is available right now.",
+      color: COLORS.yellow
+    });
+  }
+
+  const progressText = challenge.claimedAt
+    ? "Claimed"
+    : formatChallengeProgress(challenge);
+
+  return makeEmbed({
+    title,
+    description: formatChallengeSummary(challenge),
+    color: challenge.claimedAt ? COLORS.green : COLORS.yellow,
+    fields: [
+      { name: "Progress", value: progressText, inline: true },
+      { name: "Reward", value: `${getDailyChallengeAdjustedReward(challenge)} XP`, inline: true },
+      { name: "Reset", value: "Midnight America/New_York", inline: true }
+    ]
+  });
+}
+
+function getDailyChallengeAdjustedReward(challenge) {
+  if (!challenge) {
+    return 0;
+  }
+
+  return Math.max(1, Math.floor(Number(challenge.rewardXp) || 0))
+    + getDailyChallengeRewardBonus()
+    + getDailyChallengeTypeRewardBonus(challenge.type);
+}
+
+function buildDailyChallengePreviewEmbed(challenge, targetUser) {
+  if (!challenge) {
+    return makeEmbed({
+      title: "Daily Challenge Preview",
+      description: "No preview is available right now.",
+      color: COLORS.yellow
+    });
+  }
+
+  const rewardBase = Math.max(1, Math.floor(Number(challenge.rewardXp) || 0));
+  const typeBonus = getDailyChallengeTypeRewardBonus(challenge.type);
+  const globalBonus = getDailyChallengeRewardBonus();
+  const totalReward = rewardBase + typeBonus + globalBonus;
+  const enabledTypes = DAILY_CHALLENGE_TYPES.filter(type => getDailyChallengeTypeEnabled(type.key));
+
+  return makeEmbed({
+    title: targetUser ? `Daily Challenge Preview for ${targetUser.username}` : "Daily Challenge Preview",
+    description: formatChallengeSummary(challenge),
+    color: COLORS.blue,
+    fields: [
+      { name: "Reward Breakdown", value: `Base: ${rewardBase} XP\nType bonus: ${typeBonus} XP\nGlobal bonus: ${globalBonus} XP\nTotal: ${totalReward} XP`, inline: false },
+      { name: "Enabled Types", value: enabledTypes.map(type => type.title).join(", ") || "None", inline: false },
+      { name: "Target", value: challenge.targetChannelId ? `<#${challenge.targetChannelId}>` : "Any eligible channel", inline: true }
+    ]
+  });
+}
+
+function buildDailyChallengeStatsEmbed(typeStats) {
+  const totalCompletions = typeStats.reduce((sum, entry) => sum + entry.completions, 0);
+  const topLine = typeStats.length
+    ? typeStats.map((entry, index) => `${index + 1}. ${entry.title} - ${entry.completions}`).join("\n")
+    : "No challenge completions recorded yet.";
+
+  return makeEmbed({
+    title: "Daily Challenge Type Stats",
+    description: topLine,
+    color: COLORS.purple,
+    fields: [
+      { name: "Tracked Types", value: `${typeStats.length}`, inline: true },
+      { name: "Total Completions", value: `${totalCompletions}`, inline: true }
+    ]
+  });
+}
+
+function formatDailyChallengeLeaderboard(entries) {
+  if (!entries.length) {
+    return "No completed daily challenges yet.";
+  }
+
+  return entries.map((entry, index) => {
+    return `${index + 1}. ${entry.userTag} - ${entry.totalCompletions} completions, ${entry.totalRewardXp} XP`;
+  }).join("\n");
+}
+
+function buildDailyChallengeLeaderboardEmbed(entries) {
+  return makeEmbed({
+    title: "Daily Challenge Leaderboard",
+    description: formatDailyChallengeLeaderboard(entries),
+    color: COLORS.mint,
+    fields: [
+      { name: "Entries", value: `${entries.length}`, inline: true },
+      { name: "Ranking", value: "Sorted by completions, then reward XP", inline: true }
+    ]
+  });
+}
+
+function buildDailyChallengeContext(interaction) {
+  return {
+    guildId: interaction.guildId || null,
+    eligibleChannelIds: interaction.guild
+      ? interaction.guild.channels.cache
+          .filter(channel => [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type))
+          .map(channel => channel.id)
+      : [],
+    disabledTypeKeys: getDailyChallengeDisabledTypeKeys()
+  };
+}
+
+function getDailyChallengeVoiceSessionKey(guildId, userId) {
+  return `${guildId}:${userId}`;
+}
+
+function syncDailyChallengeVoiceSession(state) {
+  if (!state?.guildId || !state?.id) {
+    return;
+  }
+
+  const key = getDailyChallengeVoiceSessionKey(state.guildId, state.id);
+  const existing = dailyChallengeVoiceSessions.get(key) || null;
+  if (!state.channelId) {
+    dailyChallengeVoiceSessions.delete(key);
+    return;
+  }
+
+  dailyChallengeVoiceSessions.set(key, {
+    guildId: state.guildId,
+    userId: state.id,
+    channelId: state.channelId,
+    lastAwardedAt: Number.isFinite(Number(existing?.lastAwardedAt))
+      ? Number(existing.lastAwardedAt)
+      : Date.now()
+  });
+}
+
+function seedDailyChallengeVoiceSessions() {
+  dailyChallengeVoiceSessions.clear();
+
+  for (const guild of client.guilds.cache.values()) {
+    for (const state of guild.voiceStates.cache.values()) {
+      if (!state?.channelId || !state?.id) {
+        continue;
+      }
+
+      dailyChallengeVoiceSessions.set(getDailyChallengeVoiceSessionKey(guild.id, state.id), {
+        guildId: guild.id,
+        userId: state.id,
+        channelId: state.channelId,
+        lastAwardedAt: Date.now()
+      });
+    }
+  }
+}
+
+async function sweepDailyChallengeVoiceSessions() {
+  if (!ENABLE_CORE_BOT || !getDailyChallengeEnabled()) {
+    return;
+  }
+
+  const now = Date.now();
+
+  for (const [key, session] of dailyChallengeVoiceSessions.entries()) {
+    const guild = client.guilds.cache.get(session.guildId);
+    if (!guild) {
+      dailyChallengeVoiceSessions.delete(key);
+      continue;
+    }
+
+    const member = guild.members.cache.get(session.userId) || await guild.members.fetch(session.userId).catch(() => null);
+    const voiceState = member?.voice || null;
+    if (!voiceState?.channelId || voiceState.channelId !== session.channelId) {
+      dailyChallengeVoiceSessions.delete(key);
+      continue;
+    }
+
+    const elapsedMinutes = Math.floor((now - (session.lastAwardedAt || now)) / (60 * 1000));
+    if (elapsedMinutes <= 0) {
+      continue;
+    }
+
+    const result = await dailyChallengeStore.recordProgress({
+      userId: session.userId,
+      guildId: session.guildId,
+      kind: "voice",
+      amount: elapsedMinutes,
+      now,
+      channelId: session.channelId,
+      context: {
+        guildId: session.guildId,
+        disabledTypeKeys: getDailyChallengeDisabledTypeKeys()
+      }
+    }).catch(error => {
+      log.warn("Failed to record daily challenge voice progress.", error);
+      return null;
+    });
+
+    session.lastAwardedAt = (session.lastAwardedAt || now) + elapsedMinutes * 60 * 1000;
+    dailyChallengeVoiceSessions.set(key, session);
+
+    if (result?.challenge?.claimedAt) {
+      dailyChallengeVoiceSessions.delete(key);
+    }
+  }
+}
+
+function buildNobilitySummaryEmbed() {
+  const tiers = getNobilityTiers();
+  return makeEmbed({
+    title: "Nobility Summary",
+    description: [
+      `Ladder: ${tiers.length} tiers`,
+      `Role rewards: ${Object.values(getNobilityRoleIds()).filter(Boolean).length ? "Configured" : "Not set"}`,
+      `Role map: ${Object.keys(getNobilityRoleIds()).length} tier bindings`,
+      `Current leveling: ${getNobilityEnabled() ? "Enabled" : "Disabled"}`
+    ].join("\n"),
+    color: COLORS.purple,
+    fields: [
+      { name: "Ladder", value: formatNobilityLadder(tiers), inline: false },
+      { name: "Role map details", value: buildNobilityRoleMapDetails(), inline: false },
+      { name: "Leveling rules", value: buildNobilitySummaryLine(), inline: false }
+    ]
+  });
+}
+
+function formatNobilityLeaderboard(entries) {
+  if (!entries.length) {
+    return "No nobility XP yet. Be the first to start talking.";
+  }
+
+  return entries
+    .map((entry, index) => {
+      const progress = getNobilityProgress(entry.totalXp || 0, getNobilityTiers());
+      return `${index + 1}. ${entry.userTag} - ${entry.totalXp} XP (${progress.current.title})`;
+    })
+    .join("\n");
+}
+
+function buildNobilityLeaderboardEmbed(entries) {
+  const tiers = getNobilityTiers();
+  const ladderSummary = formatNobilityLeaderboard(entries);
+  return makeEmbed({
+    title: "Nobility Leaderboard",
+    description: ladderSummary,
+    color: COLORS.purple,
+    fields: [
+      { name: "Configured tiers", value: `${tiers.length}`, inline: true },
+      { name: "Role rewards", value: Object.values(getNobilityRoleIds()).filter(Boolean).length ? "Configured" : "Not set", inline: true }
+    ]
+  });
+}
+
+function setNobilityTierThreshold(tierKey, requiredXp) {
+  const tiers = normalizeNobilityTiers(config.settings.nobilityTiers).map(tier => ({ ...tier }));
+  const index = tiers.findIndex(tier => tier.key === tierKey);
+  if (index < 0) {
+    return null;
+  }
+
+  tiers[index].requiredXp = Math.max(0, Math.floor(Number(requiredXp) || 0));
+  tiers[0].requiredXp = 0;
+
+  for (let i = 1; i < tiers.length; i += 1) {
+    tiers[i].requiredXp = Math.max(tiers[i].requiredXp, tiers[i - 1].requiredXp);
+  }
+
+  config.settings.nobilityTiers = normalizeNobilityTiers(tiers);
+  saveConfig();
+  return config.settings.nobilityTiers;
+}
+
+function buildNobilityRoleCreateName(tier) {
+  return String(tier?.title || "").trim();
+}
+
+async function autoCreateNobilityRoles(guild, source = "nobility role autocreate") {
+  if (!guild?.roles?.create) {
+    return { created: [], reused: [], skipped: [], updated: false, roleMap: getNobilityRoleIds() };
+  }
+
+  const botMember = guild.members?.me || await guild.members.fetchMe().catch(() => null);
+  if (!botMember?.permissions?.has(PermissionFlagsBits.ManageRoles)) {
+    return {
+      created: [],
+      reused: [],
+      skipped: getNobilityTiers().map(tier => ({ tier: tier.key, reason: "missing-manage-roles" })),
+      updated: false,
+      roleMap: getNobilityRoleIds()
+    };
+  }
+
+  const tiers = getNobilityTiers();
+  const roleMap = { ...getNobilityRoleIds() };
+  const created = [];
+  const reused = [];
+  const skipped = [];
+  let updated = false;
+
+  for (const tier of tiers) {
+    const targetName = buildNobilityRoleCreateName(tier);
+    if (!targetName) {
+      skipped.push({ tier: tier.key, reason: "missing-name" });
+      continue;
+    }
+
+    const mappedRoleId = roleMap[tier.key] || null;
+    let role = null;
+
+    if (mappedRoleId) {
+      role = guild.roles.cache.get(mappedRoleId) || await guild.roles.fetch(mappedRoleId).catch(() => null);
+      if (role) {
+        reused.push({ tier: tier.key, roleId: role.id, roleName: role.name, source: "existing-mapping" });
+        continue;
+      }
+    }
+
+    role = guild.roles.cache.find(existing => existing.name.toLowerCase() === targetName.toLowerCase()) || null;
+    if (role) {
+      roleMap[tier.key] = role.id;
+      updated = true;
+      reused.push({ tier: tier.key, roleId: role.id, roleName: role.name, source: "existing-role" });
+      continue;
+    }
+
+    try {
+      role = await guild.roles.create({
+        name: targetName,
+        hoist: true,
+        mentionable: false,
+        reason: `${source}: create role for ${tier.key}`
+      });
+      roleMap[tier.key] = role.id;
+      updated = true;
+      created.push({ tier: tier.key, roleId: role.id, roleName: role.name });
+    } catch (error) {
+      skipped.push({ tier: tier.key, reason: error?.message || "create-failed" });
+    }
+  }
+
+  if (updated) {
+    config.settings.nobilityRoleIds = roleMap;
+    saveConfig();
+  }
+
+  return { created, reused, skipped, updated, roleMap };
+}
+
+async function maybeAutoProvisionNobilityRoles({ guild, source = "nobility auto-provision", force = false } = {}) {
+  if (!guild) {
+    return { attempted: false, reason: "missing-guild" };
+  }
+
+  if (!getNobilityEnabled()) {
+    return { attempted: false, reason: "nobility-disabled" };
+  }
+
+  if (!force && getNobilityRoleAutoProvisionedAt()) {
+    const roleIds = getNobilityRoleIds();
+    const allMappedRolesExist = getNobilityTiers().every(tier => {
+      const roleId = roleIds?.[tier.key];
+      return roleId && guild.roles.cache.has(roleId);
+    });
+
+    if (allMappedRolesExist) {
+      return { attempted: false, reason: "already-provisioned" };
+    }
+  }
+
+  const result = await autoCreateNobilityRoles(guild, source);
+  const completed = Boolean(result?.created?.length || result?.reused?.length);
+
+  if (completed) {
+    config.settings.nobilityRoleAutoProvisionedAt = new Date().toISOString();
+    saveConfig();
+  }
+
+  return {
+    attempted: true,
+    completed,
+    ...result
+  };
+}
+
+async function syncNobilityRoles(member, progress, source = "nobility") {
+  if (!member || !member.manageable) {
+    return { applied: false, reason: "unmanageable" };
+  }
+
+  const roleIds = getNobilityRoleIds();
+  const targetRoleId = roleIds?.[progress.current.key] || null;
+  const configuredRoleIds = [...new Set(Object.values(roleIds).filter(Boolean))];
+  const rolesToRemove = configuredRoleIds.filter(roleId => roleId !== targetRoleId && member.roles.cache.has(roleId));
+
+  if (!targetRoleId) {
+    return {
+      applied: false,
+      reason: "missing-role"
+    };
+  }
+
+  if (rolesToRemove.length) {
+    await member.roles.remove(rolesToRemove, `${source}: remove old nobility roles`).catch(() => {});
+  }
+
+  if (!member.roles.cache.has(targetRoleId)) {
+    await member.roles.add(targetRoleId, `${source}: assign nobility role`).catch(() => {});
+  }
+
+  return {
+    applied: true,
+    targetRoleId,
+    removedRoleIds: rolesToRemove
+  };
 }
 
 async function sendAnonymousAffirmation(author, message) {
@@ -6729,16 +7663,15 @@ function buildTikTokVerifyEmbed() {
     title: "TikTok matching verification",
     description:
       handle
-        ? `Optional matching path: tap **Set My Name** and type your TikTok username.\n\nI’ll match it against **@${handle}** and any saved nicknames, then hand you the verified role if it matches.`
-        : `Optional matching path: tap the button and type your TikTok username.\n\nAsk staff if you are not sure what format they want.`,
+        ? `Tap **Set My Name** and type your TikTok username. I’ll compare it to **@${handle}** and any saved nicknames.`
+        : `Tap the button and type your TikTok username.`,
     color: COLORS.pink,
     fields: [
-      { name: "🌸 Bonus handle", value: handle ? `@${handle}` : "Not set", inline: true },
-      { name: "✨ Verified role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
-      { name: "🫧 Unverified role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Optional", inline: true },
-      { name: "🍡 Saved nicknames", value: aliases.length ? `${aliases.length} saved` : "None saved", inline: false },
-      { name: "How it works", value: "1. Tap Set My Name\n2. Type your TikTok username\n3. Enjoy the garden if it matches", inline: false },
-      { name: "Reaction roles", value: "Use the dedicated reaction-role panel instead.", inline: false }
+      { name: "Bonus handle", value: handle ? `@${handle}` : "Not set", inline: true },
+      { name: "Verified role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
+      { name: "Unverified role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Optional", inline: true },
+      { name: "Saved nicknames", value: aliases.length ? `${aliases.length} saved` : "None saved", inline: false },
+      { name: "How it works", value: "Tap Set My Name, type your username, and wait for the match.", inline: false }
     ]
   });
 }
@@ -7296,12 +8229,12 @@ function buildAnonymousAffirmationsEmbed() {
   return makeEmbed({
     title: "Anonymous affirmations",
     description: isAnonymousAffirmationsEnabled()
-      ? "Got a little sunshine to share? Tap the button below and send a sweet note anonymously."
-      : "This little kindness corner is paused for now. Staff can turn it back on in Settings.",
+      ? "Tap the button below and send a sweet note anonymously."
+      : "This corner is paused. Staff can turn it back on in Settings.",
     color: COLORS.pink,
     fields: [
-      { name: "How it works", value: "Tap the button, write your message, and I’ll tuck it into the chat anonymously.", inline: false },
-      { name: "Tips", value: "Short, kind, and cozy messages work best.", inline: false },
+      { name: "How it works", value: "Tap the button, write your message, and I’ll post it anonymously.", inline: false },
+      { name: "Tips", value: "Short, kind messages work best.", inline: false },
       { name: "Cooldown", value: `${Math.round(getAnonymousAffirmationsCooldownMs() / 1000)} seconds`, inline: true },
       { name: "Status", value: isAnonymousAffirmationsEnabled() ? "Enabled" : "Disabled", inline: true }
     ]
@@ -7742,24 +8675,22 @@ function buildHelpEmbed() {
   const fields = [
     {
       name: "Moderation",
-      value:
-        "`/adminpanel`, `/warn`, `/warnings`, `/clearwarnings`, `/timeout`, `/untimeout`, `/mute`, `/unmute`, `/kick`, `/ban`, `/tempban`, `/unban`, `/slowmode`",
+      value: "Admin panel, warnings, timeouts, mutes, kicks, bans, and slowmode.",
       inline: false
     },
     {
       name: "Staff Records",
-      value:
-        "`/note`, `/notes`, `/case`, `/cases`, `/editcase`, `/automod`, `/automodlinks`, `/automodguard`, `/bannedwords`, `/settings`, `/staffroles`, `/exportmod`, `/backup`",
+      value: "Notes, cases, AutoMod tools, staff roles, exports, and backups.",
       inline: false
     },
     {
       name: "Verification",
-      value: "`/verify`, `/setupverify`, `/setuptiktokverify`, `/lockverified`, `/unlockverified`, `/settings`\nMost members should use the rules + button verify flow. CAPTCHA can be enabled for newer or suspicious accounts.",
+      value: "`/verify`, `/setupverify`, `/setuptiktokverify`, `/lockverified`, `/unlockverified`, `/settings`\nRules + button verify is the default flow. CAPTCHA is optional.",
       inline: false
     },
     {
       name: "Reaction Roles",
-      value: "`/setupreactionroles`\nPosts a reaction-role panel in a channel you choose.",
+      value: "`/setupreactionroles` posts the picker panel in a channel you choose.",
       inline: false
     },
     {
@@ -7778,8 +8709,21 @@ function buildHelpEmbed() {
       inline: false
     },
     {
+      name: "Nobility",
+      value:
+        "• `/nobility` - summary, ladder, and role map\n" +
+        "• `/rank` - your current rank and progress\n" +
+        "• `/nobilityleaderboard`, `/nobilityrole`, `/nobilitytier`, `/nobilitysync` - leaderboard and management",
+      inline: false
+    },
+    {
+      name: "Daily + Nobility Settings",
+      value: "`/daily` claims daily XP. `/dailychallenge` manages daily tasks. `/settings nobilityenabled`, `/settings dailychallengeenabled`, `/settings dailychallengebonus`, `/settings dailychallengereward`, `/settings dailychallengetype` tune it.",
+      inline: false
+    },
+    {
       name: "Server Tools",
-      value: "`/setupverify`, `/setuptiktokverify`, `/setupreactionroles`, `/setuprules`, `/announce`, `/purge`, `/resetchannel`, `/lockdown`, `/unlockdown`, `/lockverified`, `/unlockverified`\nAnonymous affirmations: use the button in the affirmations channel after `/settings affirmchannel`.\nVerification: rules + button verify for most users, TikTok matching is optional.",
+      value: "`/setupverify`, `/setuptiktokverify`, `/setupreactionroles`, `/setuprules`, `/announce`, `/purge`, `/resetchannel`, `/lockdown`, `/unlockdown`, `/lockverified`, `/unlockverified`\nAnonymous affirmations live under `/settings affirmchannel`.\nVerification is rules + button by default; TikTok matching stays optional.",
       inline: false
     },
     {
@@ -7802,6 +8746,15 @@ function buildStatusEmbed() {
   const verifyChannelId = getVerifyChannelId();
   const rulesChannelId = getRulesChannelId();
   const logChannelId = getLogChannelId();
+  const nobilityRoleCount = Object.values(getNobilityRoleIds()).filter(Boolean).length;
+  const dailyChallengeEnabled = getDailyChallengeEnabled();
+  const dailyChallengeTypesEnabled = DAILY_CHALLENGE_TYPES.filter(type => getDailyChallengeTypeEnabled(type.key)).length;
+  const dailyChallengeTypesTuned = DAILY_CHALLENGE_TYPES.filter(type => getDailyChallengeTypeRewardBonus(type.key) !== 0).length;
+  const corePanels = [
+    config.verifyMessageId ? "Verify" : null,
+    config.bonusVerifyMessageId ? "Bonus" : null,
+    config.reactionRoleMessageId ? "Reaction roles" : null
+  ].filter(Boolean);
 
   return makeEmbed({
     title: "Bot status",
@@ -7811,26 +8764,36 @@ function buildStatusEmbed() {
       { name: "Client", value: client.user ? client.user.tag : "Not ready", inline: true },
       { name: "Uptime", value: `<t:${uptimeSeconds}:R>`, inline: true },
       { name: "Ping", value: `${Math.round(client.ws.ping)}ms`, inline: true },
-      { name: "Verify Channel", value: verifyChannelId ? `<#${verifyChannelId}>` : "Not set", inline: true },
-      { name: "Rules Channel", value: rulesChannelId ? `<#${rulesChannelId}>` : "Not set", inline: true },
-      { name: "Server Activity", value: "Any server chat", inline: true },
-      { name: "Reaction Roles", value: getReactionRoleChannelId() ? `<#${getReactionRoleChannelId()}>` : "Not set", inline: true },
-      { name: "Server Activity Rule", value: `Gentle reminder at 53 days, kick at 60 days.`, inline: false },
-      { name: "Log Channel", value: logChannelId ? `<#${logChannelId}>` : "Not set", inline: true },
-      { name: "AutoMod Log Channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
-      { name: "TikTok Bonus", value: isTikTokVerificationEnabled() ? `@${getTikTokHandle()}` : "Disabled", inline: true },
-      { name: "Verified Role", value: getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set", inline: true },
-      { name: "Unverified Role", value: getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Not set", inline: true },
-      { name: "Age Roles", value: `${getAgeRoleRules().length}`, inline: true },
-      { name: "Birthday Role", value: getBirthdayRoleId() ? `<@&${getBirthdayRoleId()}>` : "Not set", inline: true },
       { name: "Core Features", value: ENABLE_CORE_BOT ? "Enabled" : "Disabled", inline: true },
-      { name: "Verify Panel", value: config.verifyMessageId || "Not cached", inline: false },
-      { name: "Bonus Panel", value: config.bonusVerifyMessageId || "Not cached", inline: false },
-      { name: "Reaction Role Panel", value: config.reactionRoleMessageId || "Not cached", inline: false },
-      { name: "Cases Logged", value: `${config.cases.length}`, inline: true },
-      { name: "Banned Words", value: `${getBannedWords().length}`, inline: true },
-      { name: "Birthdays Saved", value: `${Object.keys(getBirthdayStore()).length}`, inline: true },
-      { name: "Birthday Channel", value: getBirthdayAnnouncementChannelId() ? `<#${getBirthdayAnnouncementChannelId()}>` : "Not set", inline: true }
+      { name: "Moderation", value: [
+        `Verify: ${verifyChannelId ? `<#${verifyChannelId}>` : "Not set"}`,
+        `Rules: ${rulesChannelId ? `<#${rulesChannelId}>` : "Not set"}`,
+        `Log: ${logChannelId ? `<#${logChannelId}>` : "Not set"}`,
+        `AutoMod log: ${getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set"}`
+      ].join("\n"), inline: false },
+      { name: "Leveling", value: [
+        `Nobility: ${getNobilityEnabled() ? `${nobilityRoleCount} roles configured` : "Disabled"}`,
+        `Daily XP: ${getDailyEnabled() ? `${getDailyXpReward()} base / ${getDailyStreakBonus()} streak` : "Disabled"}`,
+        `Challenges: ${dailyChallengeEnabled ? `Enabled, ${getDailyChallengeRewardBonus()} bonus XP` : "Disabled"}`,
+        `Challenge types: ${dailyChallengeTypesEnabled}/${DAILY_CHALLENGE_TYPES.length} enabled, ${dailyChallengeTypesTuned} tuned`
+      ].join("\n"), inline: false },
+      { name: "Panels", value: corePanels.length ? corePanels.join(", ") : "None cached", inline: true },
+      { name: "Roles", value: [
+        `Verified: ${getVerificationRoleId() ? `<@&${getVerificationRoleId()}>` : "Not set"}`,
+        `Unverified: ${getUnverifiedRoleId() ? `<@&${getUnverifiedRoleId()}>` : "Not set"}`,
+        `Birthday: ${getBirthdayRoleId() ? `<@&${getBirthdayRoleId()}>` : "Not set"}`,
+        `Age rules: ${getAgeRoleRules().length}`
+      ].join("\n"), inline: true },
+      { name: "Automation", value: [
+        `Server activity: Any server chat`,
+        `Reaction roles: ${getReactionRoleChannelId() ? `<#${getReactionRoleChannelId()}>` : "Not set"}`,
+        `TikTok bonus: ${isTikTokVerificationEnabled() ? `@${getTikTokHandle()}` : "Disabled"}`
+      ].join("\n"), inline: true },
+      { name: "Stats", value: [
+        `Cases: ${config.cases.length}`,
+        `Banned words: ${getBannedWords().length}`,
+        `Birthdays saved: ${Object.keys(getBirthdayStore()).length}`
+      ].join("\n"), inline: true }
     ]
   });
 }
@@ -7901,28 +8864,31 @@ async function buildDashboardEmbed() {
         .slice(0, 1024)
     : "No recent automod cases.";
   const reactionRoleHealth = await buildReactionRoleHealth();
+  const reactionRoleIssueCount = reactionRoleHealth.issues.length;
 
   return makeEmbed({
     title: "Moderation dashboard",
-    description: "Quick view of your moderation setup and recent activity.",
+    description: "Quick view of moderation health and recent automation.",
     color: COLORS.blue,
     fields: [
-      { name: "Total cases", value: `${allCases.length}`, inline: true },
-      { name: "Warnings saved", value: `${Object.keys(config.warnings || {}).length}`, inline: true },
-      { name: "Staff notes", value: `${Object.keys(config.notes || {}).length}`, inline: true },
-      { name: "TikTok matching", value: isTikTokVerificationEnabled() ? `@${getTikTokHandle()}` : "Disabled", inline: true },
-      { name: "AutoMod log channel", value: getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set", inline: true },
-      { name: "Alert-only rules", value: getAlertOnlyRules().join(", ") || "None", inline: false },
-      { name: "Nickname filter terms", value: `${getNicknameBlockedTerms().length}`, inline: true },
-      { name: "Reaction roles", value: reactionRoleHealth.ready ? "Ready" : `${reactionRoleHealth.issues.length} issue${reactionRoleHealth.issues.length === 1 ? "" : "s"} found`, inline: true },
-      { name: "Reaction role panel", value: reactionRoleHealth.panelMessageFound ? "Found" : "Missing", inline: true },
-      { name: "Birthdays", value: Object.keys(getBirthdayStore()).length ? `${Object.keys(getBirthdayStore()).length} saved` : "None saved", inline: true },
-      { name: "Reaction role issues", value: reactionRoleHealth.issues.slice(0, 6).join("\n") || "None", inline: false },
-      {
-        name: "Recent AutoMod cases",
-        value: recentAutomodText,
-        inline: false
-      }
+      { name: "Overview", value: [
+        `Cases: ${allCases.length}`,
+        `Warnings: ${Object.keys(config.warnings || {}).length}`,
+        `Notes: ${Object.keys(config.notes || {}).length}`,
+        `Birthdays: ${Object.keys(getBirthdayStore()).length}`
+      ].join("\n"), inline: true },
+      { name: "Automation", value: [
+        `TikTok matching: ${isTikTokVerificationEnabled() ? `@${getTikTokHandle()}` : "Disabled"}`,
+        `AutoMod log: ${getAutoModLogChannelId() ? `<#${getAutoModLogChannelId()}>` : "Not set"}`,
+        `Alert-only rules: ${getAlertOnlyRules().length}`,
+        `Nickname filters: ${getNicknameBlockedTerms().length}`
+      ].join("\n"), inline: true },
+      { name: "Reaction roles", value: [
+        `Status: ${reactionRoleHealth.ready ? "Ready" : `${reactionRoleIssueCount} issue${reactionRoleIssueCount === 1 ? "" : "s"}`}`,
+        `Panel: ${reactionRoleHealth.panelMessageFound ? "Found" : "Missing"}`,
+        `Manage Roles: ${reactionRoleHealth.botManageRoles ? "Yes" : "No"}`
+      ].join("\n"), inline: true },
+      { name: "Recent AutoMod", value: recentAutomodText, inline: false }
     ]
   });
 }
@@ -8224,7 +9190,7 @@ function getPendingPanelAction(userId) {
 function buildAutoModExemptionEmbed() {
   return makeEmbed({
     title: "AutoMod Exemptions",
-    description: "Use the selectors below to replace the current exempt channels, roles, and users. Roles on this list bypass AutoMod checks.",
+    description: "Use the selectors below to update exempt channels, roles, and users.",
     color: COLORS.yellow,
     fields: [
       {
@@ -8417,6 +9383,9 @@ function buildAdminPanelButtons(view, targetUserId = null) {
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "settings-view", targetUserId)).setLabel("View Settings").setStyle(ButtonStyle.Secondary)
       ),
       new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "autocreate-nobility-roles", targetUserId)).setLabel("Create Nobility Roles").setStyle(ButtonStyle.Success)
+      ),
+      new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "lockverified-current", targetUserId)).setLabel("Lock Verified Here").setStyle(ButtonStyle.Success),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "unlockverified-current", targetUserId)).setLabel("Unlock Verified Here").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(buildAdminPanelCustomId("action", "lockverified-all", targetUserId)).setLabel("Lock Verified All").setStyle(ButtonStyle.Danger),
@@ -8448,28 +9417,16 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
 
     return makeEmbed({
       title: "Mochi Admin Panel - Moderation",
-      description: "Select a member, then run guided moderation actions directly from the panel.",
+      description: "Select a member, then run guided moderation actions from one place.",
       color: COLORS.red,
       fields: [
+        { name: "Selected User", value: user ? `${user.tag} (${user.id})` : "No user selected yet.", inline: false },
         {
-          name: "Selected User",
-          value: user ? `${user.tag} (${user.id})` : "No user selected yet.",
-          inline: false
-        },
-        {
-          name: "User Summary",
-          value: summaryText,
-          inline: false
-        },
-        {
-          name: "Current Channel",
-          value: interaction.channel ? `${interaction.channel}` : "Unknown",
-          inline: true
-        },
-        {
-          name: "Role Snapshot",
+          name: "User Overview",
           value: user
             ? [
+                summaryText,
+                `Status: ${statusText}`,
                 `Top role: ${member?.roles?.highest ? member.roles.highest.toString() : "None"}`,
                 `Roles: ${member ? member.roles.cache.filter(role => role.id !== member.guild.id).size : 0}`,
                 `Key permissions: ${buildMemberPermissionSnapshot(member)}`
@@ -8477,31 +9434,9 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
             : "Waiting for a selected user.",
           inline: false
         },
-        {
-          name: "User Status",
-          value: statusText,
-          inline: false
-        },
-        {
-          name: "Server Roles",
-          value: buildMemberRoleSummary(member),
-          inline: false
-        },
-        {
-          name: "Recent Signals",
-          value: recentSignalsText,
-          inline: false
-        },
-        {
-          name: "Quick Actions",
-          value: "`Warn`, `Timeout`, `Untimeout`, `Mute`, `Unmute`, `Kick`, `Ban`, `Temp Ban`, `Clear Warnings`, `Notes`, `Warnings`",
-          inline: false
-        },
-        {
-          name: "Recent Cases",
-          value: historyText,
-          inline: false
-        }
+        { name: "Signals", value: recentSignalsText, inline: false },
+        { name: "Quick Actions", value: "`Warn`, `Timeout`, `Untimeout`, `Mute`, `Unmute`, `Kick`, `Ban`, `Temp Ban`, `Clear Warnings`, `Notes`, `Warnings`", inline: false },
+        { name: "Recent Cases", value: historyText, inline: false }
       ]
     });
   }
@@ -8510,11 +9445,11 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
     const analytics = getAutoModAnalytics();
     return makeEmbed({
       title: "Mochi Admin Panel - AutoMod",
-      description: "Live AutoMod controls for filters, raid safety, rule actions, and analytics.",
+      description: "Live AutoMod controls grouped into the main areas you actually change.",
       color: COLORS.yellow,
       fields: [
         {
-          name: "Core Filters",
+          name: "Filters",
           value: [
             `Spam: ${config.automod.spam ? "On" : "Off"}`,
             `Invites: ${config.automod.invites ? "On" : "Off"}`,
@@ -8526,7 +9461,7 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
           inline: true
         },
         {
-          name: "Advanced Filters",
+          name: "Protection",
           value: [
             `Scam: ${config.automod.scamFilterEnabled ? `On (${getScamPhrases().length})` : "Off"}`,
             `Evasion: ${config.automod.evasionFilterEnabled ? "On" : "Off"}`,
@@ -8537,7 +9472,7 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
           inline: true
         },
         {
-          name: "Attachments And Links",
+          name: "Links & Files",
           value: [
             `Attachments: ${config.automod.attachmentsEnabled ? `On (${config.automod.maxAttachmentSizeMb}MB)` : "Off"}`,
             `Allow-only domains: ${config.automod.allowedDomainsOnly ? "On" : "Off"}`,
@@ -8547,7 +9482,7 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
           inline: true
         },
         {
-          name: "Protection",
+          name: "Raid & Limits",
           value: [
             `Age guard: ${config.automod.ageProtectionEnabled ? "On" : "Off"}`,
             `Anti-raid: ${config.automod.antiRaidEnabled ? `${config.automod.raidAction} @ ${config.automod.raidJoinThreshold}` : "Off"}`,
@@ -8567,7 +9502,7 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
           inline: true
         },
         {
-          name: "AI Moderation",
+          name: "AI",
           value: [
             `API key: ${OPENAI_API_KEY ? "Configured" : "Missing"}`,
             `Review: ${config.automod.aiModerationEnabled ? "On" : "Off"}`,
@@ -8580,12 +9515,21 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
           ].join("\n"),
           inline: true
         },
-        { name: "Link Age Gates", value: `Account ${formatDuration(config.automod.minAccountAgeForLinksMs)} | Member ${formatDuration(config.automod.minMemberAgeForLinksMs)}`, inline: false },
-        { name: "Attachment Age Gates", value: `Account ${formatDuration(config.automod.minAccountAgeForAttachmentsMs)} | Member ${formatDuration(config.automod.minMemberAgeForAttachmentsMs)}`, inline: false },
-        { name: "Rule Actions", value: Object.keys(config.automod.ruleActions || {}).slice(0, 8).map(rule => `${rule}: ${getAutoModRuleAction(rule)}`).join("\n") || "Using default delete behavior for all rules.", inline: false },
-        { name: "Top Triggered Rules", value: buildAutoModAnalyticsLines(5), inline: false },
-        { name: "Recent Detections", value: buildRecentAutoModAnalyticsLines(4), inline: false },
-        { name: "Analytics Total", value: `${analytics.totalDetections || 0}`, inline: true }
+        {
+          name: "Age Gates",
+          value: `Links: Account ${formatDuration(config.automod.minAccountAgeForLinksMs)} | Member ${formatDuration(config.automod.minMemberAgeForLinksMs)}\nAttachments: Account ${formatDuration(config.automod.minAccountAgeForAttachmentsMs)} | Member ${formatDuration(config.automod.minMemberAgeForAttachmentsMs)}`,
+          inline: false
+        },
+        {
+          name: "Rules & Activity",
+          value: [
+            Object.keys(config.automod.ruleActions || {}).slice(0, 6).map(rule => `${rule}: ${getAutoModRuleAction(rule)}`).join("\n") || "Using default delete behavior for all rules.",
+            `Top rules:\n${buildAutoModAnalyticsLines(4)}`,
+            `Recent:\n${buildRecentAutoModAnalyticsLines(3)}`,
+            `Total detections: ${analytics.totalDetections || 0}`
+          ].join("\n\n"),
+          inline: false
+        }
       ]
     });
   }
@@ -8596,21 +9540,9 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
       description: "Manage who can use moderation tools and who gets full admin-level control in the panel.",
       color: COLORS.mint,
       fields: [
-        {
-          name: "Moderation Roles",
-          value: formatPanelRoleMentions(getPermissionRoleIds("mod")),
-          inline: false
-        },
-        {
-          name: "Admin Roles",
-          value: formatPanelRoleMentions(getPermissionRoleIds("admin")),
-          inline: false
-        },
-        {
-          name: "How It Works",
-          value: "Use the role pickers below to replace each access list. Slash command permissions still apply for Discord command defaults.",
-          inline: false
-        }
+        { name: "Moderation Roles", value: formatPanelRoleMentions(getPermissionRoleIds("mod")), inline: false },
+        { name: "Admin Roles", value: formatPanelRoleMentions(getPermissionRoleIds("admin")), inline: false },
+        { name: "How It Works", value: "Use the role pickers below to replace each access list. Slash command permissions still apply for Discord command defaults.", inline: false }
       ]
     });
   }
@@ -8618,7 +9550,7 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
   if (view === "setup") {
     return makeEmbed({
       title: "Mochi Admin Panel - Setup",
-      description: "High-frequency setup actions that are safe to trigger directly from the panel.",
+      description: "Common setup values and the buttons that depend on them.",
       color: COLORS.blue,
       fields: [
         { name: "Log Channel", value: getLogChannelId() ? `<#${getLogChannelId()}>` : "Not set", inline: true },
@@ -8639,20 +9571,16 @@ async function buildAdminPanelEmbed(view, interaction, targetUserId = null) {
 
   return makeEmbed({
     title: "Mochi Admin Panel - Overview",
-    description: "Your interactive control center for moderation, AutoMod, and core server setup.",
+    description: "Main control center for moderation, AutoMod, and core server setup.",
     color: COLORS.purple,
     fields: [
-      { name: "Cases Logged", value: `${config.cases.length}`, inline: true },
-      { name: "Warning Users", value: `${Object.keys(config.warnings).length}`, inline: true },
-      { name: "Staff Notes", value: `${Object.keys(config.notes).length}`, inline: true },
-      { name: "AutoMod Status", value: config.automod.spam || config.automod.invites || config.automod.caps ? "Active" : "Mostly Off", inline: true },
+      { name: "Cases", value: `${config.cases.length}`, inline: true },
+      { name: "Warnings", value: `${Object.keys(config.warnings).length}`, inline: true },
+      { name: "Notes", value: `${Object.keys(config.notes).length}`, inline: true },
+      { name: "AutoMod", value: config.automod.spam || config.automod.invites || config.automod.caps ? "Active" : "Mostly Off", inline: true },
       { name: "Current Channel", value: interaction.channel ? `${interaction.channel}` : "Unknown", inline: true },
       { name: "Staff Access", value: `Mod roles: ${getPermissionRoleIds("mod").length} | Admin roles: ${getPermissionRoleIds("admin").length}`, inline: true },
-      {
-        name: "Quick Actions",
-        value: "`Refresh Status`, `Dashboard Snapshot`, `Reload Config`",
-        inline: false
-      }
+      { name: "Quick Actions", value: "`Refresh Status`, `Dashboard Snapshot`, `Reload Config`", inline: false }
     ]
   });
 }
@@ -9816,7 +10744,14 @@ function buildWebConfigPayload() {
         ? config.settings.tiktokNicknameAliases.join(", ")
         : String(config.settings.tiktokNicknameAliases || ""),
       verifiedRoleId: config.settings.verifiedRoleId || "",
-      unverifiedRoleId: config.settings.unverifiedRoleId || ""
+      unverifiedRoleId: config.settings.unverifiedRoleId || "",
+      nobilityEnabled: getNobilityEnabled(),
+      nobilityRoleIds: getNobilityRoleIds(),
+      nobilityRoleAutoProvisionedAt: getNobilityRoleAutoProvisionedAt(),
+      dailyChallengeEnabled: Boolean(config.settings.dailyChallengeEnabled),
+      dailyChallengeRewardBonus: Number(config.settings.dailyChallengeRewardBonus || 0),
+      dailyChallengeTypeEnabled: config.settings.dailyChallengeTypeEnabled || {},
+      dailyChallengeTypeRewardAdjustments: config.settings.dailyChallengeTypeRewardAdjustments || {}
     },
     birthdays: {
       total: Object.keys(getBirthdayStore()).length,
@@ -9841,7 +10776,7 @@ function buildWebConfigPayload() {
   };
 }
 
-function updateWebSettings(auth, payload) {
+async function updateWebSettings(auth, payload) {
   const allowed = [
     "verifyChannelId",
     "rulesChannelId",
@@ -9869,7 +10804,12 @@ function updateWebSettings(auth, payload) {
     "tiktokHandle",
     "tiktokNicknameAliases",
     "verifiedRoleId",
-    "unverifiedRoleId"
+    "unverifiedRoleId",
+    "nobilityEnabled",
+    "dailyChallengeEnabled",
+    "dailyChallengeRewardBonus",
+    "dailyChallengeTypeEnabled",
+    "dailyChallengeTypeRewardAdjustments"
   ];
 
   const nextTikTokHandle = Object.prototype.hasOwnProperty.call(payload, "tiktokHandle")
@@ -9919,6 +10859,10 @@ function updateWebSettings(auth, payload) {
   const nextMessageArchiveRetentionDays = Object.prototype.hasOwnProperty.call(payload, "messageArchiveRetentionDays")
     ? Math.max(1, Math.min(3650, Number(payload.messageArchiveRetentionDays) || 30))
     : Number(config.settings.messageArchiveRetentionDays || 30);
+  const previousNobilityEnabled = Boolean(config.settings.nobilityEnabled);
+  const nextNobilityEnabled = Object.prototype.hasOwnProperty.call(payload, "nobilityEnabled")
+    ? ["true", "1", "yes", "on"].includes(String(payload.nobilityEnabled).toLowerCase())
+    : previousNobilityEnabled;
   const before = {
     verifyChannelId: config.settings.verifyChannelId,
     rulesChannelId: config.settings.rulesChannelId,
@@ -9945,7 +10889,14 @@ function updateWebSettings(auth, payload) {
     tiktokHandle: config.settings.tiktokHandle,
     tiktokNicknameAliases: config.settings.tiktokNicknameAliases,
     verifiedRoleId: config.settings.verifiedRoleId,
-    unverifiedRoleId: config.settings.unverifiedRoleId
+    unverifiedRoleId: config.settings.unverifiedRoleId,
+    nobilityEnabled: config.settings.nobilityEnabled,
+    nobilityRoleIds: config.settings.nobilityRoleIds,
+    nobilityRoleAutoProvisionedAt: config.settings.nobilityRoleAutoProvisionedAt,
+    dailyChallengeEnabled: config.settings.dailyChallengeEnabled,
+    dailyChallengeRewardBonus: config.settings.dailyChallengeRewardBonus,
+    dailyChallengeTypeEnabled: config.settings.dailyChallengeTypeEnabled,
+    dailyChallengeTypeRewardAdjustments: config.settings.dailyChallengeTypeRewardAdjustments
   };
 
   for (const key of allowed) {
@@ -9984,6 +10935,30 @@ function updateWebSettings(auth, payload) {
         config.settings[key] = nextRulesCardDescription;
       } else if (key === "rulesCardRules") {
         config.settings[key] = nextRulesCardRules;
+      } else if (key === "dailyChallengeEnabled") {
+        config.settings[key] = ["true", "1", "yes", "on"].includes(String(payload[key]).toLowerCase());
+      } else if (key === "dailyChallengeRewardBonus") {
+        config.settings[key] = Math.max(0, Math.min(1000, Number(payload[key]) || 0));
+      } else if (key === "dailyChallengeTypeEnabled") {
+        const incoming = payload[key] && typeof payload[key] === "object" ? payload[key] : {};
+        config.settings[key] = Object.fromEntries(
+          DAILY_CHALLENGE_TYPES.map(type => [
+            type.key,
+            incoming[type.key] !== false
+          ])
+        );
+      } else if (key === "dailyChallengeTypeRewardAdjustments") {
+        const incoming = payload[key] && typeof payload[key] === "object" ? payload[key] : {};
+        config.settings[key] = Object.fromEntries(
+          DAILY_CHALLENGE_TYPES.map(type => [
+            type.key,
+            Number.isFinite(Number(incoming[type.key]))
+              ? Math.max(-1000, Math.min(1000, Number(incoming[type.key])))
+              : 0
+          ])
+        );
+      } else if (key === "nobilityEnabled") {
+        config.settings[key] = nextNobilityEnabled;
       } else {
         config.settings[key] = String(payload[key] || "").trim() || null;
       }
@@ -10024,11 +10999,19 @@ function updateWebSettings(auth, payload) {
     tiktokHandle: config.settings.tiktokHandle,
     tiktokNicknameAliases: config.settings.tiktokNicknameAliases,
     verifiedRoleId: config.settings.verifiedRoleId,
-    unverifiedRoleId: config.settings.unverifiedRoleId
+    unverifiedRoleId: config.settings.unverifiedRoleId,
+    nobilityEnabled: config.settings.nobilityEnabled,
+    nobilityRoleAutoProvisionedAt: config.settings.nobilityRoleAutoProvisionedAt
   };
   recordAuditLog(getWebModeratorTag(auth), "settings-updated", {
     changes: buildAuditDiff(before, after, Object.keys(after))
   });
+  if (!previousNobilityEnabled && nextNobilityEnabled) {
+    await maybeAutoProvisionNobilityRoles({
+      guild: client.guilds.cache.get(GUILD_ID) || null,
+      source: "web settings"
+    });
+  }
   return buildWebConfigPayload().settings;
 }
 
@@ -11709,7 +12692,7 @@ async function handleWebApi(req, res, pathname) {
         return sendWebJson(res, 403, { error: "Admin web access is required." });
       }
       const body = await readWebJsonBody(req);
-      return sendWebJson(res, 200, { settings: updateWebSettings(auth, body) });
+      return sendWebJson(res, 200, { settings: await updateWebSettings(auth, body) });
     }
 
     if (req.method === "POST" && pathname === "/api/tiktok-verify-setup") {
@@ -11717,7 +12700,7 @@ async function handleWebApi(req, res, pathname) {
         return sendWebJson(res, 403, { error: "Admin web access is required." });
       }
       const body = await readWebJsonBody(req);
-      const settings = updateWebSettings(auth, body);
+      const settings = await updateWebSettings(auth, body);
       const posted = await postTikTokVerifyPanel("web");
       recordAuditLog(getWebModeratorTag(auth), "tiktok-verify-posted", {
         channelId: posted.channelId,
@@ -11838,6 +12821,35 @@ async function handleWebApi(req, res, pathname) {
       return sendWebJson(res, 200, {
         ok: true,
         ...result
+      });
+    }
+
+    if (req.method === "POST" && pathname === "/api/nobility/autocreate") {
+      if (!hasWebAccess(auth, "admin")) {
+        return sendWebJson(res, 403, { error: "Admin web access is required." });
+      }
+
+      const guild = await client.guilds.fetch(GUILD_ID).catch(() => client.guilds.cache.get(GUILD_ID) || null);
+      if (!guild) {
+        return sendWebJson(res, 500, { error: "The Discord guild could not be loaded." });
+      }
+
+      const body = await readWebJsonBody(req).catch(() => ({}));
+      const result = await maybeAutoProvisionNobilityRoles({
+        guild,
+        source: "web api",
+        force: ["true", "1", "yes", "on"].includes(String(body?.force).toLowerCase())
+      });
+      recordAuditLog(getWebModeratorTag(auth), "nobility-role-autocreate", {
+        created: result.created?.map(entry => ({ tier: entry.tier, roleId: entry.roleId, roleName: entry.roleName })) || [],
+        reused: result.reused?.map(entry => ({ tier: entry.tier, roleId: entry.roleId, roleName: entry.roleName, source: entry.source })) || [],
+        skipped: result.skipped || []
+      });
+
+      return sendWebJson(res, 200, {
+        ok: true,
+        result,
+        settings: buildWebConfigPayload().settings
       });
     }
 
@@ -12129,6 +13141,10 @@ async function shutdownProcess(signal) {
     clearInterval(birthdaySweepInterval);
   }
 
+  if (dailyChallengeVoiceInterval) {
+    clearInterval(dailyChallengeVoiceInterval);
+  }
+
   process.exit(0);
 }
 
@@ -12157,6 +13173,13 @@ client.once("clientReady", async () => {
       await syncGoogleBlockList("startup").catch(error => {
         log.error("Google block list startup sync error.", error);
       });
+      await maybeAutoProvisionNobilityRoles({
+        guild: await client.guilds.fetch(GUILD_ID).catch(() => client.guilds.cache.get(GUILD_ID) || null),
+        source: "startup",
+        force: false
+      }).catch(error => {
+        log.warn("Startup nobility role auto-provision failed.", error);
+      });
 
       if (tempBanInterval) {
         clearInterval(tempBanInterval);
@@ -12177,6 +13200,15 @@ client.once("clientReady", async () => {
       startScheduledReports();
       startGoogleBlockListSync();
       startGeneralChatSweep();
+      seedDailyChallengeVoiceSessions();
+      if (dailyChallengeVoiceInterval) {
+        clearInterval(dailyChallengeVoiceInterval);
+      }
+      dailyChallengeVoiceInterval = setInterval(() => {
+        sweepDailyChallengeVoiceSessions().catch(error => {
+          log.error("Daily challenge voice sweep error.", error);
+        });
+      }, 60 * 1000);
     }
   } catch (error) {
     log.error("Ready error.", error);
@@ -12189,6 +13221,21 @@ client.on("messageReactionAdd", async (reaction, user) => {
     if (user.bot) return;
     if (reaction.partial) await reaction.fetch();
     if (reaction.message.partial) await reaction.message.fetch();
+
+    if (getDailyChallengeEnabled()) {
+      await dailyChallengeStore.recordProgress({
+        userId: user.id,
+        guildId: reaction.message.guildId || null,
+        kind: "reaction",
+        now: Date.now(),
+        context: {
+          guildId: reaction.message.guildId || null,
+          disabledTypeKeys: getDailyChallengeDisabledTypeKeys()
+        }
+      }).catch(error => {
+        log.warn("Failed to record daily challenge reaction progress.", error);
+      });
+    }
 
     const trackedMessageIds = await getTrackedReactionRoleMessageIds();
     if (!trackedMessageIds.includes(reaction.message.id)) return;
@@ -12245,6 +13292,20 @@ client.on("messageReactionRemove", async (reaction, user) => {
     );
   } catch (error) {
     log.error("Reaction remove error.", error);
+  }
+});
+
+client.on("voiceStateUpdate", async (oldState, newState) => {
+  try {
+    if (!ENABLE_CORE_BOT || !getDailyChallengeEnabled()) return;
+    if (newState?.member?.user?.bot) return;
+
+    syncDailyChallengeVoiceSession(newState);
+    if (!newState.channelId && oldState?.channelId) {
+      dailyChallengeVoiceSessions.delete(getDailyChallengeVoiceSessionKey(oldState.guild.id, oldState.id));
+    }
+  } catch (error) {
+    log.error("Voice state update error.", error);
   }
 });
 
@@ -12420,7 +13481,7 @@ client.on("interactionCreate", async interaction => {
         kind === "selectrole" ||
         kind === "configmodal" ||
         kind === "exemptselect" ||
-        ["reload-config", "setupverify", "setuptiktokverify", "repaironboarding", "setuprules", "settings-view", "reset-mod-roles", "reset-admin-roles", "lockverified-current", "lockverified-all", "unlockverified-current", "unlockverified-all"].includes(action)
+        ["reload-config", "setupverify", "setuptiktokverify", "repaironboarding", "setuprules", "settings-view", "reset-mod-roles", "reset-admin-roles", "autocreate-nobility-roles", "lockverified-current", "lockverified-all", "unlockverified-current", "unlockverified-all"].includes(action)
           ? "admin"
           : "mod";
 
@@ -13568,6 +14629,48 @@ client.on("interactionCreate", async interaction => {
           });
         }
 
+        if (action === "autocreate-nobility-roles") {
+          const result = await maybeAutoProvisionNobilityRoles({
+            guild: interaction.guild,
+            source: "admin panel",
+            force: true
+          });
+
+          const createdLine = result.created?.length
+            ? result.created.map(entry => `${entry.tier}: ${entry.roleName} (<@&${entry.roleId}>)`).join("\n")
+            : "None";
+          const reusedLine = result.reused?.length
+            ? result.reused.map(entry => `${entry.tier}: ${entry.roleName} (<@&${entry.roleId}>)`).join("\n")
+            : "None";
+          const skippedLine = result.skipped?.length
+            ? result.skipped.map(entry => `${entry.tier}: ${entry.reason}`).join("\n")
+            : "None";
+
+          await interaction.reply({
+            embeds: [
+              makeEmbed({
+                title: "Nobility Roles Auto-Provisioned",
+                description: result.completed
+                  ? "I created or mapped the nobility roles and saved the bindings."
+                  : "I could not provision any nobility roles.",
+                color: result.completed ? COLORS.mint : COLORS.yellow,
+                fields: [
+                  { name: "Created", value: createdLine, inline: false },
+                  { name: "Reused", value: reusedLine, inline: false },
+                  { name: "Skipped", value: skippedLine, inline: false },
+                  { name: "Leveling", value: buildNobilitySummaryLine(), inline: false }
+                ]
+              })
+            ],
+            ephemeral: true
+          });
+
+          return interaction.message.edit({
+            embeds: [await buildAdminPanelEmbed("setup", interaction, targetUserId)],
+            components: buildAdminPanelButtons("setup", targetUserId)
+          }).catch(() => {});
+        }
+
         if (action === "reset-mod-roles") {
           config.permissions.modRoleIds = [];
           saveConfig();
@@ -13712,13 +14815,13 @@ client.on("interactionCreate", async interaction => {
 
         const challenge = getVerificationCaptchaChallenge(interaction.user.id);
         if (!challenge) {
-          return interaction.reply({ content: "That CAPTCHA expired. Click the rules button again to get a fresh one.", ephemeral: true });
+          return interaction.reply({ content: "CAPTCHA expired. Reopen the rules card.", ephemeral: true });
         }
 
         const submitted = normalizeVerificationCaptchaInput(interaction.fields.getTextInputValue("captchaAnswer"));
         if (submitted !== challenge.code) {
           clearVerificationCaptchaChallenge(interaction.user.id);
-          return interaction.reply({ content: "That CAPTCHA answer was wrong. Click the rules button again to try a new one.", ephemeral: true });
+          return interaction.reply({ content: "Wrong CAPTCHA. Reopen the rules card and try again.", ephemeral: true });
         }
 
         clearVerificationCaptchaChallenge(interaction.user.id);
@@ -13749,13 +14852,13 @@ client.on("interactionCreate", async interaction => {
         if (interaction.customId === "verify:age-captcha") {
           const challenge = getVerificationCaptchaChallenge(interaction.user.id);
           if (!challenge) {
-            return interaction.reply({ content: "That CAPTCHA expired. Click the rules button again to get a fresh one.", ephemeral: true });
+            return interaction.reply({ content: "CAPTCHA expired. Reopen the rules card.", ephemeral: true });
           }
 
           const submitted = normalizeVerificationCaptchaInput(interaction.fields.getTextInputValue("captchaAnswer"));
           if (submitted !== challenge.code) {
             clearVerificationCaptchaChallenge(interaction.user.id);
-            return interaction.reply({ content: "That CAPTCHA answer was wrong. Click the rules button again to try a new one.", ephemeral: true });
+            return interaction.reply({ content: "Wrong CAPTCHA. Reopen the rules card and try again.", ephemeral: true });
           }
         }
 
@@ -13951,7 +15054,7 @@ client.on("interactionCreate", async interaction => {
         if (action === "mentions") {
           const limit = Number(interaction.fields.getTextInputValue("limit"));
           if (!Number.isInteger(limit) || limit < 1 || limit > 25) {
-            return interaction.reply({ content: "Mention limit must be a whole number from 1 to 25.", ephemeral: true });
+            return interaction.reply({ content: "Mention limit must be 1 to 25.", ephemeral: true });
           }
           config.automod.maxMentions = limit;
         }
@@ -13959,7 +15062,7 @@ client.on("interactionCreate", async interaction => {
         if (action === "emoji-limit") {
           const limit = Number(interaction.fields.getTextInputValue("limit"));
           if (!Number.isInteger(limit) || limit < 3 || limit > 100) {
-            return interaction.reply({ content: "Emoji limit must be a whole number from 3 to 100.", ephemeral: true });
+            return interaction.reply({ content: "Emoji limit must be 3 to 100.", ephemeral: true });
           }
           config.automod.maxEmojiCount = limit;
         }
@@ -13968,7 +15071,7 @@ client.on("interactionCreate", async interaction => {
           const warn = Number(interaction.fields.getTextInputValue("warn"));
           const timeout = Number(interaction.fields.getTextInputValue("timeout"));
           if (!Number.isInteger(warn) || !Number.isInteger(timeout) || warn < 1 || timeout < 1 || warn > 20 || timeout > 20) {
-            return interaction.reply({ content: "Thresholds must be whole numbers from 1 to 20.", ephemeral: true });
+            return interaction.reply({ content: "Thresholds must be 1 to 20.", ephemeral: true });
           }
           config.automod.warnThreshold = warn;
           config.automod.timeoutThreshold = timeout;
@@ -13977,7 +15080,7 @@ client.on("interactionCreate", async interaction => {
         if (action === "attachment-limit") {
           const limit = Number(interaction.fields.getTextInputValue("limit"));
           if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
-            return interaction.reply({ content: "Attachment limit must be a whole number from 1 to 100 MB.", ephemeral: true });
+            return interaction.reply({ content: "Attachment limit must be 1 to 100 MB.", ephemeral: true });
           }
           config.automod.maxAttachmentSizeMb = limit;
         }
@@ -13989,19 +15092,19 @@ client.on("interactionCreate", async interaction => {
           const raidAction = interaction.fields.getTextInputValue("action").trim().toLowerCase();
 
           if (!Number.isInteger(threshold) || threshold < 2 || threshold > 100) {
-            return interaction.reply({ content: "Raid threshold must be a whole number from 2 to 100.", ephemeral: true });
+            return interaction.reply({ content: "Raid threshold must be 2 to 100.", ephemeral: true });
           }
 
           if (!windowMs) {
-            return interaction.reply({ content: "Raid window must be a valid duration like 30s, 1m, or 5m.", ephemeral: true });
+            return interaction.reply({ content: "Raid window needs a duration like 30s or 1m.", ephemeral: true });
           }
 
           if (!accountAgeMs) {
-            return interaction.reply({ content: "Suspicious account age must be a valid duration like 1d or 7d.", ephemeral: true });
+            return interaction.reply({ content: "Account age needs a duration like 1d or 7d.", ephemeral: true });
           }
 
           if (!["log", "timeout"].includes(raidAction)) {
-            return interaction.reply({ content: "Raid action must be either `log` or `timeout`.", ephemeral: true });
+            return interaction.reply({ content: "Raid action must be `log` or `timeout`.", ephemeral: true });
           }
 
           config.automod.raidJoinThreshold = threshold;
@@ -14017,7 +15120,7 @@ client.on("interactionCreate", async interaction => {
           const attachmentMemberAge = parseDurationInputOrZero(interaction.fields.getTextInputValue("attachmentMemberAge"));
 
           if ([linkAccountAge, linkMemberAge, attachmentAccountAge, attachmentMemberAge].some(value => value === null)) {
-            return interaction.reply({ content: "Use durations like 12h or 7d. You can also enter `0` to disable a gate.", ephemeral: true });
+            return interaction.reply({ content: "Use durations like 12h or 7d. `0` disables a gate.", ephemeral: true });
           }
 
           config.automod.minAccountAgeForLinksMs = linkAccountAge;
@@ -14406,6 +15509,9 @@ client.on("interactionCreate", async interaction => {
       "setuptiktokverify",
       "setupreactionroles",
       "setuprules",
+      "nobilityrole",
+      "nobilitytier",
+      "nobilitysync",
       "automod",
       "automodlinks",
       "automodguard",
@@ -14452,6 +15558,18 @@ client.on("interactionCreate", async interaction => {
       !(await ensureStaffAccess(interaction, "mod", `/${interaction.commandName}`))
     ) {
       return;
+    }
+
+    if (interaction.isChatInputCommand() && getDailyChallengeEnabled()) {
+      await dailyChallengeStore.recordProgress({
+        userId: interaction.user.id,
+        guildId: interaction.guildId || null,
+        kind: "command",
+        now: interaction.createdTimestamp || Date.now(),
+        context: buildDailyChallengeContext(interaction)
+      }).catch(error => {
+        log.warn("Failed to record daily challenge command progress.", error);
+      });
     }
 
     if (interaction.commandName === "mochi") {
@@ -14513,6 +15631,453 @@ client.on("interactionCreate", async interaction => {
           })
         ],
         ephemeral: true
+      });
+    }
+
+    if (interaction.commandName === "dailychallenge") {
+      const subcommand = interaction.options.getSubcommand();
+      const now = interaction.createdTimestamp || Date.now();
+      const context = buildDailyChallengeContext(interaction);
+      const challenge = await dailyChallengeStore.getChallenge({
+        userId: interaction.user.id,
+        guildId: interaction.guildId || null,
+        now,
+        context
+      });
+
+      if (subcommand === "stats") {
+        const typeStats = await dailyChallengeStore.getTypeStats(8);
+        return interaction.reply({
+          embeds: [buildDailyChallengeStatsEmbed(typeStats)],
+          ephemeral: true
+        });
+      }
+
+      if (subcommand === "preview") {
+        if (!(await ensureStaffAccess(interaction, "mod", "/dailychallenge preview"))) {
+          return;
+        }
+
+        const previewUser = interaction.options.getUser("user") || interaction.user;
+        const previewChallenge = await dailyChallengeStore.getChallenge({
+          userId: previewUser.id,
+          guildId: interaction.guildId || null,
+          now,
+          context
+        });
+
+        return interaction.reply({
+          embeds: [buildDailyChallengePreviewEmbed(previewChallenge, previewUser)],
+          ephemeral: true
+        });
+      }
+
+      if (subcommand === "view") {
+        return interaction.reply({
+          embeds: [buildDailyChallengeEmbed(challenge, "Today's Daily Challenge")],
+          ephemeral: true
+        });
+      }
+
+      if (subcommand === "leaderboard") {
+        const leaderboard = await dailyChallengeStore.getLeaderboard(10);
+        return interaction.reply({
+          embeds: [buildDailyChallengeLeaderboardEmbed(leaderboard)],
+          ephemeral: true
+        });
+      }
+
+      if (subcommand === "reroll") {
+        if (!(await ensureStaffAccess(interaction, "admin", "/dailychallenge reroll"))) {
+          return;
+        }
+
+        const targetUser = interaction.options.getUser("user");
+        const reroll = await dailyChallengeStore.forceRollChallenge({
+          userId: targetUser.id,
+          guildId: interaction.guildId || null,
+          now,
+          forcedBy: interaction.user.tag,
+          context
+        });
+
+        if (!reroll?.challenge) {
+          return interaction.reply({ content: "I could not reroll that challenge.", ephemeral: true });
+        }
+
+        if (targetUser.id === interaction.user.id) {
+          dailyChallengeVoiceSessions.delete(getDailyChallengeVoiceSessionKey(interaction.guildId || "dm", targetUser.id));
+        }
+
+        return interaction.reply({
+          content: `Rerolled today's challenge for ${targetUser.tag}.`,
+          embeds: [buildDailyChallengeEmbed(reroll.challenge, "Daily Challenge Rerolled")],
+          ephemeral: true
+        });
+      }
+
+      if (!getDailyChallengeEnabled()) {
+        return interaction.reply({ content: "Daily challenges are currently disabled.", ephemeral: true });
+      }
+
+      if (!challenge) {
+        return interaction.reply({ content: "I could not load today's challenge.", ephemeral: true });
+      }
+
+      if (challenge.claimedAt) {
+        return interaction.reply({
+          content: "You already claimed today's challenge reward.",
+          embeds: [buildDailyChallengeEmbed(challenge, "Today's Daily Challenge")],
+          ephemeral: true
+        });
+      }
+
+      if (challenge.progress < challenge.target) {
+        const remaining = Math.max(0, challenge.target - challenge.progress);
+        return interaction.reply({
+          content: `You still need **${remaining} more ${challenge.unit}** to claim today's reward.`,
+          embeds: [buildDailyChallengeEmbed(challenge, "Today's Daily Challenge")],
+          ephemeral: true
+        });
+      }
+
+      const claimResult = await dailyChallengeStore.claimChallenge({
+        userId: interaction.user.id,
+        guildId: interaction.guildId || null,
+        now,
+        context
+      });
+
+      if (!claimResult) {
+        return interaction.reply({ content: "I could not load today's challenge.", ephemeral: true });
+      }
+
+      let reward = null;
+      try {
+        const adjustedReward = getDailyChallengeAdjustedReward(claimResult.challenge);
+        reward = await nobilityStore.awardXp({
+          userId: interaction.user.id,
+          userTag: interaction.user.tag,
+          guildId: interaction.guildId || null,
+          xpGain: adjustedReward,
+          reason: `daily challenge: ${claimResult.challenge.type}`,
+          now,
+          tiers: getNobilityTiers()
+        });
+
+        await dailyChallengeStore.recordClaim({
+          userId: interaction.user.id,
+          userTag: interaction.user.tag,
+          guildId: interaction.guildId || null,
+          rewardXp: adjustedReward,
+          challengeType: claimResult.challenge.type,
+          now
+        }).catch(error => {
+          log.warn("Failed to record daily challenge leaderboard stats.", error);
+        });
+      } catch (error) {
+        await dailyChallengeStore.unclaimChallenge({
+          userId: interaction.user.id,
+          guildId: interaction.guildId || null,
+          now
+        }).catch(unclaimError => {
+          log.warn("Failed to roll back daily challenge claim.", unclaimError);
+        });
+        throw error;
+      }
+
+      if (reward?.leveledUp && interaction.member) {
+        await syncNobilityRoles(interaction.member, reward.nextProgress, "daily challenge").catch(error => {
+          log.warn("Failed to sync nobility roles after daily challenge.", error);
+        });
+      }
+
+      const levelNote = reward?.leveledUp
+        ? ` You advanced to **${reward.nextProgress.current.title}**.`
+        : "";
+
+      return interaction.reply({
+        content: `You claimed **${getDailyChallengeAdjustedReward(claimResult.challenge)} XP** from today's challenge.${levelNote}`,
+        embeds: [buildDailyChallengeEmbed(claimResult.challenge, "Daily Challenge Claimed")],
+        ephemeral: true
+      });
+    }
+
+    if (interaction.commandName === "daily") {
+      if (!getDailyEnabled()) {
+        return interaction.reply({ content: "Daily XP claims are currently disabled.", ephemeral: true });
+      }
+
+      const profile = await nobilityStore.getProfile(interaction.user.id);
+      const claim = await nobilityStore.recordDailyClaim({
+        userId: interaction.user.id,
+        userTag: interaction.user.tag,
+        guildId: interaction.guildId || null,
+        dailyXp: getDailyXpReward(),
+        streakBonus: getDailyStreakBonus(),
+        cooldownMs: getDailyCooldownMs(),
+        tiers: getNobilityTiers()
+      });
+
+      if (!claim) {
+        return interaction.reply({ content: "I could not record your daily claim.", ephemeral: true });
+      }
+
+      if (!claim.awarded) {
+        const hours = Math.floor(claim.remainingMs / (60 * 60 * 1000));
+        const minutes = Math.ceil((claim.remainingMs % (60 * 60 * 1000)) / (60 * 1000));
+        const nextClaimText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+        return interaction.reply({
+          content: `You already claimed your daily XP. Try again in ${nextClaimText}.`,
+          embeds: [buildNobilityTierEmbed(profile, interaction.user)],
+          ephemeral: true
+        });
+      }
+
+      if (claim.leveledUp && interaction.member) {
+        await syncNobilityRoles(interaction.member, claim.nextProgress, "daily claim").catch(error => {
+          log.warn("Failed to sync nobility roles after daily claim.", error);
+        });
+      }
+
+      const streakNote = claim.streak > 1 ? ` Streak bonus included. Current streak: ${claim.streak} days.` : "";
+      const levelNote = claim.leveledUp
+        ? ` You advanced to **${claim.nextProgress.current.title}**.`
+        : "";
+
+      return interaction.reply({
+        content: `You claimed **${claim.rewardXp} XP** from your daily task.${streakNote}${levelNote}`,
+        embeds: [buildNobilityTierEmbed(claim.profile, interaction.user)],
+        ephemeral: true
+      });
+    }
+
+    if (interaction.commandName === "nobilityleaderboard") {
+      const leaderboard = await nobilityStore.getLeaderboard(10);
+      return interaction.reply({
+        embeds: [buildNobilityLeaderboardEmbed(leaderboard)],
+        ephemeral: true
+      });
+    }
+
+    if (interaction.commandName === "rank") {
+      const user = interaction.options.getUser("user") || interaction.user;
+      const profile = await nobilityStore.getProfile(user.id);
+      return interaction.reply({
+        embeds: [buildNobilityTierEmbed(profile, user)],
+        ephemeral: true
+      });
+    }
+
+    if (interaction.commandName === "nobility") {
+      return interaction.reply({
+        embeds: [buildNobilitySummaryEmbed()],
+        ephemeral: true
+      });
+    }
+
+    if (interaction.commandName === "nobilityrole") {
+      const subcommand = interaction.options.getSubcommand();
+      const roleMap = { ...getNobilityRoleIds() };
+
+      if (subcommand === "view") {
+        return interaction.reply({
+          embeds: [
+            makeEmbed({
+              title: "Nobility Role Mapping",
+              description: buildNobilityRoleSummary(),
+              color: COLORS.purple,
+              fields: [
+                { name: "Role Map Details", value: buildNobilityRoleMapDetails(), inline: false },
+                { name: "Leveling", value: buildNobilitySummaryLine(), inline: false }
+              ]
+            })
+          ],
+          ephemeral: true
+        });
+      }
+
+      if (subcommand === "reset") {
+        config.settings.nobilityRoleIds = {};
+        saveConfig();
+        recordAuditLog(interaction.user.tag, "nobility-role-reset", {});
+        return interaction.reply({ content: "Cleared all nobility role mappings.", ephemeral: true });
+      }
+
+      if (subcommand === "autocreate") {
+        const result = await autoCreateNobilityRoles(interaction.guild, "nobility role autocreate");
+        recordAuditLog(interaction.user.tag, "nobility-role-autocreate", {
+          created: result.created.map(entry => ({ tier: entry.tier, roleId: entry.roleId, roleName: entry.roleName })),
+          reused: result.reused.map(entry => ({ tier: entry.tier, roleId: entry.roleId, roleName: entry.roleName, source: entry.source })),
+          skipped: result.skipped
+        });
+
+        const createdLine = result.created.length
+          ? result.created.map(entry => `${entry.tier}: ${entry.roleName} (<@&${entry.roleId}>)`).join("\n")
+          : "None";
+        const reusedLine = result.reused.length
+          ? result.reused.map(entry => `${entry.tier}: ${entry.roleName} (<@&${entry.roleId}>)`).join("\n")
+          : "None";
+        const skippedLine = result.skipped.length
+          ? result.skipped.map(entry => `${entry.tier}: ${entry.reason}`).join("\n")
+          : "None";
+
+        return interaction.reply({
+          embeds: [
+            makeEmbed({
+              title: "Nobility Roles Auto-Created",
+              description: result.updated
+                ? "I created or mapped the missing nobility roles and saved the tier bindings."
+                : "All nobility roles were already present and mapped.",
+              color: result.updated ? COLORS.mint : COLORS.blue,
+              fields: [
+                { name: "Created", value: createdLine, inline: false },
+                { name: "Reused", value: reusedLine, inline: false },
+                { name: "Skipped", value: skippedLine, inline: false },
+                { name: "Leveling", value: buildNobilitySummaryLine(), inline: false }
+              ]
+            })
+          ],
+          ephemeral: true
+        });
+      }
+
+      const tier = interaction.options.getString("tier");
+
+      if (subcommand === "set") {
+        const role = interaction.options.getRole("role");
+        roleMap[tier] = role.id;
+        config.settings.nobilityRoleIds = roleMap;
+        saveConfig();
+        recordAuditLog(interaction.user.tag, "nobility-role-set", { tier, roleId: role.id, roleName: role.name });
+        return interaction.reply({
+          content: `Assigned ${role} to the ${tier} nobility tier.`,
+          ephemeral: true
+        });
+      }
+
+      if (subcommand === "remove") {
+        if (!roleMap[tier]) {
+          return interaction.reply({ content: `No role is set for the ${tier} tier.`, ephemeral: true });
+        }
+
+        const removedRoleId = roleMap[tier];
+        delete roleMap[tier];
+        config.settings.nobilityRoleIds = roleMap;
+        saveConfig();
+        recordAuditLog(interaction.user.tag, "nobility-role-removed", { tier, roleId: removedRoleId });
+        return interaction.reply({
+          content: `Removed the nobility role mapping for ${tier}.`,
+          ephemeral: true
+        });
+      }
+    }
+
+    if (interaction.commandName === "nobilitytier") {
+      const subcommand = interaction.options.getSubcommand();
+      const tiers = getNobilityTiers().map(tier => ({ ...tier }));
+
+      if (subcommand === "view") {
+        return interaction.reply({
+          embeds: [
+            makeEmbed({
+              title: "Nobility Thresholds",
+              description: formatNobilityLadder(tiers),
+              color: COLORS.purple,
+              fields: [
+                { name: "Leveling", value: buildNobilitySummaryLine(), inline: false }
+              ]
+            })
+          ],
+          ephemeral: true
+        });
+      }
+
+      if (subcommand === "reset") {
+        config.settings.nobilityTiers = NOBILITY_TIERS.map(tier => ({ ...tier }));
+        saveConfig();
+        recordAuditLog(interaction.user.tag, "nobility-tier-reset", {});
+        return interaction.reply({ content: "Restored the default nobility thresholds.", ephemeral: true });
+      }
+
+      if (subcommand === "set") {
+        const tierKey = interaction.options.getString("tier");
+        const xp = interaction.options.getInteger("xp");
+        const updated = setNobilityTierThreshold(tierKey, xp);
+
+        if (!updated) {
+          return interaction.reply({ content: "That tier could not be found.", ephemeral: true });
+        }
+
+        recordAuditLog(interaction.user.tag, "nobility-tier-set", { tierKey, xp });
+        return interaction.reply({
+          content: `Updated the ${tierKey} threshold to ${xp} XP.`,
+          ephemeral: true
+        });
+      }
+    }
+
+    if (interaction.commandName === "nobilitysync") {
+      const scope = interaction.options.getString("scope");
+      const guild = interaction.guild;
+      if (!guild) {
+        return interaction.reply({ content: "This command can only run in a server.", ephemeral: true });
+      }
+
+      await interaction.deferReply({ ephemeral: true });
+      const members = await guild.members.fetch();
+      let checked = 0;
+      let changed = 0;
+      let skipped = 0;
+      let created = 0;
+
+      for (const member of members.values()) {
+        if (member.user?.bot) {
+          continue;
+        }
+
+        checked += 1;
+        let profile = await nobilityStore.getProfile(member.id);
+        if (!profile && scope === "all") {
+          profile = await nobilityStore.setProfile(member.id, {
+            userTag: member.user.tag,
+            guildId: guild.id,
+            totalXp: 0,
+            totalMessages: 0,
+            lastXpAt: 0,
+            lastMessageAt: null
+          }, getNobilityTiers());
+          created += 1;
+        }
+
+        if (!profile) {
+          skipped += 1;
+          continue;
+        }
+
+        const progress = getNobilityProgress(profile.totalXp || 0, getNobilityTiers());
+        const result = await syncNobilityRoles(member, progress, "bulk sync").catch(error => {
+          log.warn("Failed to sync nobility roles during bulk sync.", error);
+          return { applied: false };
+        });
+
+        if (result?.applied) {
+          changed += 1;
+        } else {
+          skipped += 1;
+        }
+      }
+
+      recordAuditLog(interaction.user.tag, "nobility-bulk-sync", {
+        scope,
+        checked,
+        changed,
+        skipped,
+        created
+      });
+
+      return interaction.editReply({
+        content: `Bulk nobility sync complete. Scope: ${scope}. Checked: ${checked}. Changed: ${changed}. Created profiles: ${created}. Skipped: ${skipped}.`
       });
     }
 
@@ -14631,7 +16196,7 @@ client.on("interactionCreate", async interaction => {
       }
 
       return interaction.reply({
-        content: `Head to <#${verifyChannelId}> and click **I've Read the Rules** to verify.${isTikTokVerificationEnabled() ? ` TikTok matching is available in the verify flow.` : ""}`,
+        content: `Go to <#${verifyChannelId}> and click **I've Read the Rules**.${isTikTokVerificationEnabled() ? " TikTok matching is included there." : ""}`,
         ephemeral: true
       });
     }
@@ -15947,6 +17512,61 @@ client.on("interactionCreate", async interaction => {
         config.settings.rulesChannelId = interaction.options.getChannel("channel").id;
       }
 
+      if (subcommand === "nobilityenabled") {
+        const enabled = interaction.options.getBoolean("enabled");
+        const wasEnabled = getNobilityEnabled();
+        config.settings.nobilityEnabled = enabled;
+        if (enabled && !wasEnabled) {
+          await maybeAutoProvisionNobilityRoles({
+            guild: interaction.guild,
+            source: "settings command",
+            force: false
+          });
+        }
+      }
+
+      if (subcommand === "dailyenabled") {
+        config.settings.dailyEnabled = interaction.options.getBoolean("enabled");
+      }
+
+      if (subcommand === "dailyreward") {
+        config.settings.dailyXpReward = interaction.options.getInteger("xp");
+      }
+
+      if (subcommand === "dailystreakbonus") {
+        config.settings.dailyStreakBonus = interaction.options.getInteger("xp");
+      }
+
+      if (subcommand === "dailycooldown") {
+        config.settings.dailyCooldownMs = Math.max(60 * 60 * 1000, Math.min(7 * 24 * 60 * 60 * 1000, parseDuration(interaction.options.getString("duration")) || 0));
+      }
+
+      if (subcommand === "dailychallengeenabled") {
+        config.settings.dailyChallengeEnabled = interaction.options.getBoolean("enabled");
+      }
+
+      if (subcommand === "dailychallengebonus") {
+        config.settings.dailyChallengeRewardBonus = interaction.options.getInteger("xp");
+      }
+
+      if (subcommand === "dailychallengereward") {
+        const typeKey = interaction.options.getString("type");
+        const xp = interaction.options.getInteger("xp");
+        config.settings.dailyChallengeTypeRewardAdjustments = {
+          ...(config.settings.dailyChallengeTypeRewardAdjustments || {}),
+          [typeKey]: xp
+        };
+      }
+
+      if (subcommand === "dailychallengetype") {
+        const typeKey = interaction.options.getString("type");
+        const enabled = interaction.options.getBoolean("enabled");
+        config.settings.dailyChallengeTypeEnabled = {
+          ...(config.settings.dailyChallengeTypeEnabled || {}),
+          [typeKey]: enabled
+        };
+      }
+
       if (subcommand === "reset") {
         const target = interaction.options.getString("target");
 
@@ -16013,6 +17633,42 @@ client.on("interactionCreate", async interaction => {
 
         if (target === "ruleschannel") {
           config.settings.rulesChannelId = null;
+        }
+
+        if (target === "nobilityenabled") {
+          config.settings.nobilityEnabled = true;
+        }
+
+        if (target === "dailyenabled") {
+          config.settings.dailyEnabled = true;
+        }
+
+        if (target === "dailyreward") {
+          config.settings.dailyXpReward = 25;
+        }
+
+        if (target === "dailystreakbonus") {
+          config.settings.dailyStreakBonus = 5;
+        }
+
+        if (target === "dailycooldown") {
+          config.settings.dailyCooldownMs = 24 * 60 * 60 * 1000;
+        }
+
+        if (target === "dailychallengeenabled") {
+          config.settings.dailyChallengeEnabled = true;
+        }
+
+        if (target === "dailychallengebonus") {
+          config.settings.dailyChallengeRewardBonus = 0;
+        }
+
+        if (target === "dailychallengereward") {
+          config.settings.dailyChallengeTypeRewardAdjustments = Object.fromEntries(DAILY_CHALLENGE_TYPES.map(type => [type.key, 0]));
+        }
+
+        if (target === "dailychallengetype") {
+          config.settings.dailyChallengeTypeEnabled = Object.fromEntries(DAILY_CHALLENGE_TYPES.map(type => [type.key, true]));
         }
       }
 
@@ -16183,12 +17839,111 @@ client.on("interactionCreate", async interaction => {
   }
 });
 
-  client.on("messageCreate", async message => {
+client.on("messageCreate", async message => {
   try {
     if (!ENABLE_CORE_BOT) return;
     if (!message.guild || message.author.bot || !message.member) return;
     recordMessageArchive(message);
     generalChatActivityCache.set(message.author.id, message.createdTimestamp || Date.now());
+
+    const messageText = String(message.content || "").trim();
+    const hasVisibleContent = messageText.length > 0 || (message.attachments && message.attachments.size > 0);
+    if (hasVisibleContent && getDailyChallengeEnabled()) {
+      const eligibleChannelIds = message.guild.channels.cache
+        .filter(channel => [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type))
+        .map(channel => channel.id);
+      await dailyChallengeStore.recordProgress({
+        userId: message.author.id,
+        guildId: message.guild.id,
+        kind: "message",
+        now: message.createdTimestamp || Date.now(),
+        channelId: message.channelId,
+        context: {
+          guildId: message.guild.id,
+          eligibleChannelIds,
+          disabledTypeKeys: getDailyChallengeDisabledTypeKeys()
+        }
+      }).catch(error => {
+        log.warn("Failed to record daily challenge message progress.", error);
+      });
+
+      if (message.attachments && message.attachments.size > 0) {
+        await dailyChallengeStore.recordProgress({
+          userId: message.author.id,
+          guildId: message.guild.id,
+          kind: "attachment",
+          now: message.createdTimestamp || Date.now(),
+          context: {
+            guildId: message.guild.id,
+            disabledTypeKeys: getDailyChallengeDisabledTypeKeys()
+          }
+        }).catch(error => {
+          log.warn("Failed to record daily challenge attachment progress.", error);
+        });
+      }
+
+      if (message.reference?.messageId) {
+        await dailyChallengeStore.recordProgress({
+          userId: message.author.id,
+          guildId: message.guild.id,
+          kind: "reply",
+          now: message.createdTimestamp || Date.now(),
+          context: {
+            guildId: message.guild.id,
+            disabledTypeKeys: getDailyChallengeDisabledTypeKeys()
+          }
+        }).catch(error => {
+          log.warn("Failed to record daily challenge reply progress.", error);
+        });
+      }
+
+      if (/(?:https?:\/\/|www\.)\S+/i.test(messageText)) {
+        await dailyChallengeStore.recordProgress({
+          userId: message.author.id,
+          guildId: message.guild.id,
+          kind: "link_share",
+          now: message.createdTimestamp || Date.now(),
+          context: {
+            guildId: message.guild.id,
+            disabledTypeKeys: getDailyChallengeDisabledTypeKeys()
+          }
+        }).catch(error => {
+          log.warn("Failed to record daily challenge link progress.", error);
+        });
+      }
+    }
+
+    if (getNobilityEnabled() && hasVisibleContent) {
+      const nobilityResult = await nobilityStore.recordMessage({
+        userId: message.author.id,
+        userTag: message.author.tag,
+        guildId: message.guild.id,
+        xpGain: getNobilityXpPerMessage(),
+        cooldownMs: getNobilityCooldownMs(),
+        now: message.createdTimestamp || Date.now(),
+        tiers: getNobilityTiers()
+      });
+
+      if (nobilityResult?.leveledUp) {
+        await syncNobilityRoles(message.member, nobilityResult.nextProgress, "message level-up").catch(error => {
+          log.warn("Failed to sync nobility roles.", error);
+        });
+
+        const announcementChannelId = getNobilityAnnouncementChannelId();
+        if (announcementChannelId) {
+          const announcementChannel = await client.channels.fetch(announcementChannelId).catch(() => null);
+          if (announcementChannel && typeof announcementChannel.send === "function") {
+            const rankTitle = nobilityResult.nextProgress.current.title;
+            await announcementChannel.send({
+              content: `**${message.author.tag}** reached **${rankTitle}** in the nobility track.`
+            }).catch(error => {
+              log.warn("Failed to send nobility announcement.", error);
+            });
+          }
+        }
+      }
+    }
+
     if (isAutoModExempt(message)) return;
     const policy = resolveAutoModPolicy(message);
     const messageDomains = extractMessageDomains(message.content);
@@ -16337,11 +18092,11 @@ client.on("guildMemberAdd", async member => {
         title: "Welcome to the server",
         description:
           `Hi ${member.user.username}.\n\n` +
-          `We are happy you joined.\n` +
+          `Glad you joined.\n` +
           (isTikTokVerificationEnabled()
-            ? `Please head to ${getVerifyChannelMention()} and click **I've Read the Rules** to verify. TikTok matching is available in the same verify flow.\n\n`
-            : `Please head to ${getVerifyChannelMention()} and click **I've Read the Rules** to verify and unlock the garden.\n\n`) +
-          "Have fun and enjoy your stay.",
+            ? `Go to ${getVerifyChannelMention()} and click **I've Read the Rules**. TikTok matching is there too.\n\n`
+            : `Go to ${getVerifyChannelMention()} and click **I've Read the Rules** to unlock the server.\n\n`) +
+          "Enjoy your stay.",
         color: COLORS.pink,
         thumbnail: member.user.displayAvatarURL({ dynamic: true })
       })
@@ -16411,6 +18166,16 @@ client.on("guildMemberAdd", async member => {
             color: COLORS.mint
           })
         );
+      }
+    }
+
+    if (getNobilityEnabled()) {
+      const profile = await nobilityStore.getProfile(member.user.id);
+      if (profile) {
+        const progress = getNobilityProgress(profile.totalXp, getNobilityTiers());
+        await syncNobilityRoles(member, progress, "member join").catch(error => {
+          log.warn("Failed to sync nobility roles on join.", error);
+        });
       }
     }
 
