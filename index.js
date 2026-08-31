@@ -1444,17 +1444,13 @@ function loadConfig() {
             )
           : defaults.settings.dailyChallengeTypeRewardAdjustments,
         nobilityRoleIds: parsed.settings?.nobilityRoleIds && typeof parsed.settings.nobilityRoleIds === "object"
-          ? Object.fromEntries(
-              Object.entries(parsed.settings.nobilityRoleIds)
-                .map(([key, value]) => [String(key).trim().toLowerCase(), String(value).trim()])
-                .filter(([key, value]) => key && value)
-            )
+          ? migrateNobilityRoleIds(parsed.settings.nobilityRoleIds)
           : {},
         nobilityAnnouncementChannelId: typeof parsed.settings?.nobilityAnnouncementChannelId === "string"
           ? parsed.settings.nobilityAnnouncementChannelId
           : null,
         nobilityTiers: Array.isArray(parsed.settings?.nobilityTiers)
-          ? normalizeNobilityTiers(parsed.settings.nobilityTiers)
+          ? migrateNobilityTiers(parsed.settings.nobilityTiers)
           : defaults.settings.nobilityTiers,
         ageRoleRules: typeof parsed.settings?.ageRoleRules === "string"
           ? parsed.settings.ageRoleRules
@@ -2072,6 +2068,51 @@ function applyNobilityDifficultyCurve(tiers, multiplier = NOBILITY_DIFFICULTY_MU
   }
 
   return adjusted;
+}
+
+function migrateNobilityTiers(rawTiers) {
+  const source = Array.isArray(rawTiers) ? rawTiers : [];
+  const sourceByKey = new Map(
+    source
+      .map(tier => [String(tier?.key || "").trim().toLowerCase(), tier])
+      .filter(([key, tier]) => key && tier && typeof tier === "object")
+  );
+
+  return NOBILITY_TIERS.map((tier, index) => {
+    const sourceTier = sourceByKey.get(tier.key) || source[index] || {};
+    const requiredXp = Number.isFinite(Number(sourceTier.requiredXp))
+      ? Math.max(0, Math.floor(Number(sourceTier.requiredXp)))
+      : tier.requiredXp;
+
+    return {
+      ...tier,
+      requiredXp,
+      unicodeEmoji: typeof sourceTier.unicodeEmoji === "string" && sourceTier.unicodeEmoji.trim()
+        ? sourceTier.unicodeEmoji.trim()
+        : tier.unicodeEmoji || null,
+      color: typeof sourceTier.color === "string" && sourceTier.color.trim()
+        ? sourceTier.color.trim()
+        : tier.color || null
+    };
+  });
+}
+
+function migrateNobilityRoleIds(rawRoleIds) {
+  const legacyKeys = ["commoner", "page", "squire", "knight", "baron", "count", "duke", "archduke", "sovereign"];
+  const source = rawRoleIds && typeof rawRoleIds === "object" ? rawRoleIds : {};
+  const normalized = Object.fromEntries(
+    Object.entries(source)
+      .map(([key, value]) => [String(key).trim().toLowerCase(), String(value).trim()])
+      .filter(([key, value]) => key && value)
+  );
+  const sourceValues = Object.values(normalized);
+
+  return Object.fromEntries(
+    NOBILITY_TIERS.map((tier, index) => {
+      const value = normalized[tier.key] || normalized[legacyKeys[index]] || sourceValues[index] || "";
+      return [tier.key, value];
+    }).filter(([, value]) => Boolean(value))
+  );
 }
 
 function getBirthdayRoleId() {
@@ -7126,7 +7167,8 @@ function buildNobilityRoleSummary() {
   return getNobilityTiers()
     .map(tier => {
       const roleId = getNobilityRoleId(tier.key);
-      return `${tier.title}: ${roleId ? `<@&${roleId}>` : "Not set"}`;
+      const prefix = tier.unicodeEmoji ? `${tier.unicodeEmoji} ` : "";
+      return `${prefix}${tier.title}: ${roleId ? `<@&${roleId}>` : "Not set"}`;
     })
     .join("\n");
 }
@@ -7135,7 +7177,8 @@ function buildNobilityRoleMapDetails() {
   return getNobilityTiers()
     .map(tier => {
       const roleId = getNobilityRoleId(tier.key);
-      return `${tier.title}: ${roleId ? `<@&${roleId}>` : "Not set"}`;
+      const prefix = tier.unicodeEmoji ? `${tier.unicodeEmoji} ` : "";
+      return `${prefix}${tier.title}: ${roleId ? `<@&${roleId}>` : "Not set"}`;
     })
     .join("\n");
 }
@@ -7471,6 +7514,83 @@ function buildNobilityRoleCreateName(tier) {
   return String(tier?.title || "").trim();
 }
 
+function getNobilityRoleAppearance(tier) {
+  return {
+    color: typeof tier?.color === "string" && tier.color.trim() ? tier.color.trim() : null,
+    unicodeEmoji: typeof tier?.unicodeEmoji === "string" && tier.unicodeEmoji.trim() ? tier.unicodeEmoji.trim() : null
+  };
+}
+
+async function syncNobilityRoleAppearance(role, tier, source = "nobility role styling") {
+  if (!role || !tier) {
+    return { updated: false };
+  }
+
+  const updates = {};
+  const targetName = buildNobilityRoleCreateName(tier);
+  const appearance = getNobilityRoleAppearance(tier);
+  const currentColor = typeof role.hexColor === "string" ? role.hexColor.toLowerCase() : null;
+
+  if (targetName && role.name !== targetName) {
+    updates.name = targetName;
+  }
+
+  if (appearance.color && currentColor !== appearance.color.toLowerCase()) {
+    updates.color = appearance.color;
+  }
+
+  if (appearance.unicodeEmoji && role.unicodeEmoji !== appearance.unicodeEmoji) {
+    updates.unicodeEmoji = appearance.unicodeEmoji;
+  }
+
+  if (!Object.keys(updates).length) {
+    return { updated: false };
+  }
+
+  await role.edit({
+    ...updates,
+    reason: `${source}: ${tier.key}`
+  }).catch(() => {});
+
+  return { updated: true };
+}
+
+async function positionNobilityRoles(guild, roleMap, source = "nobility role positioning") {
+  const botMember = guild?.members?.me || (guild?.members?.fetchMe ? await guild.members.fetchMe().catch(() => null) : null);
+  const staffRoleIds = [...new Set([...getPermissionRoleIds("admin"), ...getPermissionRoleIds("mod")].filter(Boolean))];
+  const staffRoles = staffRoleIds
+    .map(roleId => guild.roles.cache.get(roleId) || null)
+    .filter(Boolean);
+  const tierRoles = getNobilityTiers()
+    .map(tier => ({
+      tier,
+      role: roleMap?.[tier.key]
+        ? guild.roles.cache.get(roleMap[tier.key]) || null
+        : null
+    }))
+    .filter(entry => entry.role);
+
+  if (!tierRoles.length) {
+    return { updated: false, reason: "missing-roles" };
+  }
+
+  const ceilingPosition = staffRoles.length
+    ? Math.min(...staffRoles.map(role => role.position)) - 1
+    : (botMember?.roles?.highest?.position || 0) - 1;
+
+  if (ceilingPosition <= 0) {
+    return { updated: false, reason: "no-space" };
+  }
+
+  let targetPosition = ceilingPosition;
+  for (const { role } of [...tierRoles].reverse()) {
+    await role.setPosition(targetPosition, `${source}: hierarchy`).catch(() => {});
+    targetPosition -= 1;
+  }
+
+  return { updated: true, ceilingPosition };
+}
+
 async function autoCreateNobilityRoles(guild, source = "nobility role autocreate") {
   if (!guild?.roles?.create) {
     return { created: [], reused: [], skipped: [], updated: false, roleMap: getNobilityRoleIds() };
@@ -7507,6 +7627,7 @@ async function autoCreateNobilityRoles(guild, source = "nobility role autocreate
     if (mappedRoleId) {
       role = guild.roles.cache.get(mappedRoleId) || await guild.roles.fetch(mappedRoleId).catch(() => null);
       if (role) {
+        await syncNobilityRoleAppearance(role, tier, `${source}: existing-mapping`);
         reused.push({ tier: tier.key, roleId: role.id, roleName: role.name, source: "existing-mapping" });
         continue;
       }
@@ -7516,6 +7637,7 @@ async function autoCreateNobilityRoles(guild, source = "nobility role autocreate
     if (role) {
       roleMap[tier.key] = role.id;
       updated = true;
+      await syncNobilityRoleAppearance(role, tier, `${source}: existing-role`);
       reused.push({ tier: tier.key, roleId: role.id, roleName: role.name, source: "existing-role" });
       continue;
     }
@@ -7523,8 +7645,10 @@ async function autoCreateNobilityRoles(guild, source = "nobility role autocreate
     try {
       role = await guild.roles.create({
         name: targetName,
+        color: tier.color || undefined,
         hoist: true,
         mentionable: false,
+        unicodeEmoji: tier.unicodeEmoji || undefined,
         reason: `${source}: create role for ${tier.key}`
       });
       roleMap[tier.key] = role.id;
@@ -7540,6 +7664,8 @@ async function autoCreateNobilityRoles(guild, source = "nobility role autocreate
     saveConfig();
   }
 
+  await positionNobilityRoles(guild, roleMap, source);
+
   return { created, reused, skipped, updated, roleMap };
 }
 
@@ -7550,18 +7676,6 @@ async function maybeAutoProvisionNobilityRoles({ guild, source = "nobility auto-
 
   if (!getNobilityEnabled()) {
     return { attempted: false, reason: "nobility-disabled" };
-  }
-
-  if (!force && getNobilityRoleAutoProvisionedAt()) {
-    const roleIds = getNobilityRoleIds();
-    const allMappedRolesExist = getNobilityTiers().every(tier => {
-      const roleId = roleIds?.[tier.key];
-      return roleId && guild.roles.cache.has(roleId);
-    });
-
-    if (allMappedRolesExist) {
-      return { attempted: false, reason: "already-provisioned" };
-    }
   }
 
   const result = await autoCreateNobilityRoles(guild, source);
@@ -18169,8 +18283,19 @@ client.on("guildMemberAdd", async member => {
       }
     }
 
-    if (getNobilityEnabled()) {
-      const profile = await nobilityStore.getProfile(member.user.id);
+  if (getNobilityEnabled()) {
+      let profile = await nobilityStore.getProfile(member.user.id);
+      if (!profile) {
+        profile = await nobilityStore.setProfile(member.user.id, {
+          userTag: member.user.tag,
+          guildId: member.guild.id,
+          totalXp: 0,
+          totalMessages: 0,
+          lastXpAt: 0,
+          lastMessageAt: null
+        }, getNobilityTiers());
+      }
+
       if (profile) {
         const progress = getNobilityProgress(profile.totalXp, getNobilityTiers());
         await syncNobilityRoles(member, progress, "member join").catch(error => {

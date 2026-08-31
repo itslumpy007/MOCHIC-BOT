@@ -436,14 +436,14 @@ const settingLabels = {
 
 const nobilityTierLabels = [
   ["commoner", "Commoner"],
-  ["page", "Page"],
   ["squire", "Squire"],
   ["knight", "Knight"],
-  ["baron", "Baron"],
-  ["count", "Count"],
-  ["duke", "Duke"],
-  ["archduke", "Archduke"],
-  ["sovereign", "Sovereign"]
+  ["baron", "Baron / Baroness"],
+  ["viscount", "Viscount"],
+  ["count", "Count / Countess"],
+  ["marquis", "Marquis / Marquess"],
+  ["duke", "Duke / Duchess"],
+  ["mochi_noble", "Mochi Noble"]
 ];
 
 const privacySettingLabels = {
