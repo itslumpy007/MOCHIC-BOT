@@ -1491,6 +1491,14 @@ function saveConfig() {
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 }
 
+function withTimeout(promise, timeoutMs, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 function cloneAuditValue(value) {
   if (value == null) return value;
   if (Array.isArray(value)) return value.slice();
@@ -10752,8 +10760,17 @@ async function buildWebDashboardPayload() {
   const recentCases = [...(Array.isArray(config.cases) ? config.cases : [])]
     .slice(-25)
     .reverse();
-  const reactionRoleHealth = await buildReactionRoleHealth();
-  const generalChatRule = await buildGeneralChatRuleStatus(null, 10).catch(() => ({
+  const reactionRoleHealth = await withTimeout(buildReactionRoleHealth(), 10000, "Reaction-role health check timed out.").catch(() => ({
+    ready: false,
+    verifyChannelId: getReactionRoleChannelId(),
+    verifyMessageId: getReactionRoleMessageId(),
+    botManageRoles: false,
+    roleHierarchyOk: false,
+    panelMessageFound: false,
+    roles: [],
+    issues: ["Health check unavailable while the bot is syncing Discord data."]
+  }));
+  const generalChatRule = await withTimeout(buildGeneralChatRuleStatus(null, 10), 10000, "Activity scan timed out.").catch(() => ({
     enabled: isGeneralChatInactivityEnabled(),
     channelId: getGeneralChatChannelId() || null,
     channelName: null,
