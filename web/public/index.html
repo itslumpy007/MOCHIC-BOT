@@ -515,6 +515,12 @@
                 <button class="ghost-button" type="button" data-view="settings">Open Server Settings</button>
               </article>
               <article class="summary-item admin-hub-card">
+                <span>Leveling and Nobility</span>
+                <strong>XP, ranks, roles, and daily challenges</strong>
+                <p>Configure the nobility ladder, difficulty curve, automatic roles, and daily XP challenges.</p>
+                <button class="ghost-button" type="button" data-view="settings" data-subtab="leveling">Open Leveling</button>
+              </article>
+              <article class="summary-item admin-hub-card">
                 <span>Staff Access</span>
                 <strong>Moderator and admin permissions</strong>
                 <p>Control who can access the panel and review staff tickets, access lists, and support inbox items.</p>
@@ -536,6 +542,7 @@
             <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="accounts">Web Access</button>
             <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="verification">Verification</button>
             <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="birthdays">Birthday Roles</button>
+            <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="leveling">Leveling</button>
             <button class="view-tab" type="button" data-subtab-view="settings" data-subtab="safety">Exemptions</button>
           </div>
           <div class="button-row" style="margin: 0 0 14px;">
@@ -568,6 +575,22 @@
               </div>
               <p class="panel-note">Control the little kindness corner: button, channel, and cooldown.</p>
               <div class="form-grid" id="affirmationsSettingsFields"></div>
+            </section>
+          </div>
+
+          <div class="view-stack hidden" data-view-subtab-group="settings" data-subtab="leveling">
+            <section class="panel">
+              <div class="panel-header">
+                <h3>Leveling and Nobility <span class="header-status" id="levelingDirtyStatus"></span></h3>
+                <button class="save-button" id="saveLevelingSettings" type="button">Save</button>
+              </div>
+              <p class="panel-note">Members earn XP from eligible chat activity and daily challenges. Rank requirements become progressively harder by 6% per tier.</p>
+              <div class="form-grid" id="levelingSettingsFields"></div>
+              <div id="levelingLadderDetails" class="summary-grid"></div>
+              <div class="button-row" style="margin-top: 12px;">
+                <button class="ghost-button" id="autocreateNobilityRolesButtonLeveling" type="button">Create Nobility Roles</button>
+                <button class="ghost-button" id="reprovisionNobilityRolesButtonLeveling" type="button">Re-provision Missing</button>
+              </div>
             </section>
           </div>
 

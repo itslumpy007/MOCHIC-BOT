@@ -434,6 +434,13 @@ const settingLabels = {
   mutedRoleId: "Muted role ID"
 };
 
+const levelingSettingLabels = {
+  nobilityXpPerMessage: "XP per eligible message",
+  nobilityCooldownMs: "Message XP cooldown (ms)",
+  dailyChallengeEnabled: "Daily challenges enabled",
+  dailyChallengeRewardBonus: "Daily challenge bonus XP"
+};
+
 const nobilityTierLabels = [
   ["commoner", "Commoner"],
   ["squire", "Squire"],
@@ -2730,6 +2737,22 @@ function renderSettings() {
       `;
     })
     .join("");
+
+  const levelingFields = Object.entries(levelingSettingLabels).map(([key, label]) => {
+    if (key === "dailyChallengeEnabled") {
+      return `<label>${label}<select data-setting="${key}">
+        <option value="true" ${settings[key] !== false ? "selected" : ""}>On</option>
+        <option value="false" ${settings[key] === false ? "selected" : ""}>Off</option>
+      </select></label>`;
+    }
+    return `<label>${label}<input data-setting="${key}" type="number" min="0" value="${escapeHtml(settings[key] ?? 0)}"></label>`;
+  }).join("");
+  $("#levelingSettingsFields").innerHTML = levelingFields;
+  const ladder = Array.isArray(settings.nobilityTiers) ? settings.nobilityTiers : [];
+  $("#levelingLadderDetails").innerHTML = nobilityTierLabels.map(([key, label]) => {
+    const tier = ladder.find(item => item.key === key);
+    return `<article class="summary-item"><span>${escapeHtml(label)}</span><strong>${tier ? `${Number(tier.requiredXp || 0)} XP` : "Not configured"}</strong></article>`;
+  }).join("");
 
   $("#generalSettingsFields").innerHTML = Object.entries(settingLabels)
     .map(([key, label]) => {
@@ -5564,6 +5587,9 @@ function bindEvents() {
   $("#saveSettings").addEventListener("click", () => saveSettings().catch(error => setAlert(error.message, "error")));
   $("#autocreateNobilityRolesButton").addEventListener("click", () => autoCreateNobilityRoles().catch(error => setAlert(error.message, "error")));
   $("#reprovisionNobilityRolesButton").addEventListener("click", () => reprovisionMissingNobilityRoles().catch(error => setAlert(error.message, "error")));
+  $("#autocreateNobilityRolesButtonLeveling").addEventListener("click", () => autoCreateNobilityRoles().catch(error => setAlert(error.message, "error")));
+  $("#reprovisionNobilityRolesButtonLeveling").addEventListener("click", () => reprovisionMissingNobilityRoles().catch(error => setAlert(error.message, "error")));
+  $("#saveLevelingSettings").addEventListener("click", () => saveSettings().catch(error => setAlert(error.message, "error")));
   $("#savePrivacySettings").addEventListener("click", () => savePrivacySettings().catch(error => setAlert(error.message, "error")));
   $("#saveWebAccountButton").addEventListener("click", () => saveWebAccount().catch(error => setAlert(error.message, "error")));
   $("#deleteWebAccountButton").addEventListener("click", () => deleteWebAccount().catch(error => setAlert(error.message, "error")));

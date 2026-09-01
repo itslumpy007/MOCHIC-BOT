@@ -10877,8 +10877,11 @@ function buildWebConfigPayload() {
       verifiedRoleId: config.settings.verifiedRoleId || "",
       unverifiedRoleId: config.settings.unverifiedRoleId || "",
       nobilityEnabled: getNobilityEnabled(),
+      nobilityXpPerMessage: getNobilityXpPerMessage(),
+      nobilityCooldownMs: getNobilityCooldownMs(),
       nobilityRoleIds: getNobilityRoleIds(),
       nobilityRoleAutoProvisionedAt: getNobilityRoleAutoProvisionedAt(),
+      nobilityTiers: getNobilityTiers(),
       dailyChallengeEnabled: Boolean(config.settings.dailyChallengeEnabled),
       dailyChallengeRewardBonus: Number(config.settings.dailyChallengeRewardBonus || 0),
       dailyChallengeTypeEnabled: config.settings.dailyChallengeTypeEnabled || {},
@@ -10937,6 +10940,8 @@ async function updateWebSettings(auth, payload) {
     "verifiedRoleId",
     "unverifiedRoleId",
     "nobilityEnabled",
+    "nobilityXpPerMessage",
+    "nobilityCooldownMs",
     "dailyChallengeEnabled",
     "dailyChallengeRewardBonus",
     "dailyChallengeTypeEnabled",
@@ -11090,6 +11095,10 @@ async function updateWebSettings(auth, payload) {
         );
       } else if (key === "nobilityEnabled") {
         config.settings[key] = nextNobilityEnabled;
+      } else if (key === "nobilityXpPerMessage") {
+        config.settings[key] = Math.max(1, Math.min(100, Number(payload[key]) || getNobilityXpPerMessage()));
+      } else if (key === "nobilityCooldownMs") {
+        config.settings[key] = Math.max(5000, Math.min(10 * 60 * 1000, Number(payload[key]) || getNobilityCooldownMs()));
       } else {
         config.settings[key] = String(payload[key] || "").trim() || null;
       }
