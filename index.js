@@ -751,6 +751,7 @@ async function approveVerification(pendingId, moderatorTag) {
     if (Number.isInteger(Number(entry.age))) {
       await applyAgeRoleForAge(member, Number(entry.age), "Verification approved by admin");
     }
+    await ensureNobilityForVerifiedMember(member, "verification approved");
     await member.send("Your verification request has been approved. Welcome to the server!").catch(() => {});
   }
 
@@ -1115,6 +1116,7 @@ async function completeRulesVerificationWithAge(member, age = null) {
       if (Number.isInteger(Number(age)) && ageRoleRules.length) {
         await applyAgeRoleForAge(member, Number(age), "Rules check verification").catch(() => {});
       }
+      await ensureNobilityForVerifiedMember(member, "verification already complete");
       return {
         ok: true,
         embed: makeEmbed({
@@ -1204,6 +1206,8 @@ async function completeRulesVerificationWithAge(member, age = null) {
   if (rolesToAdd.length) {
     await member.roles.add(rolesToAdd, "Rules check verification").catch(() => {});
   }
+
+  await ensureNobilityForVerifiedMember(member, "rules verification");
 
   const bonusMatched = isTikTokVerificationEnabled() && matchesTikTokVerification(member);
   const ageRoleText = ageRoleOutcome?.matched
@@ -7786,6 +7790,14 @@ async function syncNobilityRoles(member, progress, source = "nobility") {
     return { applied: false, reason: "unmanageable" };
   }
 
+  const verifiedRoleId = getVerificationRoleId();
+  if (!verifiedRoleId || !member.roles.cache.has(verifiedRoleId)) {
+    return { applied: false, reason: "not-verified" };
+  }
+  if (hasStaffAccess(member, "admin") || hasStaffAccess(member, "mod")) {
+    return { applied: false, reason: "staff-excluded" };
+  }
+
   const roleIds = getNobilityRoleIds();
   const targetRoleId = roleIds?.[progress.current.key] || null;
   const configuredRoleIds = [...new Set(Object.values(roleIds).filter(Boolean))];
@@ -7813,6 +7825,28 @@ async function syncNobilityRoles(member, progress, source = "nobility") {
   };
 }
 
+async function ensureNobilityForVerifiedMember(member, source = "verification") {
+  if (!getNobilityEnabled() || !member?.user || member.user.bot) return { applied: false, reason: "disabled-or-bot" };
+  const verifiedRoleId = getVerificationRoleId();
+  if (!verifiedRoleId || !member.roles.cache.has(verifiedRoleId)) return { applied: false, reason: "not-verified" };
+  if (hasStaffAccess(member, "admin") || hasStaffAccess(member, "mod")) return { applied: false, reason: "staff-excluded" };
+
+  let profile = await nobilityStore.getProfile(member.id);
+  if (!profile) {
+    profile = await nobilityStore.setProfile(member.id, {
+      userTag: member.user.tag,
+      guildId: member.guild?.id || null,
+      totalXp: 0,
+      totalMessages: 0,
+      lastXpAt: 0,
+      lastMessageAt: null
+    }, getNobilityTiers());
+  }
+
+  const progress = getNobilityProgress(profile.totalXp || 0, getNobilityTiers());
+  return syncNobilityRoles(member, progress, source);
+}
+
 async function assignNobilityRolesToMembers(guild, source = "admin bulk nobility sync") {
   if (!guild?.members?.fetch) {
     return { checked: 0, assigned: 0, removed: 0, skipped: 0, createdProfiles: 0, reason: "missing-guild" };
@@ -7820,7 +7854,7 @@ async function assignNobilityRolesToMembers(guild, source = "admin bulk nobility
 
   const roleProvision = await autoCreateNobilityRoles(guild, `${source}: role provisioning`);
   const roleIds = [...new Set(Object.values(roleProvision.roleMap || getNobilityRoleIds()).filter(Boolean))];
-  const commonerRoleId = getNobilityRoleIds().commoner || null;
+  const verifiedRoleId = getVerificationRoleId();
   const members = await guild.members.fetch();
   let assigned = 0;
   let removed = 0;
@@ -7840,6 +7874,16 @@ async function assignNobilityRolesToMembers(guild, source = "admin bulk nobility
         await member.roles.remove(staffNobilityRoles, `${source}: staff excluded from nobility roles`).catch(() => {});
         removed += staffNobilityRoles.length;
       }
+      continue;
+    }
+
+    if (!verifiedRoleId || !member.roles.cache.has(verifiedRoleId)) {
+      const unverifiedNobilityRoles = roleIds.filter(roleId => member.roles.cache.has(roleId));
+      if (unverifiedNobilityRoles.length && member.manageable) {
+        await member.roles.remove(unverifiedNobilityRoles, `${source}: remove nobility role until verification`).catch(() => {});
+        removed += unverifiedNobilityRoles.length;
+      }
+      skipped += 1;
       continue;
     }
 
@@ -18240,7 +18284,7 @@ client.on("messageCreate", async message => {
       }
     }
 
-    if (getNobilityEnabled() && hasVisibleContent) {
+    if (getNobilityEnabled() && hasVisibleContent && getVerificationRoleId() && message.member.roles.cache.has(getVerificationRoleId())) {
       const nobilityResult = await nobilityStore.recordMessage({
         userId: message.author.id,
         userTag: message.author.tag,
@@ -18485,6 +18529,7 @@ client.on("guildMemberAdd", async member => {
       });
 
       if (verificationResult?.matched) {
+        await ensureNobilityForVerifiedMember(member, "automatic TikTok verification");
         await notifyUser(
           member.user,
           makeEmbed({
@@ -18493,27 +18538,6 @@ client.on("guildMemberAdd", async member => {
             color: COLORS.mint
           })
         );
-      }
-    }
-
-  if (getNobilityEnabled() && !member.user.bot && !hasStaffAccess(member, "admin") && !hasStaffAccess(member, "mod")) {
-      let profile = await nobilityStore.getProfile(member.user.id);
-      if (!profile) {
-        profile = await nobilityStore.setProfile(member.user.id, {
-          userTag: member.user.tag,
-          guildId: member.guild.id,
-          totalXp: 0,
-          totalMessages: 0,
-          lastXpAt: 0,
-          lastMessageAt: null
-        }, getNobilityTiers());
-      }
-
-      if (profile) {
-        const progress = getNobilityProgress(profile.totalXp, getNobilityTiers());
-        await syncNobilityRoles(member, progress, "member join").catch(error => {
-          log.warn("Failed to sync nobility roles on join.", error);
-        });
       }
     }
 
