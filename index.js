@@ -7813,6 +7813,70 @@ async function syncNobilityRoles(member, progress, source = "nobility") {
   };
 }
 
+async function assignNobilityRolesToMembers(guild, source = "admin bulk nobility sync") {
+  if (!guild?.members?.fetch) {
+    return { checked: 0, assigned: 0, removed: 0, skipped: 0, createdProfiles: 0, reason: "missing-guild" };
+  }
+
+  const roleProvision = await autoCreateNobilityRoles(guild, `${source}: role provisioning`);
+  const roleIds = [...new Set(Object.values(roleProvision.roleMap || getNobilityRoleIds()).filter(Boolean))];
+  const commonerRoleId = getNobilityRoleIds().commoner || null;
+  const members = await guild.members.fetch();
+  let assigned = 0;
+  let removed = 0;
+  let skipped = 0;
+  let createdProfiles = 0;
+
+  for (const member of members.values()) {
+    if (member.user?.bot) {
+      skipped += 1;
+      continue;
+    }
+
+    const isStaff = hasStaffAccess(member, "admin") || hasStaffAccess(member, "mod");
+    if (isStaff) {
+      const staffNobilityRoles = roleIds.filter(roleId => member.roles.cache.has(roleId));
+      if (staffNobilityRoles.length && member.manageable) {
+        await member.roles.remove(staffNobilityRoles, `${source}: staff excluded from nobility roles`).catch(() => {});
+        removed += staffNobilityRoles.length;
+      }
+      continue;
+    }
+
+    let profile = await nobilityStore.getProfile(member.id);
+    if (!profile) {
+      profile = await nobilityStore.setProfile(member.id, {
+        userTag: member.user.tag,
+        guildId: guild.id,
+        totalXp: 0,
+        totalMessages: 0,
+        lastXpAt: 0,
+        lastMessageAt: null
+      }, getNobilityTiers());
+      createdProfiles += 1;
+    } else {
+      profile = await nobilityStore.setProfile(member.id, {
+        userTag: member.user.tag,
+        guildId: guild.id
+      }, getNobilityTiers());
+    }
+
+    const progress = getNobilityProgress(profile.totalXp || 0, getNobilityTiers());
+    const result = await syncNobilityRoles(member, progress, source);
+    if (result.applied) assigned += 1;
+    else if (result.reason !== "missing-role" && result.reason !== "unmanageable") skipped += 1;
+  }
+
+  return {
+    checked: members.size,
+    assigned,
+    removed,
+    skipped,
+    createdProfiles,
+    roleProvision
+  };
+}
+
 async function sendAnonymousAffirmation(author, message) {
   if (!isAnonymousAffirmationsEnabled()) {
     throw new Error("Anonymous affirmations are disabled right now.");
@@ -13074,6 +13138,31 @@ async function handleWebApi(req, res, pathname) {
         skipped: result.skipped || []
       });
 
+      return sendWebJson(res, 200, {
+        ok: true,
+        result,
+        settings: buildWebConfigPayload().settings
+      });
+    }
+
+    if (req.method === "POST" && pathname === "/api/nobility/assign-members") {
+      if (!hasWebAccess(auth, "admin")) {
+        return sendWebJson(res, 403, { error: "Admin web access is required." });
+      }
+
+      const guild = await client.guilds.fetch(GUILD_ID).catch(() => client.guilds.cache.get(GUILD_ID) || null);
+      if (!guild) {
+        return sendWebJson(res, 500, { error: "The Discord guild could not be loaded." });
+      }
+
+      const result = await assignNobilityRolesToMembers(guild, "web admin bulk sync");
+      recordAuditLog(getWebModeratorTag(auth), "nobility-member-role-sync", {
+        checked: result.checked,
+        assigned: result.assigned,
+        removed: result.removed,
+        skipped: result.skipped,
+        createdProfiles: result.createdProfiles
+      });
       return sendWebJson(res, 200, {
         ok: true,
         result,
@@ -18412,7 +18501,7 @@ client.on("guildMemberAdd", async member => {
       }
     }
 
-  if (getNobilityEnabled()) {
+  if (getNobilityEnabled() && !member.user.bot && !hasStaffAccess(member, "admin") && !hasStaffAccess(member, "mod")) {
       let profile = await nobilityStore.getProfile(member.user.id);
       if (!profile) {
         profile = await nobilityStore.setProfile(member.user.id, {
