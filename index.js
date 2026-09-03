@@ -215,6 +215,7 @@ let googleBlockListInterval = null;
 let generalChatSweepInterval = null;
 let birthdaySweepInterval = null;
 let dailyChallengeVoiceInterval = null;
+let dailyChallengeAnnouncementInterval = null;
 const dailyChallengeVoiceSessions = new Map();
 
 const dataDir = resolveDataDir(
@@ -361,6 +362,8 @@ function createDefaultConfig() {
       dailyChallengeTypeRewardAdjustments: Object.fromEntries(DAILY_CHALLENGE_TYPES.map(type => [type.key, 0])),
       nobilityRoleIds: {},
       nobilityAnnouncementChannelId: null,
+      dailyChallengeAnnouncementChannelId: null,
+      dailyChallengeAnnouncementDate: null,
       nobilityTiers: NOBILITY_TIERS.map(tier => ({ ...tier })),
       rulesCardTitle: "Server rules ✿",
       rulesCardDescription: "A cozy little guide to keep the server kind, comfy, and fun for everyone. Thanks for helping keep Mochi sweet and safe.",
@@ -1449,6 +1452,12 @@ function loadConfig() {
         nobilityAnnouncementChannelId: typeof parsed.settings?.nobilityAnnouncementChannelId === "string"
           ? parsed.settings.nobilityAnnouncementChannelId
           : null,
+        dailyChallengeAnnouncementChannelId: typeof parsed.settings?.dailyChallengeAnnouncementChannelId === "string"
+          ? parsed.settings.dailyChallengeAnnouncementChannelId
+          : null,
+        dailyChallengeAnnouncementDate: typeof parsed.settings?.dailyChallengeAnnouncementDate === "string"
+          ? parsed.settings.dailyChallengeAnnouncementDate
+          : null,
         nobilityTiers: Array.isArray(parsed.settings?.nobilityTiers)
           ? migrateNobilityTiers(parsed.settings.nobilityTiers)
           : defaults.settings.nobilityTiers,
@@ -2042,6 +2051,10 @@ function getNobilityRoleId(rankKey) {
 
 function getNobilityAnnouncementChannelId() {
   return config.settings.nobilityAnnouncementChannelId || null;
+}
+
+function getDailyChallengeAnnouncementChannelId() {
+  return config.settings.dailyChallengeAnnouncementChannelId || null;
 }
 
 function getNobilityTiers() {
@@ -7269,6 +7282,33 @@ function buildDailyChallengeEmbed(challenge, title = "Today's Daily Challenge") 
   });
 }
 
+async function postDailyChallengeAnnouncement(guild = null) {
+  if (!getDailyChallengeEnabled()) return { posted: false, skipped: "disabled" };
+  const channelId = getDailyChallengeAnnouncementChannelId();
+  if (!channelId) return { posted: false, skipped: "channel-not-configured" };
+
+  const targetGuild = guild || client.guilds.cache.get(GUILD_ID) || await client.guilds.fetch(GUILD_ID).catch(() => null);
+  const channel = targetGuild?.channels?.cache?.get(channelId) || await client.channels.fetch(channelId).catch(() => null);
+  if (!channel || typeof channel.send !== "function") return { posted: false, skipped: "channel-unavailable" };
+
+  const dateKey = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+  if (config.settings.dailyChallengeAnnouncementDate === dateKey) return { posted: false, skipped: "already-posted" };
+
+  const enabledTypes = DAILY_CHALLENGE_TYPES.filter(type => getDailyChallengeTypeEnabled(type.key));
+  const description = enabledTypes.length
+    ? enabledTypes.map(type => `• **${type.title}** - ${type.description} (${type.minTarget}-${type.maxTarget} ${type.unit})`).join("\n")
+    : "No challenge types are enabled right now.";
+  await channel.send({ embeds: [makeEmbed({
+    title: "Today's Daily Challenges",
+    description: `${description}\n\nEach member receives a personalized challenge. Use **/dailychallenge view** to see yours and **/dailychallenge claim** when complete.`,
+    color: COLORS.yellow,
+    fields: [{ name: "Reset", value: "Midnight America/New_York", inline: true }]
+  })] });
+  config.settings.dailyChallengeAnnouncementDate = dateKey;
+  saveConfig();
+  return { posted: true, dateKey };
+}
+
 function getDailyChallengeAdjustedReward(challenge) {
   if (!challenge) {
     return 0;
@@ -10882,8 +10922,10 @@ function buildWebConfigPayload() {
       nobilityRoleIds: getNobilityRoleIds(),
       nobilityRoleAutoProvisionedAt: getNobilityRoleAutoProvisionedAt(),
       nobilityTiers: getNobilityTiers(),
+      nobilityAnnouncementChannelId: getNobilityAnnouncementChannelId(),
       dailyChallengeEnabled: Boolean(config.settings.dailyChallengeEnabled),
       dailyChallengeRewardBonus: Number(config.settings.dailyChallengeRewardBonus || 0),
+      dailyChallengeAnnouncementChannelId: getDailyChallengeAnnouncementChannelId(),
       dailyChallengeTypeEnabled: config.settings.dailyChallengeTypeEnabled || {},
       dailyChallengeTypeRewardAdjustments: config.settings.dailyChallengeTypeRewardAdjustments || {}
     },
@@ -10942,8 +10984,10 @@ async function updateWebSettings(auth, payload) {
     "nobilityEnabled",
     "nobilityXpPerMessage",
     "nobilityCooldownMs",
+    "nobilityAnnouncementChannelId",
     "dailyChallengeEnabled",
     "dailyChallengeRewardBonus",
+    "dailyChallengeAnnouncementChannelId",
     "dailyChallengeTypeEnabled",
     "dailyChallengeTypeRewardAdjustments"
   ];
@@ -11099,6 +11143,8 @@ async function updateWebSettings(auth, payload) {
         config.settings[key] = Math.max(1, Math.min(100, Number(payload[key]) || getNobilityXpPerMessage()));
       } else if (key === "nobilityCooldownMs") {
         config.settings[key] = Math.max(5000, Math.min(10 * 60 * 1000, Number(payload[key]) || getNobilityCooldownMs()));
+      } else if (key === "nobilityAnnouncementChannelId" || key === "dailyChallengeAnnouncementChannelId") {
+        config.settings[key] = String(payload[key] || "").trim() || null;
       } else {
         config.settings[key] = String(payload[key] || "").trim() || null;
       }
@@ -13285,6 +13331,10 @@ async function shutdownProcess(signal) {
     clearInterval(dailyChallengeVoiceInterval);
   }
 
+  if (dailyChallengeAnnouncementInterval) {
+    clearInterval(dailyChallengeAnnouncementInterval);
+  }
+
   process.exit(0);
 }
 
@@ -13344,6 +13394,17 @@ client.once("clientReady", async () => {
       if (dailyChallengeVoiceInterval) {
         clearInterval(dailyChallengeVoiceInterval);
       }
+      await postDailyChallengeAnnouncement().catch(error => {
+        log.warn("Daily challenge announcement failed.", error);
+      });
+      if (dailyChallengeAnnouncementInterval) {
+        clearInterval(dailyChallengeAnnouncementInterval);
+      }
+      dailyChallengeAnnouncementInterval = setInterval(() => {
+        postDailyChallengeAnnouncement().catch(error => {
+          log.warn("Daily challenge announcement failed.", error);
+        });
+      }, 60 * 1000);
       dailyChallengeVoiceInterval = setInterval(() => {
         sweepDailyChallengeVoiceSessions().catch(error => {
           log.error("Daily challenge voice sweep error.", error);

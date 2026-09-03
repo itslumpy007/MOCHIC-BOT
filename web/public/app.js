@@ -441,6 +441,11 @@ const levelingSettingLabels = {
   dailyChallengeRewardBonus: "Daily challenge bonus XP"
 };
 
+const levelingChannelLabels = {
+  nobilityAnnouncementChannelId: "Rank-up log channel ID",
+  dailyChallengeAnnouncementChannelId: "Daily challenge channel ID"
+};
+
 const nobilityTierLabels = [
   ["commoner", "Commoner"],
   ["squire", "Squire"],
@@ -2738,7 +2743,9 @@ function renderSettings() {
     })
     .join("");
 
-  const levelingFields = Object.entries(levelingSettingLabels).map(([key, label]) => {
+  const levelingFields = Object.entries(levelingChannelLabels).map(([key, label]) =>
+    `<label>${label}<input data-setting="${key}" value="${escapeHtml(settings[key] || "")}" placeholder="Channel ID" spellcheck="false" autocapitalize="off" autocomplete="off"></label>`
+  ).join("") + Object.entries(levelingSettingLabels).map(([key, label]) => {
     if (key === "dailyChallengeEnabled") {
       return `<label>${label}<select data-setting="${key}">
         <option value="true" ${settings[key] !== false ? "selected" : ""}>On</option>
