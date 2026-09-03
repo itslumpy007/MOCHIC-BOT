@@ -364,6 +364,8 @@ function createDefaultConfig() {
       nobilityAnnouncementChannelId: null,
       dailyChallengeAnnouncementChannelId: null,
       dailyChallengeAnnouncementDate: null,
+      dailyChallengeAnnouncementMessageId: null,
+      dailyChallengeInstructionsMessageId: null,
       nobilityTiers: NOBILITY_TIERS.map(tier => ({ ...tier })),
       rulesCardTitle: "Server rules ✿",
       rulesCardDescription: "A cozy little guide to keep the server kind, comfy, and fun for everyone. Thanks for helping keep Mochi sweet and safe.",
@@ -1457,6 +1459,12 @@ function loadConfig() {
           : null,
         dailyChallengeAnnouncementDate: typeof parsed.settings?.dailyChallengeAnnouncementDate === "string"
           ? parsed.settings.dailyChallengeAnnouncementDate
+          : null,
+        dailyChallengeAnnouncementMessageId: typeof parsed.settings?.dailyChallengeAnnouncementMessageId === "string"
+          ? parsed.settings.dailyChallengeAnnouncementMessageId
+          : null,
+        dailyChallengeInstructionsMessageId: typeof parsed.settings?.dailyChallengeInstructionsMessageId === "string"
+          ? parsed.settings.dailyChallengeInstructionsMessageId
           : null,
         nobilityTiers: Array.isArray(parsed.settings?.nobilityTiers)
           ? migrateNobilityTiers(parsed.settings.nobilityTiers)
@@ -7294,17 +7302,49 @@ async function postDailyChallengeAnnouncement(guild = null) {
   const dateKey = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
   if (config.settings.dailyChallengeAnnouncementDate === dateKey) return { posted: false, skipped: "already-posted" };
 
+  const previousBoard = config.settings.dailyChallengeAnnouncementMessageId
+    ? await channel.messages?.fetch(config.settings.dailyChallengeAnnouncementMessageId).catch(() => null)
+    : null;
+  if (previousBoard?.deletable) {
+    await previousBoard.delete("Replace with the new daily challenge board").catch(() => {});
+  }
+
+  const instructions = await channel.messages?.fetch(config.settings.dailyChallengeInstructionsMessageId).catch(() => null);
+  const instructionPayload = {
+    embeds: [makeEmbed({
+      title: "How to Use Daily Challenges",
+      description: [
+        "Daily challenges give you extra XP toward your nobility rank.",
+        "Your challenge and progress are personalized to you.",
+        "Use these commands:",
+        "**/dailychallenge view** - See today's challenge and progress.",
+        "**/dailychallenge claim** - Claim your XP after completing it.",
+        "**/dailychallenge leaderboard** - See challenge completions.",
+        "Your chat messages, replies, reactions, attachments, links, commands, and voice activity can count depending on the challenge."
+      ].join("\n\n"),
+      color: COLORS.blue
+    })]
+  };
+  if (!instructions) {
+    const postedInstructions = await channel.send(instructionPayload);
+    config.settings.dailyChallengeInstructionsMessageId = postedInstructions.id;
+    await postedInstructions.pin("Keep daily challenge instructions easy to find").catch(() => {});
+  } else if (instructions.editable) {
+    await instructions.edit(instructionPayload).catch(() => {});
+  }
+
   const enabledTypes = DAILY_CHALLENGE_TYPES.filter(type => getDailyChallengeTypeEnabled(type.key));
   const description = enabledTypes.length
     ? enabledTypes.map(type => `• **${type.title}** - ${type.description} (${type.minTarget}-${type.maxTarget} ${type.unit})`).join("\n")
     : "No challenge types are enabled right now.";
-  await channel.send({ embeds: [makeEmbed({
+  const postedBoard = await channel.send({ embeds: [makeEmbed({
     title: "Today's Daily Challenges",
     description: `${description}\n\nEach member receives a personalized challenge. Use **/dailychallenge view** to see yours and **/dailychallenge claim** when complete.`,
     color: COLORS.yellow,
     fields: [{ name: "Reset", value: "Midnight America/New_York", inline: true }]
   })] });
   config.settings.dailyChallengeAnnouncementDate = dateKey;
+  config.settings.dailyChallengeAnnouncementMessageId = postedBoard.id;
   saveConfig();
   return { posted: true, dateKey };
 }
@@ -10926,6 +10966,8 @@ function buildWebConfigPayload() {
       dailyChallengeEnabled: Boolean(config.settings.dailyChallengeEnabled),
       dailyChallengeRewardBonus: Number(config.settings.dailyChallengeRewardBonus || 0),
       dailyChallengeAnnouncementChannelId: getDailyChallengeAnnouncementChannelId(),
+      dailyChallengeAnnouncementMessageId: config.settings.dailyChallengeAnnouncementMessageId || null,
+      dailyChallengeInstructionsMessageId: config.settings.dailyChallengeInstructionsMessageId || null,
       dailyChallengeTypeEnabled: config.settings.dailyChallengeTypeEnabled || {},
       dailyChallengeTypeRewardAdjustments: config.settings.dailyChallengeTypeRewardAdjustments || {}
     },
