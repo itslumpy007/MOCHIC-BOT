@@ -7854,11 +7854,6 @@ async function assignNobilityRolesToMembers(guild, source = "admin bulk nobility
         lastMessageAt: null
       }, getNobilityTiers());
       createdProfiles += 1;
-    } else {
-      profile = await nobilityStore.setProfile(member.id, {
-        userTag: member.user.tag,
-        guildId: guild.id
-      }, getNobilityTiers());
     }
 
     const progress = getNobilityProgress(profile.totalXp || 0, getNobilityTiers());

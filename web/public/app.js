@@ -1630,11 +1630,14 @@ function updateAuthPanel() {
 
 async function api(path, options = {}) {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), 20000);
+  const timeoutMs = Number.isFinite(Number(options.timeoutMs)) ? Math.max(1000, Number(options.timeoutMs)) : 20000;
+  const requestOptions = { ...options };
+  delete requestOptions.timeoutMs;
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   let response;
   try {
     response = await fetch(path, {
-      ...options,
+      ...requestOptions,
       signal: options.signal || controller.signal,
       headers: {
         "Content-Type": "application/json",
@@ -1644,7 +1647,7 @@ async function api(path, options = {}) {
     });
   } catch (error) {
     if (error.name === "AbortError") {
-      throw new Error(`Request to ${path} timed out. Check that the bot is online, then refresh.`);
+      throw new Error(`Request to ${path} timed out after ${Math.round(timeoutMs / 1000)} seconds. The bot may still be processing Discord roles.`);
     }
     throw error;
   } finally {
@@ -4884,7 +4887,12 @@ async function assignNobilityRolesToMembers() {
     setAlert("Admin web access is required to assign nobility roles.", "error");
     return;
   }
-  const result = await api("/api/nobility/assign-members", { method: "POST", body: JSON.stringify({}) });
+  setAlert("Assigning nobility roles to members. This may take a few minutes.");
+  const result = await api("/api/nobility/assign-members", {
+    method: "POST",
+    body: JSON.stringify({}),
+    timeoutMs: 5 * 60 * 1000
+  });
   if (result.settings) state.config.settings = result.settings;
   renderAll();
   const summary = result.result || {};
