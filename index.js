@@ -216,6 +216,7 @@ let generalChatSweepInterval = null;
 let birthdaySweepInterval = null;
 let dailyChallengeVoiceInterval = null;
 let dailyChallengeAnnouncementInterval = null;
+let nobilityResetInterval = null;
 const dailyChallengeVoiceSessions = new Map();
 
 const dataDir = resolveDataDir(
@@ -352,6 +353,8 @@ function createDefaultConfig() {
       nobilityXpPerMessage: 5,
       nobilityCooldownMs: 60 * 1000,
       nobilityRoleAutoProvisionedAt: null,
+      nobilityResetIntervalDays: 45,
+      nobilityLastResetAt: null,
       dailyEnabled: true,
       dailyXpReward: 25,
       dailyStreakBonus: 5,
@@ -1416,6 +1419,12 @@ function loadConfig() {
         nobilityRoleAutoProvisionedAt: typeof parsed.settings?.nobilityRoleAutoProvisionedAt === "string"
           ? parsed.settings.nobilityRoleAutoProvisionedAt
           : defaults.settings.nobilityRoleAutoProvisionedAt,
+        nobilityResetIntervalDays: Number.isFinite(Number(parsed.settings?.nobilityResetIntervalDays))
+          ? Math.max(7, Math.min(365, Math.floor(Number(parsed.settings.nobilityResetIntervalDays))))
+          : defaults.settings.nobilityResetIntervalDays,
+        nobilityLastResetAt: typeof parsed.settings?.nobilityLastResetAt === "string"
+          ? parsed.settings.nobilityLastResetAt
+          : defaults.settings.nobilityLastResetAt,
         dailyEnabled: parsed.settings?.dailyEnabled !== undefined
           ? Boolean(parsed.settings.dailyEnabled)
           : defaults.settings.dailyEnabled,
@@ -1992,6 +2001,11 @@ function getNobilityXpPerMessage() {
 function getNobilityCooldownMs() {
   const cooldown = Number(config.settings.nobilityCooldownMs);
   return Number.isFinite(cooldown) && cooldown > 0 ? Math.max(5000, Math.min(10 * 60 * 1000, Math.floor(cooldown))) : 60 * 1000;
+}
+
+function getNobilityResetIntervalDays() {
+  const days = Number(config.settings.nobilityResetIntervalDays);
+  return Number.isFinite(days) && days > 0 ? Math.max(7, Math.min(365, Math.floor(days))) : 45;
 }
 
 function getDailyEnabled() {
@@ -7916,6 +7930,28 @@ async function assignNobilityRolesToMembers(guild, source = "admin bulk nobility
   };
 }
 
+async function maybeResetNobilityRanks() {
+  if (!getNobilityEnabled()) return { reset: false, skipped: "disabled" };
+  const now = Date.now();
+  const lastResetAt = Date.parse(config.settings.nobilityLastResetAt || "");
+  if (!Number.isFinite(lastResetAt)) {
+    config.settings.nobilityLastResetAt = new Date(now).toISOString();
+    saveConfig();
+    return { reset: false, skipped: "cycle-started" };
+  }
+
+  const intervalMs = getNobilityResetIntervalDays() * 24 * 60 * 60 * 1000;
+  if (now - lastResetAt < intervalMs) return { reset: false, skipped: "not-due" };
+
+  const resetProfiles = await nobilityStore.resetProfiles(getNobilityTiers(), now);
+  config.settings.nobilityLastResetAt = new Date(now).toISOString();
+  saveConfig();
+  const guild = client.guilds.cache.get(GUILD_ID) || await client.guilds.fetch(GUILD_ID).catch(() => null);
+  const roleSync = guild ? await assignNobilityRolesToMembers(guild, "scheduled nobility reset") : null;
+  log.info(`Scheduled nobility reset completed. Profiles reset: ${resetProfiles}.`);
+  return { reset: true, resetProfiles, roleSync };
+}
+
 async function sendAnonymousAffirmation(author, message) {
   if (!isAnonymousAffirmationsEnabled()) {
     throw new Error("Anonymous affirmations are disabled right now.");
@@ -11064,6 +11100,8 @@ function buildWebConfigPayload() {
       nobilityCooldownMs: getNobilityCooldownMs(),
       nobilityRoleIds: getNobilityRoleIds(),
       nobilityRoleAutoProvisionedAt: getNobilityRoleAutoProvisionedAt(),
+      nobilityResetIntervalDays: getNobilityResetIntervalDays(),
+      nobilityLastResetAt: config.settings.nobilityLastResetAt || null,
       nobilityTiers: getNobilityTiers(),
       nobilityAnnouncementChannelId: getNobilityAnnouncementChannelId(),
       dailyChallengeEnabled: Boolean(config.settings.dailyChallengeEnabled),
@@ -11130,6 +11168,7 @@ async function updateWebSettings(auth, payload) {
     "nobilityXpPerMessage",
     "nobilityCooldownMs",
     "nobilityAnnouncementChannelId",
+    "nobilityResetIntervalDays",
     "dailyChallengeEnabled",
     "dailyChallengeRewardBonus",
     "dailyChallengeAnnouncementChannelId",
@@ -11290,6 +11329,8 @@ async function updateWebSettings(auth, payload) {
         config.settings[key] = Math.max(5000, Math.min(10 * 60 * 1000, Number(payload[key]) || getNobilityCooldownMs()));
       } else if (key === "nobilityAnnouncementChannelId" || key === "dailyChallengeAnnouncementChannelId") {
         config.settings[key] = String(payload[key] || "").trim() || null;
+      } else if (key === "nobilityResetIntervalDays") {
+        config.settings[key] = Math.max(7, Math.min(365, Math.floor(Number(payload[key]) || getNobilityResetIntervalDays())));
       } else {
         config.settings[key] = String(payload[key] || "").trim() || null;
       }
@@ -13505,6 +13546,10 @@ async function shutdownProcess(signal) {
     clearInterval(dailyChallengeAnnouncementInterval);
   }
 
+  if (nobilityResetInterval) {
+    clearInterval(nobilityResetInterval);
+  }
+
   process.exit(0);
 }
 
@@ -13540,6 +13585,15 @@ client.once("clientReady", async () => {
       }).catch(error => {
         log.warn("Startup nobility role auto-provision failed.", error);
       });
+      await maybeResetNobilityRanks().catch(error => {
+        log.warn("Startup nobility reset check failed.", error);
+      });
+      if (nobilityResetInterval) clearInterval(nobilityResetInterval);
+      nobilityResetInterval = setInterval(() => {
+        maybeResetNobilityRanks().catch(error => {
+          log.warn("Scheduled nobility reset check failed.", error);
+        });
+      }, 60 * 60 * 1000);
 
       if (tempBanInterval) {
         clearInterval(tempBanInterval);

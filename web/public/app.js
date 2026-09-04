@@ -437,6 +437,7 @@ const settingLabels = {
 const levelingSettingLabels = {
   nobilityXpPerMessage: "XP per eligible message",
   nobilityCooldownMs: "Message XP cooldown (ms)",
+  nobilityResetIntervalDays: "Nobility reset interval (days)",
   dailyChallengeEnabled: "Daily challenges enabled",
   dailyChallengeRewardBonus: "Daily challenge bonus XP"
 };
@@ -2758,6 +2759,8 @@ function renderSettings() {
     return `<label>${label}<input data-setting="${key}" type="number" min="0" value="${escapeHtml(settings[key] ?? 0)}"></label>`;
   }).join("");
   $("#levelingSettingsFields").innerHTML = levelingFields;
+  const lastReset = settings.nobilityLastResetAt ? formatDate(settings.nobilityLastResetAt) : "Cycle starts after first deployment";
+  $("#levelingResetStatus").textContent = `Last reset: ${lastReset}`;
   const ladder = Array.isArray(settings.nobilityTiers) ? settings.nobilityTiers : [];
   $("#levelingLadderDetails").innerHTML = nobilityTierLabels.map(([key, label]) => {
     const tier = ladder.find(item => item.key === key);
