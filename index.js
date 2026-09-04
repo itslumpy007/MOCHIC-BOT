@@ -7471,7 +7471,7 @@ function buildDailyChallengeContext(interaction) {
 }
 
 function messageContainsSharedLink(text) {
-  return /(?:https?:\/\/|www\.)[^\s<>]+|(?:^|\s)(?:[a-z0-9-]+\.)+(?:com|net|org|gg|tv|co|io|me|dev|ly|fm|be)(?:\/[^\s<>]*)?/i.test(String(text || ""));
+  return /(?:https?:\/\/|www\.)[^\s<>]+|(?:^|\s)(?:[a-z0-9-]+\.)+[a-z]{2,63}(?:\/[^\s<>]*)?/i.test(String(text || ""));
 }
 
 function getDailyChallengeVoiceSessionKey(guildId, userId) {
@@ -18434,7 +18434,7 @@ client.on("messageCreate", async message => {
       }
     }
 
-    if (getNobilityEnabled() && hasVisibleContent && getVerificationRoleId() && message.member.roles.cache.has(getVerificationRoleId())) {
+    if (getNobilityEnabled() && hasVisibleContent && canEarnNobilityProgress(message.member)) {
       const nobilityResult = await nobilityStore.recordMessage({
         userId: message.author.id,
         userTag: message.author.tag,
