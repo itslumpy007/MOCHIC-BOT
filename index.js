@@ -7290,6 +7290,50 @@ function buildNobilityTierEmbed(profile, targetUser) {
   });
 }
 
+function buildNobilityLevelUpEmbed(member, progress, source = "server activity") {
+  const tier = progress?.current;
+  const next = progress?.next;
+  const roleId = tier ? getNobilityRoleId(tier.key) : null;
+  const emoji = tier?.unicodeEmoji || "✨";
+  const nextText = next
+    ? `Next milestone: **${next.title}** at **${next.requiredXp} XP**`
+    : "You have reached the highest nobility tier.";
+
+  return makeEmbed({
+    title: `${emoji} A New Nobility Rank!`,
+    description: [
+      `<@${member.id}> has advanced to **${tier?.title || "a new rank"}**!`,
+      "Your activity in the court has been recognized. Keep going to climb even higher.",
+      nextText
+    ].join("\n\n"),
+    color: tier?.color || COLORS.purple,
+    thumbnail: typeof member.user?.displayAvatarURL === "function"
+      ? member.user.displayAvatarURL({ extension: "png", size: 128 })
+      : null,
+    fields: [
+      { name: "Current XP", value: `${progress?.totalXp || 0} XP`, inline: true },
+      { name: "Tier", value: `${progress?.level || 1}/${getNobilityTiers().length}`, inline: true },
+      { name: "Earned from", value: source, inline: true },
+      { name: "Role reward", value: roleId ? `<@&${roleId}>` : "Not configured", inline: false }
+    ]
+  });
+}
+
+async function announceNobilityLevelUp(member, progress, source = "server activity") {
+  const channelId = getNobilityAnnouncementChannelId();
+  if (!channelId || !member?.id || !progress?.current) return;
+
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel || typeof channel.send !== "function") return;
+
+  await channel.send({
+    content: `<@${member.id}>`,
+    embeds: [buildNobilityLevelUpEmbed(member, progress, source)]
+  }).catch(error => {
+    log.warn("Failed to send nobility announcement.", error);
+  });
+}
+
 function buildDailyChallengeEmbed(challenge, title = "Today's Daily Challenge", profile = null) {
   if (!challenge) {
     return makeEmbed({
@@ -16305,6 +16349,7 @@ client.on("interactionCreate", async interaction => {
         await syncNobilityRoles(interaction.member, reward.nextProgress, "daily challenge").catch(error => {
           log.warn("Failed to sync nobility roles after daily challenge.", error);
         });
+        await announceNobilityLevelUp(interaction.member, reward.nextProgress, "daily challenge");
       }
 
       const levelNote = reward?.leveledUp
@@ -16359,6 +16404,7 @@ client.on("interactionCreate", async interaction => {
         await syncNobilityRoles(interaction.member, claim.nextProgress, "daily claim").catch(error => {
           log.warn("Failed to sync nobility roles after daily claim.", error);
         });
+        await announceNobilityLevelUp(interaction.member, claim.nextProgress, "daily claim");
       }
 
       const streakNote = claim.streak > 1 ? ` Streak bonus included. Current streak: ${claim.streak} days.` : "";
@@ -18449,19 +18495,7 @@ client.on("messageCreate", async message => {
         await syncNobilityRoles(message.member, nobilityResult.nextProgress, "message level-up").catch(error => {
           log.warn("Failed to sync nobility roles.", error);
         });
-
-        const announcementChannelId = getNobilityAnnouncementChannelId();
-        if (announcementChannelId) {
-          const announcementChannel = await client.channels.fetch(announcementChannelId).catch(() => null);
-          if (announcementChannel && typeof announcementChannel.send === "function") {
-            const rankTitle = nobilityResult.nextProgress.current.title;
-            await announcementChannel.send({
-              content: `**${message.author.tag}** reached **${rankTitle}** in the nobility track.`
-            }).catch(error => {
-              log.warn("Failed to send nobility announcement.", error);
-            });
-          }
-        }
+        await announceNobilityLevelUp(message.member, nobilityResult.nextProgress, "chat activity");
       }
     }
 
