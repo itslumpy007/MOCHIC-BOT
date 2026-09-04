@@ -459,6 +459,26 @@ const nobilityTierLabels = [
   ["mochi_noble", "Mochi Noble"]
 ];
 
+const adminCommandCatalog = [
+  ["/status", "View bot health, features, leveling, and configured panels.", "overview", "Admin"],
+  ["/backup", "Download or restore the server configuration.", "ops", "Admin"],
+  ["/reload", "Reload saved configuration from disk.", "settings", "Admin"],
+  ["/setupverify", "Post or repair the verification panel.", "settings", "Admin"],
+  ["/setuptiktokverify", "Post or repair the TikTok verification panel.", "settings", "Admin"],
+  ["/setupreactionroles", "Post or repair the reaction-role panel.", "settings", "Admin"],
+  ["/setuprules", "Post or repair the server rules panel.", "settings", "Admin"],
+  ["/nobilityrole", "Create, map, remove, or view nobility role rewards.", "settings:leveling", "Admin"],
+  ["/nobilitytier", "View or edit nobility XP thresholds.", "settings:leveling", "Admin"],
+  ["/nobilitysync", "Synchronize nobility roles for verified members.", "settings:leveling", "Admin"],
+  ["/automod", "View and tune AutoMod rules and actions.", "automod", "Admin"],
+  ["/automodlinks", "Configure allowed and blocked link domains.", "automod", "Admin"],
+  ["/automodguard", "Configure account, member-age, and attachment guards.", "automod", "Admin"],
+  ["/bannedwords", "Manage banned words and context sensitivity.", "automod", "Admin"],
+  ["/nickfilter", "Manage blocked nickname terms.", "automod", "Admin"],
+  ["/settings", "Configure server, verification, safety, and leveling settings.", "settings", "Admin"],
+  ["/staffroles", "Manage moderator and administrator role access.", "staff", "Admin"]
+];
+
 const privacySettingLabels = {
   messageArchiveEnabled: "Archive member chat logs",
   messageArchiveRetentionDays: "Archive retention (days)"
@@ -3153,6 +3173,19 @@ function syncReactionRoleRulesText() {
   textarea.value = serializeReactionRoleRows(mappedRows);
 }
 
+function renderAdminCommandCatalog() {
+  const target = $("#adminCommandCatalog");
+  if (!target) return;
+  target.innerHTML = adminCommandCatalog.map(([command, description, view, access], index) => {
+    const [baseView, subtab] = view.split(":");
+    return `<article class="event" ${revealStyle(index)}>
+      <div class="event-head"><strong><code>${escapeHtml(command)}</code></strong><span class="badge">${access}</span></div>
+      <p>${escapeHtml(description)}</p>
+      <button class="ghost-button" type="button" data-view="${escapeHtml(baseView)}"${subtab ? ` data-subtab="${escapeHtml(subtab)}"` : ""}>Open related controls</button>
+    </article>`;
+  }).join("");
+}
+
 function renderReactionRoleEditor() {
   const settings = state.config?.settings || {};
   const channelId = settings.reactionRoleChannelId || "";
@@ -4582,6 +4615,7 @@ function renderAll() {
   renderAutomod();
   renderAiReview();
   renderSettings();
+  renderAdminCommandCatalog();
   loadAndRenderPendingVerifications();
   renderStaff();
   renderStaffInbox();
@@ -5968,6 +6002,9 @@ function bindEvents() {
     }
     button.addEventListener("click", () => {
       setActiveView(button.dataset.view);
+      if (button.dataset.subtab) {
+        setActiveSubtab(button.dataset.view, button.dataset.subtab);
+      }
     });
   });
   $("#quickActions").addEventListener("click", event => {
