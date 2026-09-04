@@ -4936,6 +4936,24 @@ async function assignNobilityRolesToMembers() {
   setAlert(`Nobility assignment complete. Checked ${summary.checked || 0}, assigned ${summary.assigned || 0}, staff roles removed ${summary.removed || 0}.`);
 }
 
+async function rerollDailyChallengeFromPanel() {
+  if (!hasPanelAccess("admin")) {
+    setAlert("Admin web access is required to reroll daily challenges.", "error");
+    return;
+  }
+  const userId = $("#dailyChallengeRerollUserId").value.trim();
+  if (!userId) {
+    setAlert("Enter a member ID or mention first.", "error");
+    return;
+  }
+  const result = await api("/api/daily-challenge/reroll", {
+    method: "POST",
+    body: JSON.stringify({ userId })
+  });
+  $("#dailyChallengeRerollUserId").value = "";
+  setAlert(`Rerolled today's daily challenge for ${result.userTag || "the member"}.`);
+}
+
 async function savePrivacySettings(options = {}) {
   if (!hasPanelAccess("admin")) {
     setAlert("Admin web access is required to change privacy settings.", "error");
@@ -5654,6 +5672,7 @@ function bindEvents() {
   $("#autocreateNobilityRolesButtonLeveling").addEventListener("click", () => autoCreateNobilityRoles().catch(error => setAlert(error.message, "error")));
   $("#reprovisionNobilityRolesButtonLeveling").addEventListener("click", () => reprovisionMissingNobilityRoles().catch(error => setAlert(error.message, "error")));
   $("#assignNobilityMembersButton").addEventListener("click", () => assignNobilityRolesToMembers().catch(error => setAlert(error.message, "error")));
+  $("#rerollDailyChallengeButton").addEventListener("click", () => rerollDailyChallengeFromPanel().catch(error => setAlert(error.message, "error")));
   $("#saveLevelingSettings").addEventListener("click", () => saveSettings().catch(error => setAlert(error.message, "error")));
   $("#savePrivacySettings").addEventListener("click", () => savePrivacySettings().catch(error => setAlert(error.message, "error")));
   $("#saveWebAccountButton").addEventListener("click", () => saveWebAccount().catch(error => setAlert(error.message, "error")));

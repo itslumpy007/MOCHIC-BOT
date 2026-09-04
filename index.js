@@ -13253,6 +13253,50 @@ async function handleWebApi(req, res, pathname) {
       });
     }
 
+    if (req.method === "POST" && pathname === "/api/daily-challenge/reroll") {
+      if (!hasWebAccess(auth, "admin")) {
+        return sendWebJson(res, 403, { error: "Admin web access is required." });
+      }
+
+      const body = await readWebJsonBody(req).catch(() => ({}));
+      const userId = String(body.userId || "").trim().replace(/[<@!>]/g, "");
+      if (!/^\d{15,25}$/.test(userId)) {
+        return sendWebJson(res, 400, { error: "Enter a valid Discord member ID or mention." });
+      }
+
+      const guild = await client.guilds.fetch(GUILD_ID).catch(() => client.guilds.cache.get(GUILD_ID) || null);
+      const member = guild ? await guild.members.fetch(userId).catch(() => null) : null;
+      if (!member) {
+        return sendWebJson(res, 404, { error: "That member could not be found in the server." });
+      }
+
+      const context = {
+        guildId: guild.id,
+        eligibleChannelIds: guild.channels.cache
+          .filter(channel => [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type))
+          .map(channel => channel.id),
+        disabledTypeKeys: getDailyChallengeDisabledTypeKeys()
+      };
+      const reroll = await dailyChallengeStore.forceRollChallenge({
+        userId,
+        guildId: guild.id,
+        now: Date.now(),
+        forcedBy: getWebModeratorTag(auth),
+        context
+      });
+      dailyChallengeVoiceSessions.delete(getDailyChallengeVoiceSessionKey(guild.id, userId));
+      recordAuditLog(getWebModeratorTag(auth), "daily-challenge-reroll", {
+        userId,
+        userTag: member.user.tag,
+        challengeType: reroll.challenge?.type || null
+      });
+      return sendWebJson(res, 200, {
+        ok: true,
+        userTag: member.user.tag,
+        challenge: reroll.challenge
+      });
+    }
+
     if (req.method === "POST" && pathname === "/api/permissions") {
       if (!hasWebAccess(auth, "admin")) {
         return sendWebJson(res, 403, { error: "Admin web access is required." });
