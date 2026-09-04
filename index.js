@@ -504,6 +504,13 @@ function getUnverifiedRoleId() {
   return config.settings?.unverifiedRoleId || null;
 }
 
+function canEarnNobilityProgress(member) {
+  if (!member?.user || member.user.bot) return false;
+  const verifiedRoleId = getVerificationRoleId();
+  if (!verifiedRoleId || !member.roles?.cache?.has(verifiedRoleId)) return false;
+  return !hasStaffAccess(member, "admin") && !hasStaffAccess(member, "mod");
+}
+
 function getWelcomeChannelId() {
   return config.settings?.welcomeChannelId || null;
 }
@@ -13710,7 +13717,11 @@ client.on("messageReactionAdd", async (reaction, user) => {
     if (reaction.partial) await reaction.fetch();
     if (reaction.message.partial) await reaction.message.fetch();
 
-    if (getDailyChallengeEnabled()) {
+    const progressMember = reaction.message.guild
+      ? reaction.message.guild.members.cache.get(user.id)
+        || await reaction.message.guild.members.fetch(user.id).catch(() => null)
+      : null;
+    if (getDailyChallengeEnabled() && canEarnNobilityProgress(progressMember)) {
       await dailyChallengeStore.recordProgress({
         userId: user.id,
         guildId: reaction.message.guildId || null,
@@ -13787,6 +13798,7 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
   try {
     if (!ENABLE_CORE_BOT || !getDailyChallengeEnabled()) return;
     if (newState?.member?.user?.bot) return;
+    if (newState.channelId && !canEarnNobilityProgress(newState.member)) return;
 
     syncDailyChallengeVoiceSession(newState);
     if (!newState.channelId && oldState?.channelId) {
@@ -16053,7 +16065,7 @@ client.on("interactionCreate", async interaction => {
       return;
     }
 
-    if (interaction.isChatInputCommand() && getDailyChallengeEnabled()) {
+    if (interaction.isChatInputCommand() && getDailyChallengeEnabled() && canEarnNobilityProgress(interaction.member)) {
       await dailyChallengeStore.recordProgress({
         userId: interaction.user.id,
         guildId: interaction.guildId || null,
@@ -16215,6 +16227,10 @@ client.on("interactionCreate", async interaction => {
         });
       }
 
+      if (!canEarnNobilityProgress(interaction.member)) {
+        return interaction.reply({ content: "You must be verified to participate in nobility and daily challenges.", ephemeral: true });
+      }
+
       if (!getDailyChallengeEnabled()) {
         return interaction.reply({ content: "Daily challenges are currently disabled.", ephemeral: true });
       }
@@ -16306,6 +16322,9 @@ client.on("interactionCreate", async interaction => {
     }
 
     if (interaction.commandName === "daily") {
+      if (!canEarnNobilityProgress(interaction.member)) {
+        return interaction.reply({ content: "You must be verified to participate in nobility and daily XP.", ephemeral: true });
+      }
       if (!getDailyEnabled()) {
         return interaction.reply({ content: "Daily XP claims are currently disabled.", ephemeral: true });
       }
@@ -18350,7 +18369,7 @@ client.on("messageCreate", async message => {
 
     const messageText = String(message.content || "").trim();
     const hasVisibleContent = messageText.length > 0 || (message.attachments && message.attachments.size > 0);
-    if (hasVisibleContent && getDailyChallengeEnabled()) {
+    if (hasVisibleContent && getDailyChallengeEnabled() && canEarnNobilityProgress(message.member)) {
       const eligibleChannelIds = message.guild.channels.cache
         .filter(channel => [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type))
         .map(channel => channel.id);
