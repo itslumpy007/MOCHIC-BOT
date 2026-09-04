@@ -13284,7 +13284,11 @@ async function handleWebApi(req, res, pathname) {
         forcedBy: getWebModeratorTag(auth),
         context
       });
-      dailyChallengeVoiceSessions.delete(getDailyChallengeVoiceSessionKey(guild.id, userId));
+      if (member.voice?.channelId) {
+        syncDailyChallengeVoiceSession(member.voice);
+      } else {
+        dailyChallengeVoiceSessions.delete(getDailyChallengeVoiceSessionKey(guild.id, userId));
+      }
       recordAuditLog(getWebModeratorTag(auth), "daily-challenge-reroll", {
         userId,
         userTag: member.user.tag,
@@ -16182,7 +16186,12 @@ client.on("interactionCreate", async interaction => {
           return interaction.reply({ content: "I could not reroll that challenge.", ephemeral: true });
         }
 
-        if (targetUser.id === interaction.user.id) {
+        const targetMember = interaction.guild
+          ? await interaction.guild.members.fetch(targetUser.id).catch(() => null)
+          : null;
+        if (targetMember?.voice?.channelId) {
+          syncDailyChallengeVoiceSession(targetMember.voice);
+        } else {
           dailyChallengeVoiceSessions.delete(getDailyChallengeVoiceSessionKey(interaction.guildId || "dm", targetUser.id));
         }
 
