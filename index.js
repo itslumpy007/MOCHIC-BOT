@@ -7283,7 +7283,7 @@ function buildNobilityTierEmbed(profile, targetUser) {
   });
 }
 
-function buildDailyChallengeEmbed(challenge, title = "Today's Daily Challenge") {
+function buildDailyChallengeEmbed(challenge, title = "Today's Daily Challenge", profile = null) {
   if (!challenge) {
     return makeEmbed({
       title,
@@ -7303,7 +7303,15 @@ function buildDailyChallengeEmbed(challenge, title = "Today's Daily Challenge") 
     fields: [
       { name: "Progress", value: progressText, inline: true },
       { name: "Reward", value: `${getDailyChallengeAdjustedReward(challenge)} XP`, inline: true },
-      { name: "Reset", value: "Midnight America/New_York", inline: true }
+      { name: "Reset", value: "Midnight America/New_York", inline: true },
+      ...(profile ? (() => {
+        const rankProgress = getNobilityProgress(profile.totalXp || 0, getNobilityTiers());
+        return [
+          { name: "Nobility XP", value: `${rankProgress.totalXp} XP`, inline: true },
+          { name: "Current rank", value: rankProgress.current.title, inline: true },
+          { name: "Next rank", value: rankProgress.next ? `${rankProgress.xpToNext} XP to ${rankProgress.next.title}` : "Maximum rank", inline: true }
+        ];
+      })() : [])
     ]
   });
 }
@@ -16125,6 +16133,7 @@ client.on("interactionCreate", async interaction => {
         now,
         context
       });
+      const profile = await nobilityStore.getProfile(interaction.user.id);
 
       if (subcommand === "stats") {
         const typeStats = await dailyChallengeStore.getTypeStats(8);
@@ -16155,7 +16164,7 @@ client.on("interactionCreate", async interaction => {
 
       if (subcommand === "view") {
         return interaction.reply({
-          embeds: [buildDailyChallengeEmbed(challenge, "Today's Daily Challenge")],
+          embeds: [buildDailyChallengeEmbed(challenge, "Today's Daily Challenge", profile)],
           ephemeral: true
         });
       }
@@ -16213,7 +16222,7 @@ client.on("interactionCreate", async interaction => {
       if (challenge.claimedAt) {
         return interaction.reply({
           content: "You already claimed today's challenge reward.",
-          embeds: [buildDailyChallengeEmbed(challenge, "Today's Daily Challenge")],
+          embeds: [buildDailyChallengeEmbed(challenge, "Today's Daily Challenge", profile)],
           ephemeral: true
         });
       }
@@ -16222,7 +16231,7 @@ client.on("interactionCreate", async interaction => {
         const remaining = Math.max(0, challenge.target - challenge.progress);
         return interaction.reply({
           content: `You still need **${remaining} more ${challenge.unit}** to claim today's reward.`,
-          embeds: [buildDailyChallengeEmbed(challenge, "Today's Daily Challenge")],
+          embeds: [buildDailyChallengeEmbed(challenge, "Today's Daily Challenge", profile)],
           ephemeral: true
         });
       }
@@ -16284,7 +16293,10 @@ client.on("interactionCreate", async interaction => {
 
       return interaction.reply({
         content: `You claimed **${getDailyChallengeAdjustedReward(claimResult.challenge)} XP** from today's challenge.${levelNote}`,
-        embeds: [buildDailyChallengeEmbed(claimResult.challenge, "Daily Challenge Claimed")],
+        embeds: [
+          buildDailyChallengeEmbed(claimResult.challenge, "Daily Challenge Claimed", reward?.profile),
+          buildNobilityTierEmbed(reward?.profile, interaction.user)
+        ],
         ephemeral: true
       });
     }
@@ -16315,7 +16327,7 @@ client.on("interactionCreate", async interaction => {
         const nextClaimText = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
         return interaction.reply({
           content: `You already claimed your daily XP. Try again in ${nextClaimText}.`,
-          embeds: [buildNobilityTierEmbed(profile, interaction.user)],
+          embeds: [buildNobilityTierEmbed(await nobilityStore.getProfile(interaction.user.id), interaction.user)],
           ephemeral: true
         });
       }
