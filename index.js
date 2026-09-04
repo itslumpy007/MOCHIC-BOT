@@ -7463,6 +7463,10 @@ function buildDailyChallengeContext(interaction) {
   };
 }
 
+function messageContainsSharedLink(text) {
+  return /(?:https?:\/\/|www\.)[^\s<>]+|(?:^|\s)(?:[a-z0-9-]+\.)+(?:com|net|org|gg|tv|co|io|me|dev|ly|fm|be)(?:\/[^\s<>]*)?/i.test(String(text || ""));
+}
+
 function getDailyChallengeVoiceSessionKey(guildId, userId) {
   return `${guildId}:${userId}`;
 }
@@ -18395,7 +18399,7 @@ client.on("messageCreate", async message => {
         });
       }
 
-      if (/(?:https?:\/\/|www\.)\S+/i.test(messageText)) {
+      if (messageContainsSharedLink(messageText)) {
         await dailyChallengeStore.recordProgress({
           userId: message.author.id,
           guildId: message.guild.id,
