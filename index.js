@@ -7500,6 +7500,30 @@ function seedDailyChallengeVoiceSessions() {
   }
 }
 
+async function recordDailyChallengeVoiceSessionProgress(session, now = Date.now()) {
+  const elapsedMinutes = Math.floor((now - (session.lastAwardedAt || now)) / (60 * 1000));
+  if (elapsedMinutes <= 0) return null;
+
+  const result = await dailyChallengeStore.recordProgress({
+    userId: session.userId,
+    guildId: session.guildId,
+    kind: "voice",
+    amount: elapsedMinutes,
+    now,
+    channelId: session.channelId,
+    context: {
+      guildId: session.guildId,
+      disabledTypeKeys: getDailyChallengeDisabledTypeKeys()
+    }
+  }).catch(error => {
+    log.warn("Failed to record daily challenge voice progress.", error);
+    return null;
+  });
+
+  session.lastAwardedAt = (session.lastAwardedAt || now) + elapsedMinutes * 60 * 1000;
+  return result;
+}
+
 async function sweepDailyChallengeVoiceSessions() {
   if (!ENABLE_CORE_BOT || !getDailyChallengeEnabled()) {
     return;
@@ -7521,28 +7545,7 @@ async function sweepDailyChallengeVoiceSessions() {
       continue;
     }
 
-    const elapsedMinutes = Math.floor((now - (session.lastAwardedAt || now)) / (60 * 1000));
-    if (elapsedMinutes <= 0) {
-      continue;
-    }
-
-    const result = await dailyChallengeStore.recordProgress({
-      userId: session.userId,
-      guildId: session.guildId,
-      kind: "voice",
-      amount: elapsedMinutes,
-      now,
-      channelId: session.channelId,
-      context: {
-        guildId: session.guildId,
-        disabledTypeKeys: getDailyChallengeDisabledTypeKeys()
-      }
-    }).catch(error => {
-      log.warn("Failed to record daily challenge voice progress.", error);
-      return null;
-    });
-
-    session.lastAwardedAt = (session.lastAwardedAt || now) + elapsedMinutes * 60 * 1000;
+    const result = await recordDailyChallengeVoiceSessionProgress(session, now);
     dailyChallengeVoiceSessions.set(key, session);
 
     if (result?.challenge?.claimedAt) {
@@ -13727,7 +13730,12 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 
     syncDailyChallengeVoiceSession(newState);
     if (!newState.channelId && oldState?.channelId) {
-      dailyChallengeVoiceSessions.delete(getDailyChallengeVoiceSessionKey(oldState.guild.id, oldState.id));
+      const key = getDailyChallengeVoiceSessionKey(oldState.guild.id, oldState.id);
+      const session = dailyChallengeVoiceSessions.get(key);
+      if (session) {
+        await recordDailyChallengeVoiceSessionProgress(session);
+      }
+      dailyChallengeVoiceSessions.delete(key);
     }
   } catch (error) {
     log.error("Voice state update error.", error);
